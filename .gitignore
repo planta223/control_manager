@@ -1,0 +1,32 @@
+# ROS / colcon build products
+build/
+install/
+log/
+logs/
+
+# CMake / compiler products
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.o
+*.a
+*.so
+
+# Local tooling and temporary files
+.cache/
+.clangd/
+.venv/
+__pycache__/
+*.py[cod]
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Recorded runtime data; keep source/config fixtures trackable
+rosbag2_*/
+*.db3
+*.db3.zstd
+*.mcap
+*.mcap.zstd

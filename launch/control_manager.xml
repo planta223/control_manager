@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="params_file"
+       default="$(find-pkg-share control_manager)/config/control_manager.yaml"/>
+
+  <node pkg="control_manager" exec="control_manager_node"
+        name="control_manager" output="screen">
+    <param from="$(var params_file)"/>
+  </node>
+</launch>

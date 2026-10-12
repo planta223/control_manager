@@ -1,0 +1,6 @@
+control_manager:
+  ros__parameters:
+    # The scaffold accepts only these values. Driving modes are not implemented.
+    # Both parameters are read-only after startup.
+    mode: idle
+    dry_run: true
