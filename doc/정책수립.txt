@@ -1,12 +1,64 @@
 요구사항:
 1. Lane main mode (no GPS)
 2. GPS main mode (no Lane)
-3. Fusion mode
+3. HYBRID mode
 각각의 모드에서 imu, depth, lidar는 옵션
+=================================================================
+제어에 필요한 정보 4가지:
 
-필요한 오도메트리:
+| 종류 | 대표 정보 | 용도 |
+|---|---|---|
+| 차량 상태 | x, y, yaw, speed, yaw rate | 현재 차량이 어디 있고 어떻게 움직이는가 |
+| 도로/경로 상태 | global path 또는 lane error | 어디로 가야 하는가 |
+| 주변 환경 | obstacle, 신호등, 제한속도 | 어떻게 행동해야 하는가 |
+| actuator feedback | 실제 조향각, 실제 속도/RPM, brake 상태 | 명령대로 차량이 움직이는가 |
 
+=================================================================
+제어 GUI
 
+┌──────────────── BAQU Control ────────────────┐
+
+ Vehicle Mode
+ [ IDLE ] [ MANUAL ] [ AUTO ]
+
+ Guidance Mode
+ [ GPS ] [ LANE ] [ HYBRID ]
+
+ Optional Sensor
+ [✓] IMU
+ [✓] LiDAR
+ [ ] Depth
+
+ [ E-STOP ]
+
+───────────────────────────────────────────────
+
+ Vehicle State
+ X       : 123.41 m
+ Y       :  52.18 m
+ Yaw     :  32.4 deg
+ Speed   :   2.84 m/s
+ YawRate :   3.1 deg/s
+
+ Localization : VALID
+ Lane         : VALID / 0.87
+ LiDAR        : VALID
+ IMU          : VALID
+
+───────────────────────────────────────────────
+
+ Command                Feedback
+Steer   +8.4 deg     →  +7.9 deg
+Speed    3.0 m/s     →   2.8 m/s
+Brake    OFF         →   OFF
+
+───────────────────────────────────────────────
+
+FSM       : DRIVING
+Safety    : OK
+Mode      : AUTO / HYBRID
+
+=================================================================
 GPS관련:
 - GPS부는 RMC,VTG 등 해석해서 xyz, COG, yaw, v 뽑는거 돼있음.
 - 거기에 더해, covariance를 더함.(이 값은 기존 값에 영향 없음)
@@ -73,3 +125,5 @@ twist:
 
 - 과거 로컬 파일은 follow/lane에서 localization/odom으로 재명명된 토픽으로 guidance_node가 구독하게 되어 있음.
 - 근데 이건 legacy로 놔두기로.
+
+=================================================================
