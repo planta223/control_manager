@@ -1,0 +1,199 @@
+# Guidance Mode / GUI 설계 기록
+
+이 문서의 AFTER control_manager는 실제 구현입니다. AFTER RQT는 **설계안**이며 GUI 소스는 수정하지 않았습니다.
+Guidance는 path_planning_node가 소유하고, ControlMode는 기존 control_manager_node가 소유합니다.
+새 node는 추가하지 않았습니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
+
+## BEFORE control_manager (변경 전 source)
+
+```mermaid
+flowchart TD
+  S[GNSS / RGB / LiDAR / optional IMU·Depth] --> SI[sensor_interface]
+  SI --> E[state_estimator: GNSS_ONLY]
+  SI --> O[object_manager: detection TODO]
+  E --> V[VehicleState]
+  G[external Global Path] --> P[path_planning: global path 전달]
+  L[external LaneState: 구독만] -.-> P
+  V --> P
+  P --> R[ReferencePath]
+  O --> M[mission_based_limit]
+  R --> MP[motion_planning]
+  V --> MP
+  O --> MP
+  M --> MP
+  MP --> MC[motion_control: Pure Pursuit]
+  V --> MC
+  MC --> A[AutoCommand]
+  U[ManualCommand] --> CM[control_manager: IDLE / MANUAL / AUTO]
+  A --> CM
+  Q[mode_request] --> CM
+  CM --> ST[ControlStatus / FSM]
+  CM --> SL[safety_limit]
+  V --> SL
+  O --> SL
+  ES[E-STOP] --> SL
+  SL --> VI[vehicle_interface: dry_run]
+```
+
+## AFTER control_manager (구현)
+
+```mermaid
+flowchart TD
+  S[GNSS / RGB / LiDAR / optional IMU·Depth] --> SI[sensor_interface]
+  SI --> E[Localization: GNSS_ONLY]
+  FUT[future GNSS_IMU / GNSS_IMU_WHEEL: 미구현] -.-> E
+  E --> V[VehicleState]
+  SI --> O[Object: RGB + LiDAR primary / optional Depth; detection TODO]
+  G[external Global Path] --> P[path_planning: Guidance owner]
+  L[external LaneState: algorithm TODO] -.-> P
+  V --> P
+  QG[guidance_mode_request: GPS_ONLY / LANE_ONLY / HYBRID] --> P
+  P --> GS[GuidanceStatus: requested / actual / source / validity / reason]
+  P --> R[ReferencePath: GPS_ONLY만 지원 / 미지원은 empty]
+  O --> M[mission_based_limit]
+  R --> MP[motion_planning: empty 또는 stale path이면 stop]
+  V --> MP
+  O --> MP
+  M --> MP
+  MP --> MC[motion_control: Pure Pursuit]
+  V --> MC
+  MC --> A[AutoCommand]
+  U[ManualCommand] --> CM[Vehicle Control: IDLE / MANUAL / AUTO]
+  A --> CM
+  QC[mode_request] --> CM
+  CM --> ST[ControlStatus / FSM]
+  CM --> SL[safety_limit]
+  V --> SL
+  O --> SL
+  ES[E-STOP] --> SL
+  SL --> VI[vehicle_interface: dry_run]
+```
+
+## 실제 GUI 조사 근거 (READ ONLY)
+
+- BAQU 차량 제어 전용 RQT plugin 구현은 검색에서 발견되지 않았습니다.
+- `dashboard/dashboard/index.html`: 실제 웹 화면. 데이터 사용량, ROS 토픽, GPS 시각화,
+  ROS bag 재생/정지/반복/배속, GPS 배경 맵, 배경 지도 생성, 카메라 토픽/Hz/ON-OFF.
+  화면의 mode는 시각화 모드이며 Vehicle Control/Guidance enum이 아닙니다.
+- `main/tools/dashboard_collector.py`: ROS topic 탐색/수신 빈도를 HTTP로 전송합니다.
+  `dashboard_gps.py`: `/gnss/fix`, `/gnss/status`, `/clock`을 구독합니다.
+  `dashboard_camera.py`: 요청된 Image/CompressedImage를 구독하여 웹으로 전달합니다.
+  `dashboard/config.yaml`에는 ROS 토픽 표시 그룹이 있습니다.
+- `main/src/monitor/monitor/config.py`: GUI가 아닌 console monitor. 기본 data 구독은
+  `/lidar/points`, `/lidar/imu`이며 ControlStatus를 실제 연결하지 않습니다.
+- `calibration/src/camera_bringup/launch/extrinsic.launch`: ROS 1의 외부 `rqt_reconfigure` 실행 설정.
+  `calibration/src/cam_lidar_calibration/cfg/params.yaml`: feature_extraction bounds 등 파라미터.
+  `calibration/src/cam_lidar_calibration/src/cam_lidar_panel.cpp`와 `plugin_description.xml`:
+  실제 Qt **RViz panel**, Capture Background / Capture sample / Discard last sample / Optimise / 결과 표시.
+  차량 제어 RQT 패널과는 다릅니다. `/optimiser` service 및 `run_optimise` action 사용.
+
+## BEFORE RQT / 실제 기존 GUI wireframe
+
+RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 않습니다.
+아래는 source에 있는 웹 UI와 calibration GUI를 간략히 옮긴 것입니다(화면 캡처 아님).
+
+```text
+┌─ 기존 BAQU 차량 제어 RQT ─────────────────────┐
+│ 해당 전용 구현 없음                           │
+└──────────────────────────────────────────────┘
+┌─ 실제 웹 대시보드 ────────────────────────────┐
+│ 연결 / 사용 시간 / 데이터 사용량 / ROS 토픽    │
+├───────────────────┬──────────────────────────┤
+│ 시각화 모드       │ GPS 시각화 / 지도 편집    │
+│ · ROS bag 보기    │                          │
+│ · GPS 배경 맵     │ 카메라 토픽 / Hz / ON-OFF│
+│ · 배경 지도 생성  │ 카메라 영상              │
+│ 재생/정지/반복/배속│                          │
+└───────────────────┴──────────────────────────┘
+┌─ 별도 calibration (ROS 1) ────────────────────┐
+│ rqt_reconfigure: feature_extraction parameters│
+│ RViz: Background / Capture / Discard / Optimise│
+└──────────────────────────────────────────────┘
+```
+
+## AFTER RQT (권장안만; 미구현)
+
+미지원 HYBRID 요청 예시입니다. 수치 `--`는 가짜 feedback이 아닌 미수신 표시입니다.
+
+```text
+┌─ BAQU Control (설계안) ───────────────────────┐
+│ Vehicle Control: [IDLE] [MANUAL] [AUTO]       │
+│ Actual control / FSM: -- / --               │
+├─────────────────────────────────────────────┤
+│ Guidance: [GPS_ONLY] [LANE_ONLY*] [HYBRID*]   │
+│ * NOT_IMPLEMENTED: 요청 시 AUTO stop        │
+│ Requested: HYBRID     Actual: NONE          │
+│ Source: NONE   Valid: NO   Degraded: NO      │
+│ Reason: HYBRID_NOT_IMPLEMENTED              │
+├─────────────────────────────────────────────┤
+│ Localization: GNSS_ONLY                     │
+│ future fusion: NOT_IMPLEMENTED              │
+│ GNSS / Lane / Path: validity + age / --     │
+│ IMU / LiDAR / Depth: config + RX age / --   │
+│ 수신 여부와 perception 유효성은 별도 표시    │
+├─────────────────────────────────────────────┤
+│ Vehicle: x / y / yaw / speed / yaw rate: -- │
+│ Target: steer(rad) / speed(m/s) / brake: -- │
+│ Feedback: speed=VehicleState (valid일 때)   │
+│ actual steering / brake: UNKNOWN           │
+├─────────────────────────────────────────────┤
+│ Safety / Fault / Reason / status age       │
+│ [E-STOP 요청]                              │
+└─────────────────────────────────────────────┘
+```
+
+GUI의 요청 선택 표시와 node가 보낸 actual 표시를 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
+Optional sensor runtime toggle은 없습니다. config 활성 여부와 수신 age를 표시하더라도
+그것이 fusion/detection의 성공이나 센서 물리 정상 여부를 뜻하지 않습니다.
+새 sensor health/actuator feedback 계약은 이 버전에서 만들지 않았습니다.
+
+## BEFORE RQT ↔ ROS topics (실제 존재하는 연결만)
+
+```mermaid
+flowchart LR
+  T[ROS topics: 이름 / 수신 빈도] --> C[dashboard_collector]
+  G[gnss/fix · gnss/status · clock] --> GB[dashboard_gps]
+  I[요청된 Image / CompressedImage] --> CB[dashboard_camera]
+  C --> H[HTTP bridge / web server]
+  GB --> H
+  CB --> H
+  H <--> W[실제 Web Dashboard]
+  W --> B[bag 재생 HTTP 제어]
+  B --> BP[rosbag play]
+  BP --> T
+  LI[lidar/points · lidar/imu] --> MON[console monitor]
+  RQT[calibration rqt_reconfigure ROS 1] <-->|dynamic parameters| FE[feature_extraction]
+  RV[calibration RViz panel] <-->|optimiser service / run_optimise action| FE
+  NO[BAQU 차량 제어 RQT 없음 / control topics 미연결]
+```
+
+이 그래프의 RQT 연결은 calibration parameter/service이며 신규 control topic 연결이 아닙니다.
+Web Dashboard는 control_manager의 Guidance 및 arbitration 요청 UI를 갖고 있지 않습니다.
+
+## AFTER RQT ↔ ROS topics (제안, GUI는 미구현)
+
+```mermaid
+flowchart LR
+  UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_manager]
+  UI -->|guidance_mode_request UInt8| PP[path_planning]
+  PP -->|guidance_status GuidanceStatus| UI
+  CM -->|status ControlStatus| UI
+  VS[vehicle_state] --> UI
+  LN[lane_state] --> UI
+  RP[reference_path] --> UI
+  OS[object_state] --> UI
+  FC[final_cmd: 목표 명령과 reason] --> UI
+  RX[sensors topics: 수신 age] --> UI
+  CFG[시작 config: optional sensor 활성 설정] -.-> UI
+  UI -->|estop Bool: true 요청| SL[safety_limit]
+  CM -->|selected_cmd| SL
+  SL --> FC
+  FC --> VI[vehicle_interface dry_run]
+```
+
+기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.
+추가 계약은 `/control/guidance_mode_request` (UInt8, reliable volatile)와
+`/control/guidance_status` (GuidanceStatus, reliable volatile)뿐입니다.
+요청 값은 0/1/2이며 NONE=255는 actual status sentinel입니다.
+GUI는 단순 요청/표시 source이고 정지 판정 권한은 node/safety에 있습니다.
+GUI가 없어도 source freshness 검사와 AUTO invalid guidance stop 경로는 유지됩니다.

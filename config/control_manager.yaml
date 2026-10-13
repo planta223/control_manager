@@ -34,6 +34,8 @@
       final_cmd: /control/final_cmd
       status: /control/status
       mode_request: /control/mode_request
+      guidance_mode_request: /control/guidance_mode_request
+      guidance_status: /control/guidance_status
       estop: /control/estop
 /control/state_estimator:
   ros__parameters:
@@ -45,6 +47,7 @@
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
 /control/path_planning:
   ros__parameters:
+    guidance_mode: GPS_ONLY          # LANE_ONLY / HYBRID report NOT_IMPLEMENTED and stop
     map_file: ""                     # Loader TODO. Nonempty value is rejected.
     map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
     lane_correction_enabled: false   # true rejected until correction is implemented

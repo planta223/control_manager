@@ -23,6 +23,7 @@
 #include "control_manager/msg/motion_plan.hpp"
 #include "control_manager/msg/vehicle_command.hpp"
 #include "control_manager/msg/control_status.hpp"
+#include "control_manager/msg/guidance_status.hpp"
 
 namespace control_manager {
 // Central defaults; all topic names may be overridden with topics.<key> parameters.
@@ -38,7 +39,9 @@ inline const std::map<std::string, std::string> kTopics{
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
   {"final_cmd", "/control/final_cmd"}, {"status", "/control/status"},
-  {"mode_request", "/control/mode_request"}, {"estop", "/control/estop"}
+  {"mode_request", "/control/mode_request"}, {"estop", "/control/estop"},
+  {"guidance_mode_request", "/control/guidance_mode_request"},
+  {"guidance_status", "/control/guidance_status"}
 };
 template<class T> struct Input {
   typename T::ConstSharedPtr value;

@@ -6,7 +6,7 @@
 namespace control_manager::core {
 enum class ControlMode : std::uint8_t { IDLE, MANUAL, AUTO };
 enum class VehicleFsmState : std::uint8_t { INIT, READY, DRIVING, STOPPED, FAULT };
-enum class EstimationMode { GNSS_ONLY, GNSS_IMU };
+enum class EstimationMode { GNSS_ONLY, GNSS_IMU, GNSS_IMU_WHEEL };  // Fusion modes are future only.
 struct VehicleState {
   double x_m{0.0}, y_m{0.0}, yaw_rad{0.0}, speed_mps{0.0}, yaw_rate_radps{0.0};
   bool localization_valid{false}, speed_valid{false}, yaw_rate_valid{false};

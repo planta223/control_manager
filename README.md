@@ -34,7 +34,7 @@ AutoCommand ───┴→ control_manager_node [ControlMode + arbitration + FS
 | `sensor_interface_node` | 원본 Odometry/Image/PointCloud2/optional Imu relay. stamp/frame/covariance 보존, 추정 TF 없음 |
 | `state_estimator_node` | GNSS Odometry를 VehicleState로 변환; frame, covariance, quaternion, timestamp, 속도 validity 확인 |
 | `object_manager_node` | RGB / LiDAR / optional Depth 입력 자리, invalid/UNKNOWN ObjectState 발행. detection 없음 |
-| `path_planning_node` | 외부 global Path 검증·전달. state invalid 또는 datum 미확인 시 empty Path |
+| `path_planning_node` | Guidance 요청/상태 소유. GPS_ONLY에서 global Path 검증·전달; invalid/미지원 Guidance는 empty Path |
 | `mission_based_limit_node` | 명시적으로 활성화한 baseline speed cap, 유효 sign cap, 신호 적용 구간의 GREEN 외 stop |
 | `motion_planning_node` | 신선하고 유효한 입력에서 경로 + 제한된 목표 속도 전달. obstacle detected이면 stop. 조향 계산 없음 |
 | `motion_control_node` | Adaptive Pure Pursuit + m/s pass-through, 잘못된 입력이면 invalid stop |
@@ -65,8 +65,10 @@ manual reader를 시작하지 않습니다. 내부 topic 이름과 원본 sensor
 | `manual_cmd` | `control_manager/VehicleCommand` | **future physical-unit adapter** → manager |
 | `selected_cmd` | `control_manager/VehicleCommand` | manager → safety |
 | `final_cmd` | `control_manager/VehicleCommand` | safety → vehicle interface / manager status |
-| `status` | `control_manager/ControlStatus` | manager → monitor |
+| `status` | `control_manager/ControlStatus` | manager → future GUI (기존 monitor는 미연결) |
 | `mode_request` | `std_msgs/UInt8` | operator → manager; 0=IDLE, 1=MANUAL, 2=AUTO |
+| `guidance_mode_request` | `std_msgs/UInt8` | operator → path planning; 0=GPS_ONLY, 1=LANE_ONLY, 2=HYBRID |
+| `guidance_status` | `control_manager/GuidanceStatus` | path planning → future GUI |
 | `estop` | `std_msgs/Bool` | safety input → safety; true=set, false=explicit reset |
 
 원본 기본값: `/gnss/odom`, `/imu/data`, `/camera/image_raw`,
@@ -107,7 +109,7 @@ Map Path는 정적 snapshot이라 시간 만료 없이 유지하며, ReferencePa
 ## GNSS / IMU / camera / LiDAR 정책
 
 GNSS primary, IMU optional assist. 기본 `GNSS_ONLY`, `fusion_enable=false`입니다.
-`GNSS_IMU` 또는 fusion=true 요청은 미구현 오류로 종료하며 조용히 GNSS-only로 위장하지 않습니다.
+`GNSS_IMU` / `GNSS_IMU_WHEEL` 또는 fusion=true 요청은 미구현 오류로 종료하며 조용히 GNSS-only로 위장하지 않습니다.
 GNSS-only의 yaw-rate는 항상 invalid입니다. GNSS speed covariance도 확인합니다.
 GNSS frame은 `map`, child frame은 rear axle `base_link` 계약입니다.
 `localization_reference_verified=false` 기본값은 미실측 antenna lever arm을 정상으로 가정하지 않습니다.
@@ -127,10 +129,53 @@ Depth는 optional이며 기본 구독/relay도 비활성화됩니다. near-field
 
 ## Planning / mission / safety / mode
 
-Path planner는 datum과 state가 검증된 경우 global GNSS Path를 전달합니다.
-LaneState invalid/missing이면 global path fallback입니다. valid LaneState도 현재는 correction이
-미구현이므로 global path를 유지합니다. `lane_correction_enabled=true`와 nonempty `map_file`은
-시작 오류로 명시합니다. `MapLoader` / `LaneCorrection` interface만 있으며 final-map JSON/CSV를 읽지 않습니다.
+Path planner가 Guidance Mode의 요청과 실제 상태를 소유합니다. 기본 `guidance_mode=GPS_ONLY`이며
+runtime 요청은 `/control/guidance_mode_request`입니다. ControlMode/FSM 및 localization 모드와 독립적입니다.
+
+| 구분 | 모드 | 현재 구현 |
+|---|---|---|
+| Vehicle Control | IDLE / MANUAL / AUTO | manager의 명령 source 선택 |
+| Guidance | GPS_ONLY / LANE_ONLY / HYBRID | path planner; GPS_ONLY만 실제 지원 |
+| Localization | GNSS_ONLY / GNSS_IMU / GNSS_IMU_WHEEL | GNSS_ONLY만 지원; 나머지는 future enum, 시작 오류 |
+| Optional sensors | IMU / LiDAR / Depth | 추정 보조 / 장애물 primary / optional 보조; Guidance와 독립 |
+
+- **GPS_ONLY**: datum 확인 + frame/유한 수치/신선도/localization_valid 검사 + valid Global Path일 때
+  경로를 그대로 전달합니다. LaneState의 존재/validity/내용은 결과에 영향을 주지 않습니다.
+- **LANE_ONLY**: INTERFACE_READY / NOT_IMPLEMENTED. 항상 빈 경로, actual=NONE, valid=false,
+  reason=LANE_ONLY_NOT_IMPLEMENTED입니다. GPS로 fallback하지 않습니다.
+- **HYBRID**: INTERFACE_READY / NOT_IMPLEMENTED. 입력 상태와 관계없이 빈 경로,
+  actual=NONE, valid=false, reason=HYBRID_NOT_IMPLEMENTED입니다. lane correction 및 degraded
+  GPS fallback은 이번 버전에 없습니다. future HYBRID는 GPS+Lane이며 GNSS+IMU fusion이 아닙니다.
+- **잘못된 요청 값**: requested_mode에 원래 값을 남기고 actual=NONE/valid=false,
+  reason=INVALID_GUIDANCE_MODE로 닫습니다. 이후 유효한 요청이 오기 전까지 유지합니다.
+  잘못된 초기 문자열 parameter는 시작 오류입니다.
+
+`GuidanceStatus`의 requested_mode는 마지막 요청(시작 시 parameter), actual_mode는 실제 유효하게
+생성한 Guidance이며 경로가 invalid이면 NONE(255)입니다. active_source는 GLOBAL_PATH 또는 NONE입니다.
+`degraded`는 **유효한 축소 기능 fallback이 실제 실행될 때만 true**로 사용할 필드이며 지금은 항상 false입니다.
+향후 HYBRID/GPS fallback은 requested=HYBRID, actual=GPS_ONLY, degraded=true, reason=LANE_INVALID로
+표현할 수 있습니다. lane-only fallback은 실제 알고리즘이 구현된 뒤에만 허용해야 합니다.
+현재는 어느 조합도 미구현 algorithm을 성공으로 표시하지 않습니다.
+
+Status와 ReferencePath는 동일한 계획 시각 stamp를 사용하며 기본 20 Hz로 발행합니다.
+UI는 늦거나 끊긴 status를 STALE/UNKNOWN으로 표시해야 합니다(기존 input_timeout_s=0.5 s 정책 참고).
+Status는 출력 설명이며 safety authority가 아닙니다. 빈 ReferencePath가 MotionPlan invalid/stop_request,
+AutoCommand invalid/brake로 전파됩니다. 전달과 정지는 ROS callback/timer/기존 timeout 범위에서 처리되며
+원자적 전환이나 실시간 deadline 보장을 의미하지 않습니다. path planner 중단 시 reference_path timeout으로
+정지합니다. Guidance 요청은 MANUAL command 선택이나 ControlMode를 변경하지 않습니다.
+MANUAL에도 기존 safety 조건은 그대로 적용됩니다.
+
+Global Path는 기존 계약대로 **정적 transient-local snapshot**이며 관측 센서처럼 시간 만료시키지 않습니다.
+유효하지 않은 경로로 교체하면 즉시 사용할 수 없게 됩니다. provider는 datum/version을 보증해야 합니다.
+VehicleState와 생성된 ReferencePath는 source timestamp와 수신 age를 모두 검사하며,
+새 callback으로 과거/미래/0 timestamp를 정상으로 만들지 않습니다. lane은 현재 사용하지 않으므로
+stale lane을 유효 Guidance 입력으로 판단하지 않습니다.
+
+`lane_correction_enabled=true`와 nonempty `map_file`은 시작 오류입니다.
+`MapLoader` / `LaneCorrection` interface만 있으며 final-map JSON/CSV는 읽지 않습니다.
+IMU/Depth 활성 설정은 시작 시 read-only입니다. runtime sensor toggle과 센서 health 종합 status는 추가하지 않았습니다.
+GUI가 종료되어도 요청 상태와 freshness/safety 처리는 ROS node 안에 남습니다. GUI heartbeat 기반 정지는 구현하지 않았습니다.
+기존 GUI READ ONLY 조사 및 BEFORE/AFTER 설계는 [Guidance 설계 문서](doc/guidance_modes.md)에 있습니다.
 
 **mission_based_limit**는 정상 주행 정책입니다. opt-in baseline max speed, 유효 speed sign cap,
 명시적으로 `traffic_light_applies=true`인 context의 red/yellow stop 및 unknown stop만 구현했습니다.
@@ -232,12 +277,25 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 
 ## 미구현 목록
 
+LANE_ONLY guidance, HYBRID lane correction 및 fallback, 차량 제어 RQT UI, 센서 health 통합 status,
 실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
 Depth 보조, GNSS+IMU fusion/EKF, map loader/mission section rules, obstacle avoidance,
 vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
 실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
 
-## 검증 기록
+## Guidance Mode 추가 검증 (2026-10-14)
+
+- Humble isolated configure/build 성공. GuidanceStatus C++/Python 생성 및 기존 10 executable 유지.
+- GTest 12개 (기존 8 + Guidance 4), CTest 포함 **14 tests / 0 errors / 0 failures / 0 skipped**.
+- 확대된 smoke **63개 확인 항목 통과**: 요청/actual 구분, GPS_ONLY의 lane 무시,
+  LANE_ONLY/HYBRID/잘못된 요청의 AUTO 정지, MANUAL 독립성, empty/wrong-frame path,
+  stale/future/zero GNSS timestamp, 기존 E-STOP 및 safety 검증.
+- localhost DDS/domain 179 테스트 fixture만 사용했으며 실제 actuator UDP는 없습니다.
+- 결과: `log/guidance_smoke_result.txt`, `build/control_manager/test_results/`.
+- 외부 변경 검사는 `log/guidance_audit/`의 before/after metadata·SHA256·Git 기록으로 비교합니다.
+  이전 작업의 unresolved symlink 문제는 아래 기록에 유지하며 이번 작업에서 복구하지 않습니다.
+
+## 최초 skeleton 검증 기록 (이전 작업)
 
 2026-10-13, 기존 `main` 컨테이너의 ROS 2 Humble에서 검증했습니다.
 

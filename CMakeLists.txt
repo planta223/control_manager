@@ -16,10 +16,11 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/VehicleState.msg" "msg/LaneState.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
+  "msg/GuidanceStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
-add_library(control_core src/core.cxx src/pure_pursuit.cxx)
+add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx)
 target_include_directories(control_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
@@ -45,11 +46,14 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_control_core test/test_control_core.cxx)
   target_link_libraries(test_control_core control_core)
+  ament_add_gtest(test_guidance test/test_guidance.cxx)
+  target_link_libraries(test_guidance control_core)
 endif()
 install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
+install(FILES doc/guidance_modes.md DESTINATION share/${PROJECT_NAME}/doc)
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
 ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
 ament_package()

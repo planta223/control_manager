@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import VehicleState, VehicleCommand, ObjectState, MotionPlan, ControlStatus
+from control_manager.msg import VehicleState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -63,7 +63,8 @@ def observe(node):
     for topic, cls in [('vehicle_state', VehicleState), ('selected_cmd', VehicleCommand),
                        ('final_cmd', VehicleCommand), ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
-                       ('object_state', ObjectState)]:
+                       ('object_state', ObjectState), ('guidance_status', GuidanceStatus),
+                       ('reference_path', PathMsg)]:
         node.create_subscription(cls, '/control/' + topic,
                                  lambda msg, key=topic: values.__setitem__(key, msg), 10)
     return values
@@ -86,7 +87,7 @@ def default_stack():
         print('PASS: default IDLE, unknown objects, final safe stop', flush=True)
         required = {'/control/' + s for s in ['vehicle_state', 'lane_state', 'object_state',
                     'reference_path', 'mission_limit', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'final_cmd', 'status']}
+                    'selected_cmd', 'final_cmd', 'status', 'guidance_status', 'guidance_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         print('PASS: required topic graph contracts', flush=True)
     finally:
@@ -99,7 +100,9 @@ def startup_rejections():
              ('state_estimator_node', 'fusion_enable:=true', 'not implemented'),
              ('state_estimator_node', 'estimation_mode:=GNSS_IMU', 'not implemented'),
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
-             ('path_planning_node', 'map_file:=unsupported.json', 'not implemented')]
+             ('path_planning_node', 'map_file:=unsupported.json', 'not implemented'),
+             ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
+             ('state_estimator_node', 'estimation_mode:=GNSS_IMU_WHEEL', 'not implemented')]
     for executable, parameter, reason in cases:
         result = subprocess.run(['ros2', 'run', 'control_manager', executable, '--ros-args', '-p',
                                  parameter], env=ENV, capture_output=True, text=True, timeout=10)
@@ -134,11 +137,14 @@ def integrated_fixtures():
     object_pub = node.create_publisher(ObjectState, '/control/object_state', 10)
     manual_pub = node.create_publisher(VehicleCommand, '/control/manual_cmd', 10)
     mode_pub = node.create_publisher(UInt8, '/control/mode_request', 10)
+    guidance_pub = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
+    lane_pub = node.create_publisher(LaneState, '/control/lane_state', 10)
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', durable)
     estop_pub = node.create_publisher(Bool, '/control/estop', durable)
-    active = {'gnss': True, 'object': True, 'manual': True}
+    active = {'gnss': True, 'object': True, 'manual': True,
+              'gnss_stamp': 'fresh', 'lane': 'absent', 'path': 'valid'}
     manual = VehicleCommand(target_steer_rad=-0.15, target_speed_mps=0.4,
                             target_brake=False, valid=True, reason='TEST_ONLY')
     object_state = ObjectState(valid=True, obstacle_valid=True, obstacle_detected=False)
@@ -157,7 +163,11 @@ def integrated_fixtures():
         stamp = node.get_clock().now().to_msg()
         if active['gnss']:
             odom = Odometry()
-            odom.header.stamp = stamp
+            odom.header.stamp = copy.deepcopy(stamp)
+            if active['gnss_stamp'] == 'stale': odom.header.stamp.sec -= 10
+            if active['gnss_stamp'] == 'future': odom.header.stamp.sec += 10
+            if active['gnss_stamp'] == 'zero':
+                odom.header.stamp.sec = odom.header.stamp.nanosec = 0
             odom.header.frame_id = 'map'
             odom.child_frame_id = 'base_link'
             odom.pose.pose.orientation.w = 1.0
@@ -174,7 +184,19 @@ def integrated_fixtures():
             manual.header.frame_id = 'base_link'
             manual_pub.publish(manual)
         path.header.stamp = stamp
-        path_pub.publish(path)
+        sent_path = copy.deepcopy(path)
+        if active['path'] == 'empty': sent_path.poses = []
+        if active['path'] == 'wrong_frame': sent_path.header.frame_id = 'wrong_frame'
+        path_pub.publish(sent_path)
+        if active['lane'] != 'absent':
+            lane = LaneState(valid=active['lane'] != 'invalid', confidence=1.0)
+            lane.header.stamp = copy.deepcopy(stamp)
+            lane.header.frame_id = 'base_link'
+            lane.lateral_error_m = 2.0
+            lane.heading_error_rad = 0.3
+            if active['lane'] == 'stale': lane.header.stamp.sec -= 10
+            if active['lane'] == 'nan': lane.lateral_error_m = float('nan')
+            lane_pub.publish(lane)
 
     timer = node.create_timer(0.05, publish)
     stack = Stack(['ros2', 'launch', str(fixture_launch), 'params_file:=' + str(fixture_config)],
@@ -200,6 +222,83 @@ def integrated_fixtures():
         mode_pub.publish(UInt8(data=ControlStatus.AUTO))
         wait_for(node, lambda: values['final_cmd'].valid and values['final_cmd'].target_speed_mps == 1.0,
                  'AUTO selects only auto')
+        wait_for(node, lambda: 'guidance_status' in values and values['guidance_status'].valid,
+                 'GPS_ONLY default publishes valid GuidanceStatus')
+        for lane_input in ['valid', 'invalid', 'stale', 'nan', 'absent']:
+            active['lane'] = lane_input
+            deadline = time.monotonic() + 0.7
+            while time.monotonic() < deadline:
+                rclpy.spin_once(node, timeout_sec=0.05)
+                status = values['guidance_status']
+                assert status.requested_mode == status.GPS_ONLY == status.actual_mode
+                assert status.valid and not status.degraded and status.active_source == 'GLOBAL_PATH'
+                assert [(p.pose.position.x, p.pose.position.y) for p in values['reference_path'].poses] == [(0., 1.), (10., 1.), (20., 1.)]
+            print('PASS: GPS_ONLY ignores LaneState ' + lane_input, flush=True)
+
+        for request, reason in [(GuidanceStatus.LANE_ONLY, 'LANE_ONLY_NOT_IMPLEMENTED'),
+                                (GuidanceStatus.HYBRID, 'HYBRID_NOT_IMPLEMENTED'),
+                                (255, 'INVALID_GUIDANCE_MODE')]:
+            guidance_pub.publish(UInt8(data=request))
+            wait_for(node, lambda: values['guidance_status'].requested_mode == request and
+                     values['guidance_status'].reason == reason and
+                     values['guidance_status'].actual_mode == GuidanceStatus.NONE and
+                     not values['guidance_status'].valid and not values['reference_path'].poses and
+                     not values['motion_plan'].valid and values['motion_plan'].stop_request and
+                     not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
+                     not values['final_cmd'].valid and values['final_cmd'].target_brake,
+                     'unsupported/invalid guidance closes AUTO: ' + reason)
+            assert values['status'].mode == ControlStatus.AUTO
+            assert not values['guidance_status'].degraded
+            assert values['guidance_status'].active_source == 'NONE'
+            # Even healthy lane input and absent GNSS cannot fake lane/hybrid support.
+            active['lane'], active['gnss'] = 'valid', False
+            wait_for(node, lambda: not values['vehicle_state'].localization_valid,
+                     'unsupported guidance fixture: localization expires')
+            assert not values['guidance_status'].valid
+            assert values['guidance_status'].reason == reason
+            active['gnss'] = True
+            wait_for(node, lambda: values['vehicle_state'].localization_valid, 'restore fixture GNSS')
+            mode_pub.publish(UInt8(data=ControlStatus.MANUAL))
+            wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
+                     values['final_cmd'].valid and values['final_cmd'].target_speed_mps == 0.4,
+                     'Guidance request does not select or block MANUAL')
+            assert values['guidance_status'].requested_mode == request
+            mode_pub.publish(UInt8(data=ControlStatus.AUTO))
+            wait_for(node, lambda: values['status'].mode == ControlStatus.AUTO and
+                     not values['final_cmd'].valid and values['final_cmd'].target_brake,
+                     'AUTO cannot use manual command with invalid guidance')
+            guidance_pub.publish(UInt8(data=GuidanceStatus.GPS_ONLY))
+            wait_for(node, lambda: values['guidance_status'].requested_mode == GuidanceStatus.GPS_ONLY and
+                     values['guidance_status'].actual_mode == GuidanceStatus.GPS_ONLY and
+                     values['guidance_status'].valid and values['final_cmd'].valid and
+                     values['final_cmd'].target_speed_mps == 1.0, 'explicit GPS_ONLY recovery')
+
+        for shape in ['empty', 'wrong_frame']:
+            active['path'] = shape
+            wait_for(node, lambda: values['guidance_status'].reason == 'GLOBAL_PATH_UNAVAILABLE' and
+                     not values['guidance_status'].valid and not values['reference_path'].poses and
+                     not values['final_cmd'].valid and values['final_cmd'].target_brake,
+                     'invalid global path stops AUTO: ' + shape)
+            active['path'] = 'valid'
+            wait_for(node, lambda: values['guidance_status'].valid and values['final_cmd'].valid,
+                     'restore valid global path')
+        for timestamp in ['stale', 'future', 'zero']:
+            active['gnss_stamp'] = timestamp
+            wait_for(node, lambda: values['guidance_status'].reason == 'LOCALIZATION_UNAVAILABLE' and
+                     not values['guidance_status'].valid and not values['reference_path'].poses and
+                     not values['final_cmd'].valid and values['final_cmd'].target_brake,
+                     'fresh callbacks cannot hide bad source timestamp: ' + timestamp)
+            active['gnss_stamp'] = 'fresh'
+            wait_for(node, lambda: values['guidance_status'].valid and values['final_cmd'].valid,
+                     'restore fresh GNSS timestamp')
+        # No GUI process or heartbeat is needed: node-side freshness still gates AUTO.
+        active['gnss'] = False
+        wait_for(node, lambda: not values['guidance_status'].valid and
+                 not values['final_cmd'].valid and values['final_cmd'].target_brake,
+                 'no GUI requests: sensor timeout still stops AUTO')
+        active['gnss'] = True
+        wait_for(node, lambda: values['guidance_status'].valid and values['final_cmd'].valid,
+                 'restore fixture after timeout')
         for mode in [ControlStatus.AUTO, ControlStatus.MANUAL]:
             mode_pub.publish(UInt8(data=mode))
             estop_pub.publish(Bool(data=True))

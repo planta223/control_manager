@@ -35,6 +35,8 @@ class PathPlanningNode : public NodeBase {
   std::shared_ptr<Input<msg::VehicleState>> state_;
   std::shared_ptr<Input<msg::LaneState>> lane_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_;
+  rclcpp::Publisher<msg::GuidanceStatus>::SharedPtr guidance_publisher_;
+  std::uint8_t requested_guidance_{msg::GuidanceStatus::GPS_ONLY};
   std::string frame_;
   double timeout_s_;
   bool datum_verified_;
