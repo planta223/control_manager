@@ -1,0 +1,53 @@
+<GNSS 관련 용어>
+
+==================================================
+NMEA:
+GNSS 수신기가 내보내는 문자열 형식의 표준 데이터. 예를 들어,
+
+GNSS Receiver
+   ↓
+NMEA 문장들
+   ├─ RMC : 위도·경도, 이동속도, 이동방향(COG), 시간 같은 기본 항법 정보
+   ├─ VTG : 이동방향과 지면속도
+   ├─ GGA
+   └─ ...
+  
+  
+***
+GNSS (Global Navigation Satellite System)
+NMEA (National Marine Electronics Association)
+RMC (Recommended Minimum Specific GNSS Data)
+VTG (Course Over Ground and Ground Speed)
+GGA (Global Positioning System Fix Data)
+***
+
+==================================================
+
+COG (Course Over Ground)
+
+“차가 어디를 바라보는가”가 아니라 실제로 지면 위에서 어느 방향으로 움직이고 있는가입니다.
+미끄러짐이 있거나 정지 중이면 차량 차체 방향과 실제 이동 방향(COG)는 다를 수 있습니다.
+그래서 GNSS COG만으로 yaw를 만드는 방식은 주행 중에는 쓸 만하지만 정지 상태의 자세 측정에는 약합니다.
+
+==================================================
+
+ENU(East North Up)
+
+E = East  → x(m)
+N = North → y(m)
+U = Up    → z(m)
+
+==================================================
+
+covariance
+
+간단히 말하면 이 값이 얼마나 불확실한지를 나타내는 수치입니다. 예를들어,
+
+x = 12.3 m
+
+covariance 작음
+→ "12.3 m를 꽤 믿을 수 있음"
+
+covariance 큼
+→ "12.3 m라고는 했지만 별로 못 믿음"
+

@@ -1,0 +1,75 @@
+요구사항:
+1. Lane main mode (no GPS)
+2. GPS main mode (no Lane)
+3. Fusion mode
+각각의 모드에서 imu, depth, lidar는 옵션
+
+필요한 오도메트리:
+
+
+GPS관련:
+- GPS부는 RMC,VTG 등 해석해서 xyz, COG, yaw, v 뽑는거 돼있음.
+- 거기에 더해, covariance를 더함.(이 값은 기존 값에 영향 없음)
+- 이 모든 정보는 odom 토픽으로 나오며, 그 형식은 다음과 같음.
+
+header:
+  stamp:
+    sec: 123456
+    nanosec: 789000000
+  frame_id: map
+
+child_frame_id: base_link
+
+pose:
+  pose:
+    position:
+      x: 12.40
+      y: 5.70
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.3827
+      w: 0.9239
+
+  covariance:
+    - ...
+    - ...
+    # 총 36개
+
+twist:
+  twist:
+    linear:
+      x: 1.42
+      y: 0.0
+      z: 0.0
+    angular:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+
+  covariance:
+    - ...
+    - ...
+    # 총 36개
+
+- 내가 받아야 할 정보는 다음과 같다.
+
+/gnss/odom
+│
+├─ timestamp
+├─ frame_id = map
+├─ child_frame_id = base_link
+│
+├─ x [m]
+├─ y [m]
+├─ yaw [quaternion → rad]
+├─ speed [m/s]
+│
+├─ x covariance [m²]
+├─ y covariance [m²]
+├─ yaw covariance [rad²]
+└─ speed covariance [(m/s)²]
+
+- 과거 로컬 파일은 follow/lane에서 localization/odom으로 재명명된 토픽으로 guidance_node가 구독하게 되어 있음.
+- 근데 이건 legacy로 놔두기로.
