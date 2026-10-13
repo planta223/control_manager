@@ -1,0 +1,19 @@
+신규 src/control_manager 폴더를 만들어서 그 안에 자율주행 제어와 수동주행에 관한 로직을 작성하려고 하는데, 어떻게 생각해?
+만약 합리적이라면 현재 폴더를 절대 변경하지 말고 새 폴더만을 생성한 뒤, 다른 폴더들의 통일성을 참고하여 기본 환경을 구축해줘.
+거기에는 README, gitignore이 포함되어야 해
+
+
+// answer(Sol6.1)
+
+합리적인 구조입니다. 자율·수동 명령의 선택과 모드 전환을 한 패키지에서 관리하기 좋습니다.
+
+기존 ROS 작업공간에 맞춰 **`main/src/control_manager/`만 새로 생성**했습니다.
+
+- C++17·`ament_cmake` 기반 ROS 2 패키지
+- `package.xml`, `CMakeLists.txt`
+- 기본 노드, YAML 설정, XML launch
+- [README.md](/home/baqu4/Workspaces/2026WS/main/src/control_manager/README.md), [.gitignore](/home/baqu4/Workspaces/2026WS/main/src/control_manager/.gitignore), LICENSE
+
+현재 노드는 `idle`, `dry_run=true`만 허용합니다. 자율·수동 주행 로직과 하드웨어 출력은 아직 연결하지 않았습니다.
+
+XML/YAML과 패키지 연결을 정적으로 검증했고, 기존 소스·설정 파일의 해시가 유지됨을 확인했습니다. **빌드·ROS·하드웨어는 실행하지 않았습니다.**
