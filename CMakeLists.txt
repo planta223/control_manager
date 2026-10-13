@@ -1,32 +1,55 @@
 cmake_minimum_required(VERSION 3.8)
 project(control_manager)
-
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
-
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/VehicleState.msg" "msg/LaneState.msg" "msg/ObjectState.msg"
+  "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
+  DEPENDENCIES std_msgs nav_msgs)
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
-add_executable(control_manager_node
-  src/control_manager_node.cxx
-  src/main.cxx
-)
-target_include_directories(control_manager_node PRIVATE include)
-ament_target_dependencies(control_manager_node rclcpp rcl_interfaces)
+add_library(control_core src/core.cxx src/pure_pursuit.cxx)
+target_include_directories(control_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
-install(TARGETS control_manager_node
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
-)
+function(add_control_node executable class_name)
+  add_executable(${executable} src/main.cxx src/${executable}.cxx)
+  target_compile_definitions(${executable} PRIVATE CONTROL_MANAGER_NODE_CLASS=${class_name})
+  target_link_libraries(${executable} control_core "${cpp_typesupport_target}")
+  ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
+  install(TARGETS ${executable} RUNTIME DESTINATION lib/${PROJECT_NAME})
+endfunction()
+add_control_node(sensor_interface_node SensorInterfaceNode)
+add_control_node(state_estimator_node StateEstimatorNode)
+add_control_node(path_planning_node PathPlanningNode)
+add_control_node(object_manager_node ObjectManagerNode)
+add_control_node(mission_based_limit_node MissionBasedLimitNode)
+add_control_node(motion_planning_node MotionPlanningNode)
+add_control_node(motion_control_node MotionControlNode)
+add_control_node(control_manager_node ControlManagerNode)
+add_control_node(safety_limit_node SafetyLimitNode)
+add_control_node(vehicle_interface_node VehicleInterfaceNode)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_control_core test/test_control_core.cxx)
+  target_link_libraries(test_control_core control_core)
+endif()
+install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
-
+ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
+ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
 ament_package()

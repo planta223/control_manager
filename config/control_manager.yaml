@@ -1,6 +1,78 @@
-control_manager:
+/**:
   ros__parameters:
-    # The scaffold accepts only these values. Driving modes are not implemented.
-    # Both parameters are read-only after startup.
-    mode: idle
-    dry_run: true
+    # Software policy / bench tuning, NOT measured vehicle limits.
+    rate_hz: 20.0
+    map_frame: map
+    base_frame: base_link
+    state_timeout_s: 0.5
+    command_timeout_s: 0.5
+    object_timeout_s: 0.5
+    input_timeout_s: 0.5
+    imu_enabled: false
+    depth_enabled: false
+    topics:
+      gnss: /gnss/odom                # Existing GNSS default, SensorDataQoS
+      imu: /imu/data
+      rgb: /camera/image_raw
+      depth: /camera_dep/depth/image_raw
+      lidar: /lidar/points
+      sensor_gnss: /control/sensors/gnss_odom
+      sensor_imu: /control/sensors/imu
+      sensor_rgb: /control/sensors/rgb
+      sensor_depth: /control/sensors/depth
+      sensor_lidar: /control/sensors/lidar
+      vehicle_state: /control/vehicle_state
+      lane_state: /control/lane_state
+      object_state: /control/object_state
+      global_path: /control/global_path
+      reference_path: /control/reference_path
+      mission_limit: /control/mission_limit
+      motion_plan: /control/motion_plan
+      auto_cmd: /control/auto_cmd
+      manual_cmd: /control/manual_cmd
+      selected_cmd: /control/selected_cmd
+      final_cmd: /control/final_cmd
+      status: /control/status
+      mode_request: /control/mode_request
+      estop: /control/estop
+/control/state_estimator:
+  ros__parameters:
+    estimation_mode: GNSS_ONLY
+    fusion_enable: false             # GNSS_IMU / true is an explicit startup error
+    localization_reference_verified: false # TODO NOT_VERIFIED: rear axle lever arm
+    max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
+    max_yaw_variance_rad2: 0.25       # TUNE
+    max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
+/control/path_planning:
+  ros__parameters:
+    map_file: ""                     # Loader TODO. Nonempty value is rejected.
+    map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
+    lane_correction_enabled: false   # true rejected until correction is implemented
+/control/mission_based_limit:
+  ros__parameters:
+    mission_baseline_enabled: false  # Mission section policy not agreed
+    mission_max_speed_mps: 0.0       # Disabled, NOT physical max speed
+    traffic_light_applies: false     # Explicit baseline context, future map-section input
+/control/motion_planning:
+  ros__parameters:
+    cruise_speed_mps: 0.0            # Disabled target, NOT physical max speed
+/control/motion_control:
+  ros__parameters:
+    lookahead_min_m: 2.0             # TUNE / NOT field validated
+    lookahead_max_m: 6.0             # TUNE
+    lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
+    goal_tolerance_m: 0.3            # TUNE
+/control/control_manager:
+  ros__parameters:
+    mode: IDLE                      # Initial mode; mode_request changes runtime mode
+/control/safety_limit:
+  ros__parameters:
+    operating_limits_verified: false
+    max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving
+    max_speed_mps: 0.0               # TODO NOT_VERIFIED; zero disables driving
+    emergency_distance_m: 0.0        # TODO NOT_VERIFIED; detected obstacle => stop
+    require_obstacle_state: true    # Unknown obstacle state blocks AUTO AND MANUAL
+    # Steering road-wheel calibration, motor raw/mps and brake model are NOT_VERIFIED.
+/control/vehicle_interface:
+  ros__parameters:
+    dry_run: true                   # false rejected: no UDP backend implemented

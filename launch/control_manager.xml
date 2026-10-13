@@ -1,10 +1,45 @@
 <?xml version="1.0"?>
 <launch>
-  <arg name="params_file"
-       default="$(find-pkg-share control_manager)/config/control_manager.yaml"/>
-
-  <node pkg="control_manager" exec="control_manager_node"
-        name="control_manager" output="screen">
+  <arg name="params_file" default="$(find-pkg-share control_manager)/config/control_manager.yaml"/>
+  <arg name="vehicle_file" default="$(find-pkg-share control_manager)/config/vehicle.yaml"/>
+  <node pkg="control_manager" exec="sensor_interface_node" name="sensor_interface" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="state_estimator_node" name="state_estimator" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="path_planning_node" name="path_planning" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="object_manager_node" name="object_manager" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="mission_based_limit_node" name="mission_based_limit" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="motion_planning_node" name="motion_planning" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="motion_control_node" name="motion_control" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="control_manager_node" name="control_manager" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="safety_limit_node" name="safety_limit" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var params_file)"/>
+  </node>
+  <node pkg="control_manager" exec="vehicle_interface_node" name="vehicle_interface" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>
 </launch>

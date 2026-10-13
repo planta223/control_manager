@@ -1,119 +1,282 @@
 # control_manager
 
-자율주행과 수동주행의 명령 선택·모드 전환을 개발하기 위한 ROS 2 패키지입니다.
-현재는 **idle 노드와 빌드·설정·launch 환경만** 제공합니다.
-자율주행, 수동주행, 모드 전환, 센서 구독, 제어 명령 발행, UDP 송신은 아직 구현하지 않았습니다.
+ROS 2 Humble / C++17 / ament_cmake 기반 상위제어 **1차 architecture와 실행 가능한 skeleton**입니다.
+기존 기본 패키지를 확장했으며 `.cxx` / `.hxx`, XML launch를 사용합니다.
+실차 주행 준비가 완료된 패키지가 아닙니다. 기본 실행은 `IDLE`, `dry_run=true`이고,
+미확정 조건에서는 `final_cmd`가 속도 0 / brake=true / valid=false로 닫힙니다.
+**액추에이터 UDP 구현 자체가 없으며 `dry_run=false`는 시작 오류입니다.**
 
-## 위치와 기존 패키지와의 통일성
-
-- 호스트 경로: `main/src/control_manager/`
-- 기존 main 컨테이너 경로: `/workspace/src/control_manager/`
-- 기존 `docker-compose.yml`의 `./main:/workspace` 마운트를 사용합니다. 별도 Docker 설정은 추가하지 않았습니다.
-- `gnss_tools`와 동일하게 ROS 2 Humble, C++17, `ament_cmake`, `.cxx`/`.hxx`, XML launch를 사용합니다.
-- 패키지 이름은 `control_manager`, 실행 파일은 `control_manager_node`, 기본 노드 이름은 `control_manager`입니다.
-- 의존성은 현재 사용하는 `rclcpp`, `rcl_interfaces`와 launch 관련 패키지만 선언했습니다.
-
-## 폴더 구조
+## Architecture / node 책임
 
 ```text
-control_manager/
-├── README.md
-├── .gitignore
-├── LICENSE
-├── package.xml
-├── CMakeLists.txt
-├── config/
-│   └── control_manager.yaml
-├── include/control_manager/
-│   └── control_manager_node.hxx
-├── launch/
-│   └── control_manager.xml
-└── src/
-    ├── control_manager_node.cxx
-    └── main.cxx
+/gnss/odom ───────┐
+/imu/data (opt) ─┤
+/camera/image_raw│  sensor_interface_node → /control/sensors/*
+/lidar/points ───┤       ├── GNSS → state_estimator_node → VehicleState
+/depth (opt) ────┘       └── RGB + LiDAR (+Depth) → object_manager_node → ObjectState
+
+external LaneState ─────────────┐
+external global_path + VehicleState → path_planning_node → ReferencePath
+ObjectState + configured baseline → mission_based_limit_node → MissionLimit
+VehicleState + ReferencePath + ObjectState + MissionLimit
+  → motion_planning_node → MotionPlan
+VehicleState + MotionPlan
+  → motion_control_node [Adaptive Pure Pursuit + physical speed pass-through] → AutoCommand
+
+ManualCommand ─┐
+AutoCommand ───┴→ control_manager_node [ControlMode + arbitration + FSM/status]
+  → selected_cmd → safety_limit_node [VehicleState + ObjectState + E-STOP]
+  → final_cmd → vehicle_interface_node [DRY RUN ONLY]
 ```
 
-| 파일 | 역할 |
+| Executable | 책임 / 현재 구현 |
 |---|---|
-| `package.xml` | 패키지 정보와 ROS 의존성 |
-| `CMakeLists.txt` | C++17 실행 파일 빌드 및 설정·launch 설치 |
-| `include/control_manager/control_manager_node.hxx` | ROS 노드 선언 |
-| `src/control_manager_node.cxx` | 초기 parameter 검사와 idle 시작 로그 |
-| `src/main.cxx` | ROS 초기화·spin·종료와 시작 오류 처리 |
-| `config/control_manager.yaml` | 초기 `mode`, `dry_run` 설정 |
-| `launch/control_manager.xml` | 이 패키지의 노드만 시작하는 launch |
+| `sensor_interface_node` | 원본 Odometry/Image/PointCloud2/optional Imu relay. stamp/frame/covariance 보존, 추정 TF 없음 |
+| `state_estimator_node` | GNSS Odometry를 VehicleState로 변환; frame, covariance, quaternion, timestamp, 속도 validity 확인 |
+| `object_manager_node` | RGB / LiDAR / optional Depth 입력 자리, invalid/UNKNOWN ObjectState 발행. detection 없음 |
+| `path_planning_node` | 외부 global Path 검증·전달. state invalid 또는 datum 미확인 시 empty Path |
+| `mission_based_limit_node` | 명시적으로 활성화한 baseline speed cap, 유효 sign cap, 신호 적용 구간의 GREEN 외 stop |
+| `motion_planning_node` | 신선하고 유효한 입력에서 경로 + 제한된 목표 속도 전달. obstacle detected이면 stop. 조향 계산 없음 |
+| `motion_control_node` | Adaptive Pure Pursuit + m/s pass-through, 잘못된 입력이면 invalid stop |
+| `control_manager_node` | AUTO/MANUAL source 선택, 모드 요청, final command 기반 FSM/status |
+| `safety_limit_node` | 선택 이후 최종 timeout/validity/range/E-STOP/obstacle 제한 |
+| `vehicle_interface_node` | 최종 물리 명령 수신·로그 / final timeout 감시. socket 생성 없음 |
 
-## 현재 동작
+launch는 위 10개 노드만 `/control` namespace로 시작합니다. 기존 센서, guidance, trans,
+manual reader를 시작하지 않습니다. 내부 topic 이름과 원본 sensor topic 이름은
+`topics.*` parameter이며 기본 문자열은 `ros_support.hxx` 한 곳에 모았습니다.
 
-| Parameter | 기본값 | 현재 계약 |
+## Message / topic contract
+
+| Topic (`/control/` prefix) | Type | Publisher → Subscriber |
 |---|---|---|
-| `mode` | `idle` | `idle`만 허용 |
-| `dry_run` | `true` | `true`만 허용 |
+| `sensors/gnss_odom` | `nav_msgs/Odometry` | sensor_interface → state_estimator |
+| `sensors/imu` | `sensor_msgs/Imu` | optional relay → future assist |
+| `sensors/rgb`, `sensors/depth` | `sensor_msgs/Image` | relay → object_manager / future lane |
+| `sensors/lidar` | `sensor_msgs/PointCloud2` | relay → object_manager |
+| `vehicle_state` | `control_manager/VehicleState` | estimator → path / motion planning / motion control / safety |
+| `lane_state` | `control_manager/LaneState` | **future external publisher** → path planning |
+| `object_state` | `control_manager/ObjectState` | object manager → mission / motion planning / safety |
+| `global_path` | `nav_msgs/Path` | **external validated map provider** → path planning |
+| `reference_path` | `nav_msgs/Path` | path planning → motion planning |
+| `mission_limit` | `control_manager/MissionLimit` | mission → motion planning |
+| `motion_plan` | `control_manager/MotionPlan` | motion planning → motion control |
+| `auto_cmd` | `control_manager/VehicleCommand` | motion control → manager |
+| `manual_cmd` | `control_manager/VehicleCommand` | **future physical-unit adapter** → manager |
+| `selected_cmd` | `control_manager/VehicleCommand` | manager → safety |
+| `final_cmd` | `control_manager/VehicleCommand` | safety → vehicle interface / manager status |
+| `status` | `control_manager/ControlStatus` | manager → monitor |
+| `mode_request` | `std_msgs/UInt8` | operator → manager; 0=IDLE, 1=MANUAL, 2=AUTO |
+| `estop` | `std_msgs/Bool` | safety input → safety; true=set, false=explicit reset |
 
-두 parameter는 시작 이후 변경할 수 없습니다.
-`mode=autonomous`, `mode=manual` 또는 `dry_run=false`로 시작하면 오류 메시지와 함께 종료합니다.
-이 값들을 바꾸는 것으로 주행 기능이 활성화되지는 않습니다.
-실행 가능한 기반 노드일 뿐, 주행 제어가 구현된 상태가 아닙니다.
+원본 기본값: `/gnss/odom`, `/imu/data`, `/camera/image_raw`,
+`/camera_dep/depth/image_raw`, `/lidar/points`. 기존 guidance의 `/localization/odom` remap이
+필요하면 `topics.gnss`만 변경합니다. 원본/relay는 SensorDataQoS, 제어 topic은 reliable volatile입니다.
+`global_path`는 reliable transient-local depth 1이고 **publisher도 transient-local**이어야 합니다.
+`estop`도 reliable transient-local depth 1이므로 **publisher에 같은 QoS**를 지정합니다.
+E-STOP true는 explicit false 전까지 유지됩니다. 기본 false는 물리 E-STOP 정상 상태의 증명이 아니며,
+현재는 하드웨어 E-STOP, heartbeat, 인증, 재시작 시 latch 복원 기능을 구현하지 않았습니다.
 
-## 개발할 책임과 기존 코드의 경계
+### 상태 분리 / 단위 / 시간
 
-아래는 후속 개발 방향이며 현재 구현된 기능 목록이 아닙니다.
+- **VehicleState**: rear axle centre의 ENU `x_m, y_m, yaw_rad, speed_mps, yaw_rate_radps`,
+  `localization_valid`, `speed_valid`, `yaw_rate_valid`, `header.stamp`.
+  독립 C++ `core::VehicleState`도 제공하며 ROS 변환은 `ros_support.hxx`에 있습니다.
+- **LaneState**: `lateral_error_m, heading_error_rad, confidence, valid, header.stamp`.
+  양의 lateral은 좌측, heading은 CCW. 도로 상대 상태이며 VehicleState에 섞지 않습니다.
+  현재 lane_AI overlay를 숫자 차선 상태로 변환하지 않습니다.
+- **ObjectState**: UNKNOWN/RED/YELLOW/GREEN, optional speed limit, obstacle detected/distance,
+  전체 및 필드별 validity, timestamp. **false detected + obstacle_valid=false는 장애물 없음이 아닙니다.**
+  현재 모든 관측은 invalid이며 timestamp는 unavailable 보고 시각입니다. 미래 detector는 acquisition
+  timestamp와 필드별 freshness를 검사해 aggregate해야 합니다. 거리 기준은 차량 외곽까지의 거리로
+  계약 확정이 필요합니다. 단일 공통 stamp 한계 때문에 비동기 detector 통합 때 계약 재검토가 필요합니다.
+- **VehicleCommand**: 실제 전륜 road-wheel `target_steer_rad` (좌측 +),
+  `target_speed_mps` (전진 >=0), `target_brake` bool, `valid`, `reason`.
+  normalized joystick / steering actuator raw / motor raw와 호환되지 않습니다.
+  `valid=false`도 speed=0 / brake=true인 정지 요구로 취급해야 합니다.
+- **MotionPlan**: Path + target_speed_mps + stop_request + valid/reason.
+  **ReferencePath**는 표준 `nav_msgs/Path`; 빈 경로는 unavailable입니다.
 
-| 책임 | 후속 개발 내용 | 참고할 기존 코드 |
-|---|---|---|
-| 자율주행 | 경로·미션 구간에 따른 목표 조향/속도 결정 | `../gnss_tools/src/pure_pursuit.cxx`, `../gnss_tools/src/guidance_node.cxx` |
-| 수동주행 | 수동 입력 수신, 유효성·최신성 검사 | `../manual_control/manual_control/` |
-| 모드 관리 | idle/manual/autonomous 전환과 명령 선택 | `../gnss_tools/include/guidance_cxx/state_machine.hxx` |
-| 주행 허용 판단 | 상태 추정 품질·입력 timeout·정지 요청 검사 | `../gnss_tools/src/guidance_node.cxx`의 `evaluateFollowGate()` |
-| 최종 명령 전달 | 단일 송신 주체와 명령 단위·범위 확정 | `../trans/trans/`, `../gnss_tools/include/guidance_cxx/message.hxx` |
+GNSS observation timestamp는 heartbeat 때 갱신하지 않습니다. 선택된 명령도 source timestamp를
+보존하므로 상위 노드가 죽으면 반복 전달로 timeout이 숨겨지지 않습니다. 소비자는 receipt monotonic
+age와 ROS source stamp를 함께 확인합니다. 0 / 미래 / 만료 stamp는 거부합니다. `use_sim_time` 사용 시
+입력과 모든 노드의 clock을 일치시켜야 합니다. 서로 다른 호스트도 clock 동기화가 필요합니다.
+Map Path는 정적 snapshot이라 시간 만료 없이 유지하며, ReferencePath는 매 tick 현재 계획 시각으로
+발행합니다. map provider는 좌표 원점·version을 별도 검증해야 합니다.
 
-기존 경로는 상대 위치 참고용입니다. 이 패키지가 해당 구현을 복사하거나 실행하거나 런타임 의존하는 것은 아닙니다.
-기존 `guidance_node`와 `trans`에는 각각 UDP 송신 경로가 있습니다.
-실제 제어 연결 시에는 최종 액추에이터 명령을 보내는 주체 하나를 정하고 모드별로 명령을 선택해야 합니다.
-그 통합 작업과 기존 패키지 변경은 이번 기본 환경에 포함하지 않았습니다.
+## GNSS / IMU / camera / LiDAR 정책
 
-## 인터페이스와 차량 parameter
+GNSS primary, IMU optional assist. 기본 `GNSS_ONLY`, `fusion_enable=false`입니다.
+`GNSS_IMU` 또는 fusion=true 요청은 미구현 오류로 종료하며 조용히 GNSS-only로 위장하지 않습니다.
+GNSS-only의 yaw-rate는 항상 invalid입니다. GNSS speed covariance도 확인합니다.
+GNSS frame은 `map`, child frame은 rear axle `base_link` 계약입니다.
+`localization_reference_verified=false` 기본값은 미실측 antenna lever arm을 정상으로 가정하지 않습니다.
+현장 측정 및 외부 GNSS 설정 확인 후에만 이 parameter를 변경해야 합니다.
 
-새 제어 topic과 메시지 contract는 아직 정의하지 않았습니다.
-다음 기존 인터페이스는 설계 참고 대상입니다.
+**Pure Pursuit는 Motion Control / Lateral Control 소속**입니다. GNSS package의 책임이 아닙니다.
+`gnss_tools`는 읽기 전용 참고했으며 독립 구현에는 빌드/런타임 의존성이 없습니다.
+LateralController interface 뒤에 Adaptive Pure Pursuit를 둡니다. nearest segment projection에서
+`clamp(min + gain * speed, min, max)`만큼 경로를 따라 target을 찾고 실제 target chord 길이로
+`atan2(2 * wheelbase * lateral, chord²)`를 계산합니다. 뒤쪽 target, 퇴화 경로는 invalid입니다.
+전진 단순 경로 baseline이며 loop/교차 경로 progress, off-path gate, smoothing, steering rate 제한은
+아직 없습니다. 실제 steering calibration이나 물리 한계값을 추측하지 않습니다.
 
-- 상태 추정 입력: `/localization/odom` (`nav_msgs/msg/Odometry`). 현재 guidance는 `map`/`base_link` frame을 요구합니다.
-- 수동 입력: 기존 `manual_control`의 `cmd` (`std_msgs/msg/Float32MultiArray`), `[steering, speed, brake]` 순서. 새 제어 명령 형식은 별도로 결정해야 합니다.
-- 차선 입력: 기존 Lane AI는 overlay 이미지를 발행합니다. lane prediction을 제어에 전달하는 데이터 인터페이스는 추가 설계 대상입니다.
-- 지도 입력: dashboard final-map JSON과 guidance waypoint CSV는 형식이 다릅니다. 경로와 미션 section 로더는 아직 없습니다.
+RGB → traffic light / sign / future LaneState. **Obstacle primary는 LiDAR**입니다.
+`object_manager/{traffic_light,traffic_sign,obstacle}.hxx`는 교체 가능한 detector interface만 제공합니다.
+Depth는 optional이며 기본 구독/relay도 비활성화됩니다. near-field 보조와 object validation은 TODO입니다.
 
-기존 설정의 wheelbase `1.328 m`/`1.04 m`, GPS 전방 offset `0.559 m`/`0 m`,
-guidance raw 속도 `350`과 저장된 모터 펌웨어 입력 범위 `-100~100`은 아직 통일되지 않았습니다.
-이 패키지에는 해당 값을 임의로 선택해 복사하지 않았습니다.
-물리 속도(m/s), raw 명령, motor RPM은 후속 인터페이스에서 구분해야 합니다.
+## Planning / mission / safety / mode
 
-## 빌드와 실행 방법
+Path planner는 datum과 state가 검증된 경우 global GNSS Path를 전달합니다.
+LaneState invalid/missing이면 global path fallback입니다. valid LaneState도 현재는 correction이
+미구현이므로 global path를 유지합니다. `lane_correction_enabled=true`와 nonempty `map_file`은
+시작 오류로 명시합니다. `MapLoader` / `LaneCorrection` interface만 있으며 final-map JSON/CSV를 읽지 않습니다.
 
-아래 명령은 참고용이며 패키지 생성 작업에서는 빌드하거나 실행하지 않았습니다.
-ROS 2 Humble과 기존 main 이미지의 개발 도구가 준비된 셸을 기준으로 합니다.
-컨테이너에서는 `/workspace`, 호스트에서는 이 저장소의 `main/`에서 시작합니다.
+**mission_based_limit**는 정상 주행 정책입니다. opt-in baseline max speed, 유효 speed sign cap,
+명시적으로 `traffic_light_applies=true`인 context의 red/yellow stop 및 unknown stop만 구현했습니다.
+동적 map mission section, curve/turn 감속, sign 적용 해제/수명은 TODO입니다. baseline은 기본 비활성입니다.
+Motion planner는 state/path/mission/object가 모두 유효해야 정상 plan을 내며, obstacle detected이면
+거리와 무관하게 정지합니다. avoidance/trajectory optimizer는 없습니다.
 
-기존 `main/build`, `main/install`, `main/log`와 분리하려면 빌드 산출물을 새 패키지 안에 둡니다.
+**safety_limit**는 선택 이후 최종 위험/시스템 이상 제한입니다. AUTO/MANUAL 모두 localization과
+speed validity, timeout, object freshness, E-STOP, NaN/Inf, 음의 속도, brake+양의 속도,
+steer/speed 범위, 검증되지 않은 운용 한계를 확인합니다. 범위 초과는 clamp 대신 정지합니다.
+`require_obstacle_state=true` 기본값으로 perception 미구현 상태는 주행을 차단합니다.
+검증된 장애물이 있고 emergency distance가 미설정(0)이면 정지합니다.
+어떤 설정도 이 버전에서 액추에이터 송신을 활성화할 수 없습니다.
+
+ControlMode는 IDLE/MANUAL/AUTO입니다. 초기 `mode` parameter는 read-only이고 runtime 전환은
+`mode_request`를 사용합니다. 다른 mode의 drive command로 fallback하지 않습니다.
+전환 시 입력 cache를 지워 다음 source callback을 기다리고 즉시 stop을 발행합니다.
+잘못된 mode 요청은 IDLE로 전환합니다. 다른 parameter도 read-only이며 변경은 재시작이 필요합니다.
+
+Vehicle FSM은 별도의 INIT/READY/DRIVING/STOPPED/FAULT입니다. 최초 final 대기=INIT,
+invalid/stale final=FAULT, 유효 final + IDLE=READY, 유효 brake/zero speed=STOPPED,
+유효 양의 command=DRIVING의 최소 상태 관리입니다. **DRIVING은 실제 차량 운동 확인이 아니라 명령 단계**입니다.
+FAULT는 조건 해소 시 자동 회복하는 skeleton이며 fault latch/reset 및 운전자 승인 전이는 후속 설계 대상입니다.
+
+## Configuration / 측정값
+
+새 stack의 local source of truth는 이 패키지의 `config/`입니다.
+`control_manager.yaml`에 topic/timing/control policy, `vehicle.yaml`에 geometry를 모았습니다.
+launch가 두 파일을 함께 로드합니다. node-specific parameter key는 `/control/<node name>`입니다.
+standalone `ros2 run`에 파일을 적용할 때도 `-r __ns:=/control`을 사용합니다.
+
+| 항목 | 값 (m) | 출처 |
+|---|---:|---|
+| length / width / height | 2.222 / 1.280 / 1.3005 | 사용자 실측 |
+| rear axle / front axle from rear | 0.225 / 1.553 | 사용자 실측 |
+| wheelbase / track width | 1.328 / 1.060 | 사용자 실측 |
+| LiDAR rear-axle x / z | 0.559 / 1.224 | 실측 x=0.784−0.225 |
+| Camera rear-axle x / z | 0.636 / 1.140 | 실측 x=0.861−0.225 |
+| LiDAR / Camera y | 0.0 | **중심선 가정, 미실측** |
+
+현재 계산에 쓰는 geometry는 wheelbase뿐입니다. 나머지는 향후 footprint/extrinsic의 문서화된
+config이며 TF나 perception 보정에 사용하지 않습니다.
+
+**미확정**: actual max steering angle, wheel-angle/actuator calibration, physical max operating speed,
+GNSS/IMU xyz/RPY, camera/LiDAR rotation, motor raw↔m/s, brake physical model.
+따라서 max_steer/max_speed는 0과 `operating_limits_verified=false`로 비활성화했습니다.
+lookahead, timeout, covariance quality gate는 소프트웨어 초기 tuning이며 실측 사실이 아닙니다.
+
+## Build / launch / test
+
+컨테이너의 `/workspace`는 호스트 `main/`입니다. 아래 명령은 `main/build`, `main/install`,
+`main/log`를 사용하지 않습니다. 빌드·런타임 로그와 임시 파일도 package 내부에 둡니다.
 
 ```bash
+cd /workspace
 source /opt/ros/humble/setup.bash
-
+mkdir -p src/control_manager/log/{tmp,ros,colcon_home}
+export TMPDIR=/workspace/src/control_manager/log/tmp
+export ROS_LOG_DIR=/workspace/src/control_manager/log/ros
+export ROS_HOME=/workspace/src/control_manager/log/ros
+export COLCON_HOME=/workspace/src/control_manager/log/colcon_home
+export PYTHONDONTWRITEBYTECODE=1
+export CMAKE_BUILD_PARALLEL_LEVEL=2
 colcon --log-base src/control_manager/log build \
-  --base-paths src/control_manager \
-  --packages-select control_manager \
-  --build-base src/control_manager/build \
-  --install-base src/control_manager/install \
-  --symlink-install
-
+  --base-paths src/control_manager --packages-select control_manager \
+  --build-base src/control_manager/build --install-base src/control_manager/install \
+  --symlink-install --cmake-args -DBUILD_TESTING=ON
 source src/control_manager/install/setup.bash
+colcon --log-base src/control_manager/log test \
+  --base-paths src/control_manager --packages-select control_manager \
+  --build-base src/control_manager/build --install-base src/control_manager/install
+colcon --log-base src/control_manager/log test-result --test-result-base src/control_manager/build --verbose
 ros2 launch control_manager control_manager.xml
 ```
 
-launch는 GNSS, 카메라, 수동 입력 노드, 기존 guidance 또는 trans를 함께 시작하지 않습니다.
-종료는 `Ctrl+C`로 합니다.
+하드웨어 없는 검증은 기존 실행 중인 ROS 시스템과 분리된 ROS_DOMAIN_ID / localhost 환경에서 수행합니다.
+`test/smoke_test.py`는 10-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
+GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/timeout을 검증합니다.
+테스트 fixture의 센서/명령/limits는 **테스트 전용**이며 runtime perception이 가짜 관측을 생성하지 않습니다.
+실행 절차 및 결과는 아래 검증 기록을 참고합니다.
 
-## 검증 범위
+## 기존 구조와 충돌 / 팀 협의 필요
 
-초기 구성은 파일 내용과 package/launch/config의 이름 연결을 정적으로 확인하는 범위입니다.
-컴파일·ROS launch·노드 실행·하드웨어 연결 검증은 수행하지 않았습니다.
-빌드 성공이나 자율·수동 주행 기능의 완성을 의미하지 않습니다.
+- 기존 `guidance_node`와 `trans`에 별도 UDP 경로가 있고 trans의 TEST_MODE 기본값도 false입니다.
+  신규 vehicle_interface를 미래 단일 actuator owner로 전환하기 전에 기존 sender 실행 정책을 팀과 합의해야 합니다.
+  새 launch는 기존 sender를 시작하지도 중지하지도 않습니다.
+- gnss_tools 내부 정책은 guidance의 UDP 소유와 custom msg 금지를 규정합니다.
+  이 신규 package는 요청한 정책대로 custom msg와 별도 actuator ownership 경계를 설계했습니다.
+  외부 AGENTS/코드/설정은 변경하지 않았습니다.
+- 기존 teleop 정책은 localization gate를 제외하지만 신규 최종 safety는 MANUAL에도 적용합니다.
+  실내 수동 주행 예외 정책은 팀 결정 사항이며 여기서 외부 정책을 수정하지 않습니다.
+- 기존 wheelbase 기본 1.04 m 등은 이 패키지에 복사하지 않고 사용자 실측 1.328 m를 사용합니다.
+  GNSS lever arm 수치와 LiDAR x=0.559 m를 혼동해서 적용하지 않습니다.
+- manual_control의 `cmd` Float32MultiArray, keyboard_control의 steering_cmd/speed_cmd는
+  단위 및 제동 계약이 다릅니다. 확인된 calibration을 갖춘 adapter가 필요합니다.
+- guidance raw speed와 trans/펌웨어 raw 범위는 m/s 계약이 아닙니다. raw conversion은 미구현입니다.
+- dashboard final-map JSON과 guidance CSV의 datum/mission/path 계약을 통일해야 합니다.
+  map loader는 placeholder이며 외부 파일을 변경하지 않았습니다.
+
+## 미구현 목록
+
+실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
+Depth 보조, GNSS+IMU fusion/EKF, map loader/mission section rules, obstacle avoidance,
+vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
+실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
+
+## 검증 기록
+
+2026-10-13, 기존 `main` 컨테이너의 ROS 2 Humble에서 검증했습니다.
+
+- isolated configure/build 성공, 최종 compile error/warning 없음.
+- 10개 installed executable, custom msg 7개 Python/C++ 생성, XML/package/config 경로 확인.
+- `colcon test-result`: **9 tests, 0 errors, 0 failures, 0 skipped** (CTest 집계 포함).
+- hardware-free smoke: 기본 10-node launch 및 25개 확인 항목 통과.
+  GNSS relay→Path→mission→MotionPlan→Pure Pursuit 흐름, AUTO/MANUAL 분리,
+  E-STOP, command/GNSS/object timeout, range/NaN 거부, 미구현 설정 시작 거부 확인.
+- 액추에이터 UDP/하드웨어 접속 시험 없음. 테스트의 DDS는 localhost 전용 domain 179.
+
+설정한 환경 변수와 install을 source한 셸에서 smoke 재실행:
+
+```bash
+export ROS_DOMAIN_ID=179
+export ROS_LOCALHOST_ONLY=1
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/src/control_manager/test/dds_local.xml
+python3 src/control_manager/test/smoke_test.py
+```
+
+결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,
+`log/smoke_integration.log`, `build/control_manager/test_results/`.
+
+### WRITE SCOPE 검증 미충족 사항
+
+구현 소스와 build/install은 이 패키지 내부에 있습니다. 다만 작업 중 초기
+`colcon test-result` 두 호출에 `--log-base`를 누락하여 **외부 로그 변경이 발생했습니다**:
+
+- `main/log/test-result_2026-10-13_02-38-36/logger_all.log` 생성
+- `main/log/test-result_2026-10-13_02-39-51/logger_all.log` 생성
+- 기존 `main/log/COLCON_IGNORE` (빈 파일)의 수정 시각 갱신
+- `main/log/latest`, `main/log/latest_test-result` 링크 갱신 (기존 대상은 기록하지 못함)
+
+사용자의 “알려진 변경만 복구 허용” 승인에 따라 위 로그 디렉터리 2개를 삭제하고,
+`COLCON_IGNORE`의 기록된 수정 시각을 복원했습니다. 기존 파일 내용은 변경하지 않았습니다.
+`latest`, `latest_test-result`는 원래 대상을 기록하지 못했으므로 승인 범위에 따라 그대로
+두었습니다. 현재 두 링크는 삭제된 로그 디렉터리를 가리키는 dangling link입니다.
+이 두 외부 링크 변경이 남아 있으므로 코드·기능 검증 통과와 별개로
+**원래의 전체 작업 완료 조건은 아직 미충족**입니다.
+위 build/test 문서는 모든 colcon 호출에 package 내부 `--log-base`를 명시하도록 수정했습니다.
+외부 package의 기존 Git 변경사항은 보존되었습니다.

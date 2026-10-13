@@ -1,0 +1,85 @@
+#include <cmath>
+#include <gtest/gtest.h>
+#include <limits>
+#include "control_manager/core/lateral_controller.hxx"
+namespace cm = control_manager::core;
+namespace {
+constexpr std::int64_t now_ns = 10000000000LL;
+cm::VehicleState state() { return {0, 0, 0, 1, 0, true, true, false, now_ns}; }
+cm::Command command() { return {0.1, 1.0, false, true, now_ns, "TEST_FIXTURE"}; }
+cm::SafetyConfig config() { return {true, 0.4, 2.0, 0.5, 0.5, 1.0}; }
+}
+TEST(Freshness, RejectZeroFutureAndExpired) {
+  EXPECT_FALSE(cm::fresh(0, now_ns, 0.5));
+  EXPECT_FALSE(cm::fresh(now_ns+1, now_ns, 0.5));
+  EXPECT_FALSE(cm::fresh(now_ns-600000000, now_ns, 0.5));
+  EXPECT_TRUE(cm::fresh(now_ns-500000000, now_ns, 0.5));
+}
+TEST(Arbitration, ModeIsolationAndTimestampPreserved) {
+  auto m = command(), a = command(); m.target_speed_mps = 0.4; a.target_speed_mps = 0.8;
+  EXPECT_DOUBLE_EQ(cm::selectCommand(cm::ControlMode::MANUAL,m,a,now_ns).target_speed_mps,0.4);
+  EXPECT_DOUBLE_EQ(cm::selectCommand(cm::ControlMode::AUTO,m,a,now_ns).target_speed_mps,0.8);
+  m.valid = false;
+  EXPECT_FALSE(cm::selectCommand(cm::ControlMode::MANUAL,m,a,now_ns).valid);
+  EXPECT_TRUE(cm::selectCommand(cm::ControlMode::IDLE,m,a,now_ns).target_brake);
+  a.timestamp_ns -= 100;
+  EXPECT_EQ(cm::selectCommand(cm::ControlMode::AUTO,m,a,now_ns).timestamp_ns,a.timestamp_ns);
+}
+TEST(Safety, OverridesBothModesAndRejectsInvalidLimits) {
+  for (auto mode : {cm::ControlMode::AUTO, cm::ControlMode::MANUAL}) {
+    const auto selected = cm::selectCommand(mode, command(), command(), now_ns);
+    const auto out = cm::applySafety(selected,state(),{},true,now_ns,config());
+    EXPECT_FALSE(out.valid); EXPECT_TRUE(out.target_brake); EXPECT_EQ(out.target_speed_mps,0);
+  }
+  EXPECT_FALSE(cm::applySafety(command(),state(),{},false,now_ns,{}).valid);
+  auto cfg = config(); cfg.max_speed_mps = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(cm::applySafety(command(),state(),{},false,now_ns,cfg).valid);
+}
+TEST(Safety, TimeoutRangeNanAndObstacle) {
+  EXPECT_TRUE(cm::applySafety(command(),state(),{},false,now_ns,config()).valid);
+  auto s = state(); s.timestamp_ns -= 600000000;
+  EXPECT_FALSE(cm::applySafety(command(),s,{},false,now_ns,config()).valid);
+  auto c = command(); c.timestamp_ns -= 600000000;
+  EXPECT_FALSE(cm::applySafety(c,state(),{},false,now_ns,config()).valid);
+  c = command(); c.target_speed_mps = 3.0;
+  EXPECT_FALSE(cm::applySafety(c,state(),{},false,now_ns,config()).valid);
+  c = command(); c.target_steer_rad = 0.5;
+  EXPECT_FALSE(cm::applySafety(c,state(),{},false,now_ns,config()).valid);
+  c.target_steer_rad = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(cm::applySafety(c,state(),{},false,now_ns,config()).valid);
+  EXPECT_FALSE(cm::applySafety(command(),state(),{true,true,0.9},false,now_ns,config()).valid);
+  EXPECT_TRUE(cm::applySafety(command(),state(),{true,true,2.0},false,now_ns,config()).valid);
+}
+TEST(Fsm, ModeAndVehicleStateAreSeparate) {
+  EXPECT_EQ(cm::fsmState(false,false,{},cm::ControlMode::AUTO),cm::VehicleFsmState::INIT);
+  EXPECT_EQ(cm::fsmState(true,false,command(),cm::ControlMode::AUTO),cm::VehicleFsmState::FAULT);
+  EXPECT_EQ(cm::fsmState(true,true,command(),cm::ControlMode::IDLE),cm::VehicleFsmState::READY);
+  EXPECT_EQ(cm::fsmState(true,true,command(),cm::ControlMode::MANUAL),cm::VehicleFsmState::DRIVING);
+  EXPECT_EQ(cm::fsmState(true,true,cm::stop(now_ns,"stop",true),cm::ControlMode::AUTO),cm::VehicleFsmState::STOPPED);
+}
+TEST(PurePursuit, StraightLeftRightAndRotation) {
+  cm::AdaptivePurePursuit pp({});
+  auto s = state();
+  EXPECT_NEAR(pp.compute(s,{{0,0},{20,0}}).steering_rad,0,1e-12);
+  EXPECT_GT(pp.compute(s,{{0,1},{20,1}}).steering_rad,0);
+  EXPECT_LT(pp.compute(s,{{0,-1},{20,-1}}).steering_rad,0);
+  s.yaw_rad = std::acos(-1.0)/2;
+  EXPECT_NEAR(pp.compute(s,{{0,0},{0,20}}).steering_rad,0,1e-12);
+}
+TEST(PurePursuit, AdaptiveLookaheadAndActualChordNearEnd) {
+  cm::AdaptivePurePursuit pp({}); auto slow = state(), fast = state(); fast.speed_mps = 4;
+  EXPECT_GT(pp.compute(slow,{{0,1},{20,1}}).steering_rad,
+            pp.compute(fast,{{0,1},{20,1}}).steering_rad);
+  const auto near_end = pp.compute(slow,{{0,1},{1,1}});
+  ASSERT_TRUE(near_end.valid);
+  EXPECT_NEAR(near_end.steering_rad,std::atan2(2*1.328,2.0),1e-12);
+}
+TEST(PurePursuit, RejectDegenerateBehindNonfiniteAndDetectGoal) {
+  cm::AdaptivePurePursuit pp({}); auto s = state();
+  EXPECT_FALSE(pp.compute(s,{}).valid);
+  EXPECT_FALSE(pp.compute(s,{{0,0},{0,0}}).valid);
+  EXPECT_FALSE(pp.compute(s,{{-10,0},{-1,0}}).valid);
+  EXPECT_FALSE(pp.compute(s,{{0,0},{std::numeric_limits<double>::quiet_NaN(),0}}).valid);
+  s.x_m = 10; EXPECT_TRUE(pp.compute(s,{{0,0},{10,0}}).goal_reached);
+  s.localization_valid = false; EXPECT_FALSE(pp.compute(s,{{0,0},{20,0}}).valid);
+}
