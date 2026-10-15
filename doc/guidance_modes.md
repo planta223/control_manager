@@ -2,9 +2,11 @@
 
 이 문서의 AFTER control_manager는 실제 구현입니다. AFTER RQT는 **설계안**이며 GUI 소스는 수정하지 않았습니다.
 Guidance는 path_planning_node가 소유하고, ControlMode는 기존 control_manager_node가 소유합니다.
-0.3.0 상태 분리로 motion_state_estimator를 추가했습니다. 현재 계약은 README 및 state_split.md를 참고합니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
+현재 상태 출력은 global_state_estimator와 lane_state_estimator가 맡습니다. README 및 estimators.md를 참고합니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
 
 ## BEFORE control_manager (변경 전 source)
+
+아래는 당시 흐름을 보존한 그림이며, Lane 메시지 표기만 현재 LanePose 명칭으로 갱신했습니다.
 
 ```mermaid
 flowchart TD
@@ -13,7 +15,7 @@ flowchart TD
   SI --> O[object_manager: detection TODO]
   E --> V[VehicleState]
   G[external Global Path] --> P[path_planning: global path 전달]
-  L[external LaneState: 구독만] -.-> P
+  L[external LanePose: 구독만] -.-> P
   V --> P
   P --> R[ReferencePath]
   O --> M[mission_based_limit]
@@ -35,19 +37,25 @@ flowchart TD
   SL --> VI[vehicle_interface: dry_run]
 ```
 
-## AFTER control_manager (0.3.0 현재 구현)
+## AFTER control_manager (상태 분리 + ingress 현재 구현)
 
 ```mermaid
 flowchart TD
   S[Raw sensors] --> SI[sensor_interface]
-  SI --> E[gnss_state_estimator: GNSS / GNSS_IMU TODO]
+  SI --> E[global_state_estimator: independent pose_mode / motion_mode]
   E --> GP[GlobalPose]
-  SI --> ME[motion_state_estimator: GNSS / WHEEL TODO]
-  ME --> MS[MotionState]
+  E --> MS[MotionState]
   SI --> O[Object: LiDAR primary / RGB / optional Depth]
   GP --> P[path_planning: GPS / LANE / HYBRID]
   G[GlobalPath] --> P
-  L[external LaneState: direct input] --> P
+  L[external Lane AI] --> SI
+  SI --> LO[lane_observation]
+  LO --> LE[lane_state_estimator]
+  LE --> LS[LanePose]
+  LS --> P
+  FB[future motor / steering feedback contract TODO] -.-> SI
+  SI --> VF[internal VehicleFeedback: unavailable]
+  VF --> E
   QG[guidance_mode_request] --> P
   P --> GS[GuidanceStatus]
   P --> RP[ReferencePath]
@@ -70,7 +78,7 @@ flowchart TD
   SL --> VI[vehicle_interface: dry_run]
 ```
 
-LANE의 planner dependency는 LaneState만입니다. Lane/Hybrid 알고리즘과 local-path controller adapter는 미구현입니다.
+LANE의 planner dependency는 LanePose만입니다. Lane/Hybrid 알고리즘과 local-path controller adapter는 미구현입니다.
 
 ## 실제 GUI 조사 근거 (READ ONLY)
 
@@ -148,7 +156,7 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 GUI의 요청 선택 표시와 node가 보낸 actual 표시를 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
 Optional sensor runtime toggle은 없습니다. config 활성 여부와 수신 age를 표시하더라도
 그것이 fusion/detection의 성공이나 센서 물리 정상 여부를 뜻하지 않습니다.
-새 sensor health/actuator feedback 계약은 이 버전에서 만들지 않았습니다.
+센서 health/실제 외부 actuator feedback 계약은 미확정입니다. 내부 VehicleFeedback은 현재 invalid입니다.
 
 ## BEFORE RQT ↔ ROS topics (실제 존재하는 연결만)
 
@@ -183,7 +191,7 @@ flowchart LR
   CM -->|status ControlStatus| UI
   GP[global_pose] --> UI
   MS[motion_state] --> UI
-  LN[lane_state] --> UI
+  LN[lane_pose] --> UI
   RP[reference_path] --> UI
   OS[object_state] --> UI
   FC[final_cmd: 목표 명령과 reason] --> UI

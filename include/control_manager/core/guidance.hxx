@@ -15,7 +15,7 @@ struct GuidanceDecision {
   std::string reason;
 };
 // Availability is validated by the ROS adapter (timestamp, frame, finite values).
-// LaneState cannot enable either unsupported algorithm; GPS ignores it.
+// LanePose cannot enable either unsupported algorithm; GPS ignores it.
 GuidanceDecision evaluateGuidance(std::uint8_t requested_mode,
                                   bool global_pose_available, bool global_path_available,
                                   const std::string &lane_error);

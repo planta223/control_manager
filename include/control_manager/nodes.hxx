@@ -7,35 +7,47 @@ namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
  public: SensorInterfaceNode();
  private:
+  void laneCallback(msg::LanePose::ConstSharedPtr sample);
+  void publishFeedback(const msg::VehicleFeedback &sample);
+  rclcpp::Publisher<msg::LanePose>::SharedPtr lane_publisher_;
+  rclcpp::Publisher<msg::VehicleFeedback>::SharedPtr feedback_publisher_;
+  std::string base_frame_;
+  double input_timeout_s_;
+  // TODO external hardware callbacks belong HERE, once motor/steering wire types,
+  // topics, units, calibration and acquisition-time alignment have been agreed.
+  // They must normalize actual feedback and call publishFeedback, not estimate motion.
   template<class T> void relay(const std::string &source, const std::string &destination) {
     auto publisher = output<T>(destination, rclcpp::SensorDataQoS());
-    subscriptions_.push_back(create_subscription<T>(topic(source), rclcpp::SensorDataQoS(),
-      [publisher](typename T::ConstSharedPtr value) { publisher->publish(*value); }));
+    auto subscription = create_subscription<T>(topic(source), rclcpp::SensorDataQoS(),
+      [publisher](typename T::ConstSharedPtr value) { publisher->publish(*value); });
+    if (std::string(subscription->get_topic_name()) == publisher->get_topic_name())
+      throw std::invalid_argument("ingress source and destination resolve to the same topic: " + source);
+    subscriptions_.push_back(subscription);
   }
 };
-class GnssStateEstimatorNode : public NodeBase {
- public: GnssStateEstimatorNode();
+class GlobalStateEstimatorNode : public NodeBase {
+ public: GlobalStateEstimatorNode();
  private:
   void update();
+  msg::GlobalPose estimatePose();
+  msg::MotionState estimateMotion();
   std::shared_ptr<Input<nav_msgs::msg::Odometry>> gnss_;
-  rclcpp::Publisher<msg::GlobalPose>::SharedPtr publisher_;
-  core::GlobalEstimationMode mode_;
   std::shared_ptr<Input<sensor_msgs::msg::Imu>> imu_;
+  std::shared_ptr<Input<msg::VehicleFeedback>> feedback_;
+  rclcpp::Publisher<msg::GlobalPose>::SharedPtr pose_publisher_;
+  rclcpp::Publisher<msg::MotionState>::SharedPtr motion_publisher_;
+  core::PoseMode pose_mode_;
+  core::MotionMode motion_mode_;
   std::string map_frame_, base_frame_;
-  double timeout_s_, max_position_std_m_, max_yaw_variance_;
+  double timeout_s_, max_position_std_m_, max_yaw_variance_, max_speed_variance_, wheelbase_m_;
   bool reference_verified_;
 };
-class MotionStateEstimatorNode : public NodeBase {
- public: MotionStateEstimatorNode();
+class LanePoseEstimatorNode : public NodeBase {
+ public: LanePoseEstimatorNode();
  private:
-  void update();
-  std::shared_ptr<Input<nav_msgs::msg::Odometry>> gnss_;
-  rclcpp::Publisher<msg::MotionState>::SharedPtr publisher_;
-  core::MotionEstimationMode mode_;
-  std::string map_frame_, base_frame_;
-  double timeout_s_, max_speed_variance_, wheelbase_m_;
-  // TODO: attach measured wheel speed/steering feedback inputs here ONLY after
-  // topic/type, physical units, calibration, frame and source-time contract agreement.
+  void observationCallback(msg::LanePose::ConstSharedPtr observation);
+  rclcpp::Publisher<msg::LanePose>::SharedPtr publisher_;
+  double timeout_s_;
 };
 class ObjectManagerNode : public NodeBase {
  public: ObjectManagerNode();
@@ -48,7 +60,7 @@ class PathPlanningNode : public NodeBase {
   void update();
   std::shared_ptr<Input<nav_msgs::msg::Path>> global_;
   std::shared_ptr<Input<msg::GlobalPose>> pose_;
-  std::shared_ptr<Input<msg::LaneState>> lane_;
+  std::shared_ptr<Input<msg::LanePose>> lane_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_;
   rclcpp::Publisher<msg::GuidanceStatus>::SharedPtr guidance_publisher_;
   std::uint8_t requested_guidance_{msg::GuidanceStatus::GPS};

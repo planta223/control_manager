@@ -13,6 +13,6 @@ class MapLoader {
 class LaneCorrection {
  public:
   virtual ~LaneCorrection() = default;
-  virtual std::vector<Point> correct(const std::vector<Point> &, const LaneState &) const = 0;
+  virtual std::vector<Point> correct(const std::vector<Point> &, const LanePose &) const = 0;
 };
 }  // namespace control_manager::core

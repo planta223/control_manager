@@ -6,8 +6,8 @@
 namespace control_manager::core {
 enum class ControlMode : std::uint8_t { IDLE, MANUAL, AUTO };
 enum class VehicleFsmState : std::uint8_t { INIT, READY, DRIVING, STOPPED, FAULT };
-enum class GlobalEstimationMode { GNSS, GNSS_IMU };  // Fusion is NOT_IMPLEMENTED.
-enum class MotionEstimationMode { GNSS, WHEEL };  // Wheel feedback contract is pending.
+enum class PoseMode { GNSS, GNSS_IMU, NONE };  // Fusion is NOT_IMPLEMENTED.
+enum class MotionMode { GNSS, GNSS_IMU, WHEEL, NONE };  // Wheel feedback contract is pending.
 struct GlobalPose {
   double x_m{0.0}, y_m{0.0}, yaw_rad{0.0};
   double position_variance_x_m2{0.0}, position_variance_y_m2{0.0}, yaw_variance_rad2{0.0};
@@ -27,8 +27,8 @@ struct TrackingState {
   std::int64_t timestamp_ns{0};
 };
 struct Point { double x_m{0.0}, y_m{0.0}; };
-struct LaneState {
-  double lateral_error_m{0.0}, longitudinal_error_m{0.0}, confidence{0.0};
+struct LanePose {
+  double lateral_error_m{0.0}, heading_error_rad{0.0}, confidence{0.0};
   std::int64_t timestamp_ns{0};
 };
 struct Command {

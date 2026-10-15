@@ -23,7 +23,12 @@
       sensor_lidar: /control/sensors/lidar
       global_pose: /control/global_pose
       motion_state: /control/motion_state
-      lane_state: /control/lane_state
+      external_lane: ""            # Unagreed topic: disabled until explicitly configured.
+      # Adapter input type: control_manager/msg/LanePose; confirm external wire type with Lane team.
+      # Supplied values: lateral_error_m, heading_error_rad, confidence, header.stamp.
+      lane_observation: /control/lane_observation # INTERNAL publisher: sensor_interface
+      lane_pose: /control/lane_pose # INTERNAL publisher: lane_state_estimator
+      vehicle_feedback: /control/vehicle_feedback # INTERNAL, invalid until hardware adapter exists
       object_state: /control/object_state
       global_path: /control/global_path
       reference_path: /control/reference_path
@@ -40,17 +45,24 @@
       tracking_mode_request: /control/tracking_mode_request
       tracking_status: /control/tracking_status
       estop: /control/estop
-/control/gnss_state_estimator:
+/control/sensor_interface:
   ros__parameters:
-    estimation_mode: GNSS           # GNSS_IMU publishes invalid/NOT_IMPLEMENTED
+    # input_timeout_s: common source-age admission policy. Lane confidence threshold
+    # remains a planner policy; ingress only checks finite confidence in [0, 1].
+    # External motor/steering topic/type/unit contracts are TODO: no subscription yet.
+    input_timeout_s: 0.5
+/control/global_state_estimator:
+  ros__parameters:
+    pose_mode: GNSS                 # GNSS / GNSS_IMU (TODO) / NONE
+    motion_mode: GNSS               # GNSS / GNSS_IMU (TODO) / WHEEL (TODO) / NONE
     localization_reference_verified: false # TODO NOT_VERIFIED: rear axle lever arm
     max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
     max_yaw_variance_rad2: 0.25       # TUNE
-/control/motion_state_estimator:
-  ros__parameters:
-    estimation_mode: GNSS           # WHEEL: input contract missing, invalid/NOT_IMPLEMENTED
     # vehicle.wheelbase_m comes from vehicle.yaml, used only by future WHEEL estimator.
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
+/control/lane_state_estimator:
+  ros__parameters:
+    state_timeout_s: 0.5            # Observation source freshness; no filtering/geometry
 /control/path_planning:
   ros__parameters:
     guidance_mode: GPS               # LANE / HYBRID validate inputs, then NOT_IMPLEMENTED

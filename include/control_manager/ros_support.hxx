@@ -18,7 +18,8 @@
 #include "control_manager/core/types.hxx"
 #include "control_manager/msg/global_pose.hpp"
 #include "control_manager/msg/motion_state.hpp"
-#include "control_manager/msg/lane_state.hpp"
+#include "control_manager/msg/vehicle_feedback.hpp"
+#include "control_manager/msg/lane_pose.hpp"
 #include "control_manager/msg/object_state.hpp"
 #include "control_manager/msg/mission_limit.hpp"
 #include "control_manager/msg/motion_plan.hpp"
@@ -35,7 +36,10 @@ inline const std::map<std::string, std::string> kTopics{
   {"sensor_gnss", "/control/sensors/gnss_odom"}, {"sensor_imu", "/control/sensors/imu"},
   {"sensor_rgb", "/control/sensors/rgb"}, {"sensor_depth", "/control/sensors/depth"},
   {"sensor_lidar", "/control/sensors/lidar"},
-  {"global_pose", "/control/global_pose"}, {"motion_state", "/control/motion_state"}, {"lane_state", "/control/lane_state"},
+  {"external_lane", ""},  // No agreed external Lane topic; explicitly configure the adapter.
+  {"lane_observation", "/control/lane_observation"},
+  {"vehicle_feedback", "/control/vehicle_feedback"},
+  {"global_pose", "/control/global_pose"}, {"motion_state", "/control/motion_state"}, {"lane_pose", "/control/lane_pose"},
   {"object_state", "/control/object_state"}, {"global_path", "/control/global_path"},
   {"reference_path", "/control/reference_path"}, {"mission_limit", "/control/mission_limit"},
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},

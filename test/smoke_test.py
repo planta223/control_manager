@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState, TrackingStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LanePose, TrackingStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -88,7 +88,7 @@ def default_stack():
         assert not values['object_state'].valid and not values['object_state'].obstacle_valid
         assert not values['auto_cmd'].valid
         print('PASS: default IDLE, unknown objects, final safe stop', flush=True)
-        required = {'/control/' + s for s in ['global_pose', 'motion_state', 'lane_state', 'object_state',
+        required = {'/control/' + s for s in ['global_pose', 'motion_state', 'lane_observation', 'lane_pose', 'vehicle_feedback', 'object_state',
                     'reference_path', 'mission_limit', 'motion_plan', 'auto_cmd', 'manual_cmd',
                     'selected_cmd', 'final_cmd', 'status', 'guidance_status', 'guidance_mode_request', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
@@ -100,11 +100,11 @@ def default_stack():
 
 def startup_rejections():
     cases = [('vehicle_interface_node', 'dry_run:=false', 'UDP backend does not exist'),
-             ('gnss_state_estimator_node', 'estimation_mode:=INVALID', 'estimation_mode must be'),
+             ('global_state_estimator', 'pose_mode:=INVALID', 'pose_mode must be'),
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
              ('path_planning_node', 'map_file:=unsupported.json', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
-             ('motion_state_estimator_node', 'estimation_mode:=INVALID', 'estimation_mode must be'),
+             ('global_state_estimator', 'motion_mode:=INVALID', 'motion_mode must be'),
              ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be')]
     for executable, parameter, reason in cases:
         result = subprocess.run(['ros2', 'run', 'control_manager', executable, '--ros-args', '-p',
@@ -116,7 +116,8 @@ def startup_rejections():
 def integrated_fixtures():
     config = yaml.safe_load((ROOT / 'config/control_manager.yaml').read_text())
     overrides = {
-        'gnss_state_estimator': {'localization_reference_verified': True},
+        'global_state_estimator': {'localization_reference_verified': True},
+        'sensor_interface': {'topics.external_lane': '/test/external_lane'},
         'path_planning': {'map_datum_verified': True},
         'mission_based_limit': {'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0},
         'motion_planning': {'cruise_speed_mps': 1.0},
@@ -142,7 +143,7 @@ def integrated_fixtures():
     manual_pub = node.create_publisher(VehicleCommand, '/control/manual_cmd', 10)
     mode_pub = node.create_publisher(UInt8, '/control/mode_request', 10)
     guidance_pub = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
-    lane_pub = node.create_publisher(LaneState, '/control/lane_state', 10)
+    lane_pub = node.create_publisher(LanePose, '/test/external_lane', 10)
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', durable)
@@ -193,11 +194,11 @@ def integrated_fixtures():
         if active['path'] == 'wrong_frame': sent_path.header.frame_id = 'wrong_frame'
         path_pub.publish(sent_path)
         if active['lane'] != 'absent':
-            lane = LaneState(confidence=0.0 if active['lane'] == 'invalid' else 1.0)
+            lane = LanePose(confidence=0.0 if active['lane'] == 'invalid' else 1.0)
             lane.header.stamp = copy.deepcopy(stamp)
             lane.header.frame_id = 'base_link'
             lane.lateral_error_m = 2.0
-            lane.longitudinal_error_m = 0.3
+            lane.heading_error_rad = 0.3
             if active['lane'] == 'stale': lane.header.stamp.sec -= 10
             if active['lane'] == 'nan': lane.lateral_error_m = float('nan')
             lane_pub.publish(lane)
@@ -239,7 +240,7 @@ def integrated_fixtures():
                 assert status.requested_mode == status.GPS == status.actual_mode
                 assert status.valid and not status.degraded and status.active_source == 'GLOBAL_PATH'
                 assert [(p.pose.position.x, p.pose.position.y) for p in values['reference_path'].poses] == [(0., 1.), (10., 1.), (20., 1.)]
-            print('PASS: GPS ignores LaneState ' + lane_input, flush=True)
+            print('PASS: GPS ignores LanePose ' + lane_input, flush=True)
 
         active['lane'] = 'valid'
         for request, reason in [(GuidanceStatus.LANE, 'LANE_NOT_IMPLEMENTED'),

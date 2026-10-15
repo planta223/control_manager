@@ -6,11 +6,11 @@
     <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>
-  <node pkg="control_manager" exec="gnss_state_estimator_node" name="gnss_state_estimator" namespace="/control" output="screen">
+  <node pkg="control_manager" exec="global_state_estimator" name="global_state_estimator" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>
-  <node pkg="control_manager" exec="motion_state_estimator_node" name="motion_state_estimator" namespace="/control" output="screen">
+  <node pkg="control_manager" exec="lane_state_estimator" name="lane_state_estimator" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>

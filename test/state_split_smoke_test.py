@@ -10,13 +10,13 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profi
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import UInt8
-from control_manager.msg import (GlobalPose, MotionState, LaneState, GuidanceStatus,
+from control_manager.msg import (GlobalPose, MotionState, LanePose, GuidanceStatus,
                                  MissionLimit, ObjectState, VehicleCommand, MotionPlan)
 from smoke_test import ROOT, Stack, observe, wait_for
 
 
 def start(executable, label, *params):
-    args = ['ros2', 'run', 'control_manager', executable + '_node', '--ros-args',
+    args = ['ros2', 'run', 'control_manager', executable if executable in {'global_state_estimator', 'lane_state_estimator'} else executable + '_node', '--ros-args',
             '-r', '__ns:=/control', '--params-file', str(ROOT/'config/vehicle.yaml')]
     for param in params:
         args += ['-p', param]
@@ -68,8 +68,7 @@ def estimators():
         pub.publish(o)
 
     timer = node.create_timer(.05, publish)
-    stacks = [start('gnss_state_estimator', 'split_global', 'localization_reference_verified:=true'),
-              start('motion_state_estimator', 'split_motion')]
+    stacks = [start('global_state_estimator', 'split_global', 'localization_reference_verified:=true')]
     try:
         def good():
             return ('global_pose' in values and 'motion_state' in values and
@@ -107,9 +106,9 @@ def estimators():
     # Each unsupported mode remains visible as an invalid heartbeat, never GNSS fallback.
     state['send'] = True
     for executable, params, key, reason in [
-        ('gnss_state_estimator', ['estimation_mode:=GNSS_IMU'], 'global_pose', 'GNSS_IMU_NOT_IMPLEMENTED'),
-        ('motion_state_estimator', ['estimation_mode:=WHEEL'], 'motion_state', 'WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED'),
-        ('gnss_state_estimator', [], 'global_pose', 'INVALID_OR_STALE_GNSS_POSE')]:
+        ('global_state_estimator', ['pose_mode:=GNSS_IMU'], 'global_pose', 'GNSS_IMU_NOT_IMPLEMENTED'),
+        ('global_state_estimator', ['motion_mode:=WHEEL'], 'motion_state', 'WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED'),
+        ('global_state_estimator', [], 'global_pose', 'INVALID_OR_STALE_GNSS_POSE')]:
         values.clear()
         stack = start(executable, 'split_' + reason.lower(), *params)
         try:
@@ -126,8 +125,8 @@ def estimators():
 def guidance():
     node = rclpy.create_node('state_split_guidance_fixture')
     values = observe(node)
-    pubs = {key: node.create_publisher(cls, '/control/' + key, 10) for key, cls in [
-        ('lane_state', LaneState), ('global_pose', GlobalPose), ('guidance_mode_request', UInt8)]}
+    pubs = {key: node.create_publisher(cls, '/test/external_lane' if key == 'lane_pose' else '/control/' + key, 10) for key, cls in [
+        ('lane_pose', LanePose), ('global_pose', GlobalPose), ('guidance_mode_request', UInt8)]}
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', durable)
@@ -135,16 +134,16 @@ def guidance():
 
     def publish():
         stamp = node.get_clock().now().to_msg()
-        lane = LaneState(lateral_error_m=.2, longitudinal_error_m=.3, confidence=.9)
+        lane = LanePose(lateral_error_m=.2, heading_error_rad=.3, confidence=.9)
         lane.header.stamp = copy.deepcopy(stamp)
         if state['lane'] == 'stale': lane.header.stamp.sec -= 10
         if state['lane'] == 'future': lane.header.stamp.sec += 10
         if state['lane'] == 'zero': lane.header.stamp.sec = lane.header.stamp.nanosec = 0
         if state['lane'] == 'low': lane.confidence = .1
-        if state['lane'] == 'nan': lane.longitudinal_error_m = float('nan')
+        if state['lane'] == 'nan': lane.heading_error_rad = float('nan')
         if state['lane'] == 'confidence_nan': lane.confidence = float('nan')
         if state['lane'] == 'range': lane.confidence = 1.1
-        if state['lane'] != 'absent': pubs['lane_state'].publish(lane)
+        if state['lane'] != 'absent': pubs['lane_pose'].publish(lane)
         if state['pose']:
             pose = GlobalPose(valid=True); pose.header.stamp = stamp; pose.header.frame_id = 'map'
             pubs['global_pose'].publish(pose)
@@ -156,16 +155,18 @@ def guidance():
         path_pub.publish(path)
 
     timer = node.create_timer(.05, publish)
+    ingress = start('sensor_interface', 'split_ingress', 'topics.external_lane:=/test/external_lane')
+    lane_estimator = start('lane_state_estimator', 'split_lane')
     stack = start('path_planning', 'split_guidance', 'guidance_mode:=LANE', 'map_datum_verified:=true')
     def reason(expected):
         return ('guidance_status' in values and values['guidance_status'].reason == expected and
                 'reference_path' in values and not values['reference_path'].poses)
     try:
         wait_for(node, lambda: reason('LANE_NOT_IMPLEMENTED'), 'LANE with NO GNSS/GlobalPose/map reaches algorithm boundary')
-        for case, expected in [('stale','LANE_STATE_UNAVAILABLE'), ('future','LANE_STATE_UNAVAILABLE'),
-                               ('zero','LANE_STATE_UNAVAILABLE'), ('low','LANE_CONFIDENCE_LOW'),
-                               ('nan','LANE_VALUES_INVALID'), ('confidence_nan','LANE_VALUES_INVALID'),
-                               ('range','LANE_VALUES_INVALID'), ('absent','LANE_STATE_UNAVAILABLE')]:
+        for case, expected in [('stale','LANE_POSE_UNAVAILABLE'), ('future','LANE_POSE_UNAVAILABLE'),
+                               ('zero','LANE_POSE_UNAVAILABLE'), ('low','LANE_CONFIDENCE_LOW'),
+                               ('nan','LANE_POSE_UNAVAILABLE'), ('confidence_nan','LANE_POSE_UNAVAILABLE'),
+                               ('range','LANE_POSE_UNAVAILABLE'), ('absent','LANE_POSE_UNAVAILABLE')]:
             state['lane'] = case
             wait_for(node, lambda: reason(expected), 'Lane admission: ' + case)
             state['lane'] = 'good'
@@ -182,11 +183,11 @@ def guidance():
         state['lane'] = 'nan'
         pubs['guidance_mode_request'].publish(UInt8(data=GuidanceStatus.GPS))
         wait_for(node, lambda: values['guidance_status'].valid and len(values['reference_path'].poses)==2,
-                 'GPS pass-through ignores malformed Lane')
+                 'GPS pass-through ignores ingress-rejected Lane')
         state['pose'] = False
         wait_for(node, lambda: reason('GLOBAL_POSE_UNAVAILABLE'), 'GPS GlobalPose receipt timeout')
     finally:
-        stack.close(); node.destroy_timer(timer); node.destroy_node()
+        stack.close(); lane_estimator.close(); ingress.close(); node.destroy_timer(timer); node.destroy_node()
 
 
 def downstream():

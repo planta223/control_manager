@@ -58,7 +58,7 @@ TEST(Guidance, ControlModeSelectionRemainsIndependent) {
 
 TEST(Guidance, LaneValidationDoesNotDependOnPoseOrMap) {
   for (bool pose : {false, true}) for (bool path : {false, true}) {
-    for (const auto &error : {"LANE_STATE_UNAVAILABLE", "LANE_CONFIDENCE_LOW", "LANE_VALUES_INVALID"}) {
+    for (const auto &error : {"LANE_POSE_UNAVAILABLE", "LANE_CONFIDENCE_LOW", "LANE_VALUES_INVALID"}) {
       EXPECT_EQ(cm::evaluateGuidance(1, pose, path, error).reason, error);
       EXPECT_EQ(cm::evaluateGuidance(0, pose, path, error).valid, pose && path);
     }

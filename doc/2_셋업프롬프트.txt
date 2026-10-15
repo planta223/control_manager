@@ -102,8 +102,8 @@ LiDAR
         +--> VehicleState
  RGB lane information
         |
-        +--> LaneState
-VehicleState + LaneState + Map
+        +--> LanePose
+VehicleState + LanePose + Map
                 |
                 v
         path_planning_node
@@ -196,8 +196,8 @@ RGB는 주로:
 - Traffic Light
 - Traffic Sign
 정보를 위한 입력으로 본다.
-Lane 관련 최종 상태는 VehicleState에 섞지 말고 LaneState로 분리한다.
-LaneState 기본 요소:
+Lane 관련 최종 상태는 VehicleState에 섞지 말고 LanePose로 분리한다.
+LanePose 기본 요소:
 lateral_error_m
 heading_error_rad
 confidence
@@ -205,7 +205,7 @@ valid
 timestamp
 현재 lane_AI는 numeric lane state를 제어로 보내지 않으므로
 실제 lane extraction을 이번 작업에서 임의 구현하지 마라.
-향후 LaneState publisher를 붙일 수 있게 interface만 설계한다.
+향후 LanePose publisher를 붙일 수 있게 interface만 설계한다.
 4-4. Depth Camera
 Optional sensor.
 향후:
@@ -241,7 +241,7 @@ VehicleState는 control_manager 내부 C++ type으로도 사용 가능해야 한
 필요하다면 control_manager package 내부에 custom msg를 정의해도 된다.
 외부 interface package는 만들지 마라.
 control_manager 밖에 새 package를 만들지 마라.
-LaneState
+LanePose
 도로/차선에 대한 상대 상태.
 최소 개념:
 lateral_error_m
@@ -250,7 +250,7 @@ confidence
 valid
 timestamp
 topic 예:
-    /control/lane_state
+    /control/lane_pose
 ObjectState
 외부 object / traffic 상태.
 이번에는 확장 가능한 최소 skeleton만 만들어라.
@@ -286,17 +286,17 @@ object_manager_node가 최종적으로 ObjectState를 관리/publish하는 구�
 Path Planning 책임:
 입력:
     VehicleState
-    LaneState
+    LanePose
     Global Map / Waypoints
 출력:
     ReferencePath
 개념:
 GNSS global path
     +
-valid한 LaneState가 존재할 경우 local lateral correction
+valid한 LanePose가 존재할 경우 local lateral correction
     =
 ReferencePath
-LaneState invalid이면:
+LanePose invalid이면:
 ReferencePath = Global GNSS path
 가 가능하도록 설계한다.
 이번 작업에서 기존 final-map JSON과 CSV 문제를 억지로 해결하거나
@@ -509,7 +509,7 @@ config/control.yaml
 기본 namespace는 /control을 사용한다.
 가능한 기본 contract:
 /control/vehicle_state
-/control/lane_state
+/control/lane_pose
 /control/object_state
 /control/reference_path
 /control/mission_limit
@@ -547,7 +547,7 @@ vehicle_interface_node
 control_manager/msg/ 내부에 정의할 수 있다.
 후보:
 VehicleState.msg
-LaneState.msg
+LanePose.msg
 ObjectState.msg
 MissionLimit.msg
 MotionPlan.msg
@@ -588,7 +588,7 @@ control_manager/README.md를 현재 구현에 맞게 갱신해라.
 - 전체 architecture
 - 각 node의 책임
 - 주요 topic graph
-- VehicleState / LaneState / ObjectState 설명
+- VehicleState / LanePose / ObjectState 설명
 - mission_based_limit와 safety_limit 차이
 - GNSS-only baseline / optional IMU 정책
 - Pure Pursuit가 Motion Control에 속한다는 점
