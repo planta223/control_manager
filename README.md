@@ -21,7 +21,7 @@ ObjectState + configured baseline → mission_based_limit_node → MissionLimit
 VehicleState + ReferencePath + ObjectState + MissionLimit
   → motion_planning_node → MotionPlan
 VehicleState + MotionPlan
-  → motion_control_node [Adaptive Pure Pursuit + physical speed pass-through] → AutoCommand
+  → motion_control_node [PID / legacy Pure Pursuit / additional Adaptive PP TODO] → AutoCommand
 
 ManualCommand ─┐
 AutoCommand ───┴→ control_manager_node [ControlMode + arbitration + FSM/status]
@@ -37,7 +37,7 @@ AutoCommand ───┴→ control_manager_node [ControlMode + arbitration + FS
 | `path_planning_node` | Guidance 요청/상태 소유. GPS_ONLY에서 global Path 검증·전달; invalid/미지원 Guidance는 empty Path |
 | `mission_based_limit_node` | 명시적으로 활성화한 baseline speed cap, 유효 sign cap, 신호 적용 구간의 GREEN 외 stop |
 | `motion_planning_node` | 신선하고 유효한 입력에서 경로 + 제한된 목표 속도 전달. obstacle detected이면 stop. 조향 계산 없음 |
-| `motion_control_node` | Adaptive Pure Pursuit + m/s pass-through, 잘못된 입력이면 invalid stop |
+| `motion_control_node` | 독립 Tracking 선택(PID 기본), lateral PID / 기존 PP + m/s pass-through, invalid 입력은 stop |
 | `control_manager_node` | AUTO/MANUAL source 선택, 모드 요청, final command 기반 FSM/status |
 | `safety_limit_node` | 선택 이후 최종 timeout/validity/range/E-STOP/obstacle 제한 |
 | `vehicle_interface_node` | 최종 물리 명령 수신·로그 / final timeout 감시. socket 생성 없음 |
@@ -69,6 +69,8 @@ manual reader를 시작하지 않습니다. 내부 topic 이름과 원본 sensor
 | `mode_request` | `std_msgs/UInt8` | operator → manager; 0=IDLE, 1=MANUAL, 2=AUTO |
 | `guidance_mode_request` | `std_msgs/UInt8` | operator → path planning; 0=GPS_ONLY, 1=LANE_ONLY, 2=HYBRID |
 | `guidance_status` | `control_manager/GuidanceStatus` | path planning → future GUI |
+| `tracking_mode_request` | `std_msgs/UInt8` | operator → motion control; 0=PID, 1=PURE_PURSUIT, 2=ADAPTIVE_PURE_PURSUIT |
+| `tracking_status` | `control_manager/TrackingStatus` | motion control → future GUI |
 | `estop` | `std_msgs/Bool` | safety input → safety; true=set, false=explicit reset |
 
 원본 기본값: `/gnss/odom`, `/imu/data`, `/camera/image_raw`,
@@ -117,7 +119,8 @@ GNSS frame은 `map`, child frame은 rear axle `base_link` 계약입니다.
 
 **Pure Pursuit는 Motion Control / Lateral Control 소속**입니다. GNSS package의 책임이 아닙니다.
 `gnss_tools`는 읽기 전용 참고했으며 독립 구현에는 빌드/런타임 의존성이 없습니다.
-LateralController interface 뒤에 Adaptive Pure Pursuit를 둡니다. nearest segment projection에서
+`PURE_PURSUIT` 선택은 기존 `AdaptivePurePursuit` class를 그대로 사용합니다. 이 기존 구현은 이미
+**speed-adaptive**이며 이번에 알고리즘을 재작성하지 않았습니다. nearest segment projection에서
 `clamp(min + gain * speed, min, max)`만큼 경로를 따라 target을 찾고 실제 target chord 길이로
 `atan2(2 * wheelbase * lateral, chord²)`를 계산합니다. 뒤쪽 target, 퇴화 경로는 invalid입니다.
 전진 단순 경로 baseline이며 loop/교차 경로 progress, off-path gate, smoothing, steering rate 제한은
@@ -126,6 +129,90 @@ LateralController interface 뒤에 Adaptive Pure Pursuit를 둡니다. nearest s
 RGB → traffic light / sign / future LaneState. **Obstacle primary는 LiDAR**입니다.
 `object_manager/{traffic_light,traffic_sign,obstacle}.hxx`는 교체 가능한 detector interface만 제공합니다.
 Depth는 optional이며 기본 구독/relay도 비활성화됩니다. near-field 보조와 object validation은 TODO입니다.
+
+## Tracking Controller (2026-10-15)
+
+기존 10-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
+Guidance(GPS_ONLY/LANE_ONLY/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
+`VehicleState.x_m/y_m/yaw_rad/speed_mps`, `header.stamp`, localization/speed validity와
+`MotionPlan.reference_path`의 `poses[].pose.position.x/y`, frame/stamp를 그대로 사용합니다.
+Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분의 tangent를 계산합니다.
+`MotionPlan.valid/stop_request/target_speed_mps`와 AutoCommand의 VehicleCommand 계약은 유지합니다.
+
+| Tracking request | 구현 / 실제 동작 |
+|---|---|
+| PID (0, 기본) | GNSS 경로 lateral PID + heading P. 기본 tuning은 비활성 placeholder |
+| PURE_PURSUIT (1) | 기존 speed-adaptive Pure Pursuit를 그대로 호출 |
+| ADAPTIVE_PURE_PURSUIT (2) | 추가 lateral/heading-error 적응형은 NOT_IMPLEMENTED; invalid stop |
+| 나머지 값 | 요청 값 보존, actual=NONE, INVALID_TRACKING_MODE; fallback 없음 |
+
+`TrackingStatus`는 GuidanceStatus와 동일한 `requested_mode`, `actual_mode`, `valid`, `reason` naming을
+사용합니다. NONE=255이며 actual은 **이번 steering 계산에 성공한 controller**입니다.
+단순 PLAN_STOP은 controller를 계산하지 않으므로 actual=NONE/valid=false/PLAN_STOP이지만
+AutoCommand는 기존 정책대로 유효한 speed=0/brake=true 정지 명령입니다. goal 판정에 성공한 경우에는
+Tracking valid=true/GOAL_REACHED입니다. 상태 유효성은 실제 조향 feedback이나 운행 허가를 의미하지 않습니다.
+mode 요청은 reliable volatile UInt8이며 상태는 기존 rate_hz(20 Hz)로 발행합니다.
+잘못된 초기 tracking_mode 문자열은 시작 오류입니다. runtime 요청 변경 시 먼저 invalid stop을 발행하고
+다음 tick에 새 controller를 계산합니다. 같은 mode 반복 요청은 적분을 지우지 않습니다.
+
+### PID 수식 / 부호 / 시간
+
+진행 방향 단위 tangent를 t=(tx,ty), 차량에서 최근접 경로 projection까지의 벡터를 d=(dx,dy)라 하면:
+
+```text
+e_y   = tx * dy - ty * dx                       [m]
+e_psi = atan2(sin(path_yaw-yaw), cos(...))        [rad]
+I     = clamp(I_previous + e_y*dt, -I_max, I_max) [m*s]
+D     = (e_y - e_y_previous) / dt                [m/s]
+steer = clamp(kp_lateral*e_y + ki_lateral*I
+            + kd_lateral*D + kp_heading*e_psi,
+              -max_steering_rad, +max_steering_rad)
+```
+
+경로 진행 방향의 **왼쪽에 차량이 있으면 e_y<0 → 우조향**, 오른쪽이면 e_y>0 → 좌조향입니다.
+전륜 road-wheel steering은 기존처럼 rad, 좌회전이 양수입니다. 예: 동쪽 직선에서 차량 y=+1 m이면
+오차 -1 m입니다. 차량 heading이 경로보다 CCW로 틀어졌으면 heading correction은 음수입니다.
+PID는 조향만 반환하며 속도는 MotionPlan 값을 전달하고, brake는 node/plan/safety가 결정합니다.
+
+`dt`는 node timer 사이의 steady-clock 실제 경과 시간입니다. 첫 sample/reset 직후에는 I=D=0이며
+그 다음부터 누적합니다. integral clamp가 최소 anti-windup입니다. NaN/Inf, 계산 overflow, dt<=0 또는
+max_dt_s 초과는 invalid와 reset입니다. forward-only baseline으로 끝점 뒤나 반대 방향 경로는 거부하고,
+끝점 도달은 기존 goal_tolerance_m를 사용합니다. loop/교차점 progress 판정은 구현하지 않았습니다.
+
+다음 경우 PID 이력을 reset합니다: Tracking mode 변경, 입력 invalid/stale, stop plan, goal,
+경로 점 좌표 변경, 긴 dt. 같은 경로의 stamp 갱신만으로는 reset하지 않습니다.
+`/control/status`를 추가 구독하여 IDLE/MANUAL/FAULT/INIT 및 stale/missing status에서는
+PID 이력을 지우고 **P + heading P preview만** 계산합니다. 이때 reason=PID_PREVIEW_STATE_RESET입니다.
+AUTO가 READY/DRIVING/STOPPED이고 status도 신선할 때만 I/D 이력을 유지합니다.
+이 구독은 ControlMode를 바꾸거나 safety 권한을 이전하지 않습니다. FAULT의 원인인 final command를
+기다리며 모든 AUTO 출력을 막는 순환 대기 없이 기존 안전 조건이 회복될 수 있도록 preview는 허용합니다.
+preview AutoCommand도 실제로 선택할지는 기존 manager/safety가 결정합니다.
+
+VehicleState/MotionPlan은 source stamp와 수신 timeout을 검사하고, 주행 계산에서는 nested
+reference_path.header.stamp도 검사합니다. 잘못되거나 만료된 경로로 유효 steering을 만들지 않습니다.
+ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되며 upstream Global Path는 정적 snapshot입니다.
+
+### Tracking parameters
+
+모든 값은 `/control/motion_control`의 `config/control_manager.yaml`에 있습니다.
+
+| Parameter | 기본값 | 의미 / 단위 |
+|---|---:|---|
+| tracking_mode | PID | 초기 선택, runtime 전환은 request topic |
+| pid.enabled | false | tuning 후 명시적으로 활성화 |
+| pid.kp_lateral | 0.0 | rad/m |
+| pid.ki_lateral | 0.0 | rad/(m*s) |
+| pid.kd_lateral | 0.0 | rad*s/m |
+| pid.kp_heading | 0.0 | rad/rad |
+| pid.integral_limit_m_s | 0.0 | 적분 상한, m*s |
+| pid.max_steering_rad | 0.0 | controller 출력 clamp; 실제 차량 최대 조향각이 아님 |
+| pid.max_dt_s | 0.5 | software timeout, s |
+
+PID가 disabled, max_steering_rad=0, 또는 모든 gain=0이면 PID_NOT_CONFIGURED로 닫습니다.
+양의 test fixture gain은 실차 추천값이 아닙니다. 기존 최종 safety의 operating_limits_verified와
+steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계나 actuator calibration을 추정하지 않았습니다.
+기존 `lookahead_min_m/max_m/gain_s`, `goal_tolerance_m`, measured wheelbase 설정은 유지합니다.
+추가 Adaptive PP는 현재 mode/interface/거부 테스트만 있으며 가짜 오차 적응 gain이나 PP fallback은 없습니다.
 
 ## Planning / mission / safety / mode
 
@@ -277,11 +364,27 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 
 ## 미구현 목록
 
-LANE_ONLY guidance, HYBRID lane correction 및 fallback, 차량 제어 RQT UI, 센서 health 통합 status,
+추가 error-adaptive PP, 실차 lateral PID tuning, LANE_ONLY guidance, HYBRID lane correction 및 fallback,
+차량 제어 RQT UI, 센서 health 통합 status,
 실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
 Depth 보조, GNSS+IMU fusion/EKF, map loader/mission section rules, obstacle avoidance,
 vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
 실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
+
+## Tracking 추가 검증 (2026-10-15)
+
+- ROS 2 Humble package-only configure/build 성공. node 10개, custom msg 9개.
+- **GTest 26개 통과** (기존 core 8 + Guidance 4 + 신규 Tracking/PID 14).
+  CTest 포함 **29 tests / 0 errors / 0 failures / 0 skipped**.
+- 기존 smoke **65개 확인 항목** 통과: 기존 PP/Guidance fixture는 PURE_PURSUIT를 명시하여 회귀 검증.
+- 신규 Tracking smoke **48개 확인 항목** 통과: default PID 미설정 차단, configured PID, I/clamp/reset,
+  PP steering 수치, mode 변경, unsupported/invalid 요청, MANUAL 독립성, stale/NaN/frame/path/stop 처리.
+- config의 PID gain/한계는 placeholder로 유지하며 양의 값은 hardware-free test fixture에서만 사용했습니다.
+- 기존 `src/pure_pursuit.cxx` 알고리즘 소스는 수정하지 않았습니다.
+- 로그: `log/tracking_legacy_smoke_result.txt`, `log/tracking_smoke_result.txt`,
+  `build/control_manager/test_results/`.
+- 빌드/테스트 산출물은 package 내부에만 두었으며 scope 비교 기록은
+  `log/guidance_audit/tracking_before.json`, `tracking_after.json`입니다.
 
 ## Guidance Mode 추가 검증 (2026-10-14)
 
@@ -314,7 +417,8 @@ export ROS_DOMAIN_ID=179
 export ROS_LOCALHOST_ONLY=1
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/src/control_manager/test/dds_local.xml
-python3 src/control_manager/test/smoke_test.py
+python3 -B src/control_manager/test/smoke_test.py
+python3 -B src/control_manager/test/tracking_smoke_test.py
 ```
 
 결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,

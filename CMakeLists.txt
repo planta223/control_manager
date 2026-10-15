@@ -16,11 +16,12 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/VehicleState.msg" "msg/LaneState.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
-  "msg/GuidanceStatus.msg"
+  "msg/GuidanceStatus.msg" "msg/TrackingStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
-add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx)
+add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx
+  src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx)
 target_include_directories(control_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
@@ -48,6 +49,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_control_core control_core)
   ament_add_gtest(test_guidance test/test_guidance.cxx)
   target_link_libraries(test_guidance control_core)
+  ament_add_gtest(test_tracking test/test_tracking.cxx)
+  target_link_libraries(test_tracking control_core)
 endif()
 install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
 install(DIRECTORY include/ DESTINATION include)

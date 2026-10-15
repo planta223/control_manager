@@ -1,0 +1,18 @@
+이번주 화성 계획
+- LiDAR 는 쓰지 않을 것.
+- Depth 정보도 안쓸거 같음.
+- 토요일에는 global map 및 lane ai(?) 고도화를 위한 데이터 수집 우선. 
+- 일요일에는 자율주행이 되어야 한다.
+
+성준님
+- Lane에서 lateral/heading error 추출 후 다음 사항 publish되도록 구현 : lateral error, heading error, confidence, timestamp
+- 모터팀/조향팀에게 엔코더값 송신하도록 요청 (기존 UDP 사용)
+- 센서 좌표계 transform 실측값 공유
+- 고규범에게 다음 가상데이터 전달 : waypoint xy, 현재위치, yaw(imu) 
+
+고규범 해야할거
+- 성준님에게 전달받은 가상데이터로 다음 사항 출력 : 모터, 조향, 브레이크
+- GNSS 기반 PID 완성 (일요일까지 무조건)
+- GNSS 기반 pure-pursuit 완성 (향후 LANE 및 HYBRID 추가 구현)
+
+카메라 관련 사항은 내일..

@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import VehicleState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState
+from control_manager.msg import VehicleState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState, TrackingStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -64,7 +64,7 @@ def observe(node):
                        ('final_cmd', VehicleCommand), ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
                        ('object_state', ObjectState), ('guidance_status', GuidanceStatus),
-                       ('reference_path', PathMsg)]:
+                       ('reference_path', PathMsg), ('tracking_status', TrackingStatus)]:
         node.create_subscription(cls, '/control/' + topic,
                                  lambda msg, key=topic: values.__setitem__(key, msg), 10)
     return values
@@ -79,6 +79,9 @@ def default_stack():
                                    if ns == '/control']) == 10, 'XML launches all ten nodes')
         wait_for(node, lambda: 'final_cmd' in values and 'object_state' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
+        wait_for(node, lambda: 'tracking_status' in values, 'TrackingStatus delivered')
+        assert values['tracking_status'].requested_mode == TrackingStatus.PID
+        assert not values['tracking_status'].valid and values['tracking_status'].actual_mode == TrackingStatus.NONE
         assert values['status'].mode == ControlStatus.IDLE
         assert not values['final_cmd'].valid and values['final_cmd'].target_brake
         assert values['final_cmd'].target_speed_mps == 0.0
@@ -87,7 +90,7 @@ def default_stack():
         print('PASS: default IDLE, unknown objects, final safe stop', flush=True)
         required = {'/control/' + s for s in ['vehicle_state', 'lane_state', 'object_state',
                     'reference_path', 'mission_limit', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'final_cmd', 'status', 'guidance_status', 'guidance_mode_request']}
+                    'selected_cmd', 'final_cmd', 'status', 'guidance_status', 'guidance_mode_request', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         print('PASS: required topic graph contracts', flush=True)
     finally:
@@ -102,7 +105,8 @@ def startup_rejections():
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
              ('path_planning_node', 'map_file:=unsupported.json', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
-             ('state_estimator_node', 'estimation_mode:=GNSS_IMU_WHEEL', 'not implemented')]
+             ('state_estimator_node', 'estimation_mode:=GNSS_IMU_WHEEL', 'not implemented'),
+             ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be')]
     for executable, parameter, reason in cases:
         result = subprocess.run(['ros2', 'run', 'control_manager', executable, '--ros-args', '-p',
                                  parameter], env=ENV, capture_output=True, text=True, timeout=10)
@@ -117,6 +121,7 @@ def integrated_fixtures():
         'path_planning': {'map_datum_verified': True},
         'mission_based_limit': {'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0},
         'motion_planning': {'cruise_speed_mps': 1.0},
+        'motion_control': {'tracking_mode': 'PURE_PURSUIT'},  # Preserve legacy regression fixture.
         'safety_limit': {'operating_limits_verified': True, 'max_steer_rad': 0.7,
                          'max_speed_mps': 2.0, 'emergency_distance_m': 1.0},
     }

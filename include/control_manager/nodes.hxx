@@ -1,6 +1,7 @@
 #pragma once
 #include "control_manager/ros_support.hxx"
 #include "control_manager/core/lateral_controller.hxx"
+#include "control_manager/core/tracking.hxx"
 
 namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
@@ -67,10 +68,15 @@ class MotionControlNode : public NodeBase {
  public: MotionControlNode();
  private:
   void update();
-  std::unique_ptr<core::LateralController> lateral_;
+  void publish(const core::Command &command, const core::TrackingResult &result);
+  std::unique_ptr<core::TrackingController> tracking_;
+  std::vector<core::Point> previous_path_;
+  std::chrono::steady_clock::time_point previous_tick_;
   std::shared_ptr<Input<msg::VehicleState>> state_;
   std::shared_ptr<Input<msg::MotionPlan>> plan_;
+  std::shared_ptr<Input<msg::ControlStatus>> control_status_;
   rclcpp::Publisher<msg::VehicleCommand>::SharedPtr publisher_;
+  rclcpp::Publisher<msg::TrackingStatus>::SharedPtr tracking_publisher_;
   std::string frame_, base_frame_;
   double timeout_s_;
 };
