@@ -3,9 +3,10 @@
 namespace control_manager {
 MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
   frame_ = param<std::string>("map_frame", "map");
+  base_frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("input_timeout_s", 0.5);
   cruise_speed_mps_ = nonnegative("cruise_speed_mps", 0.0);
-  state_ = input<msg::VehicleState>("vehicle_state");
+  motion_ = input<msg::MotionState>("motion_state");
   path_ = input<nav_msgs::msg::Path>("reference_path");
   objects_ = input<msg::ObjectState>("object_state");
   limit_ = input<msg::MissionLimit>("mission_limit");
@@ -17,12 +18,14 @@ void MotionPlanningNode::update() {
   plan.header = header(frame_);
   plan.stop_request = true;
   plan.reason = "MISSING_INVALID_OR_STALE_INPUT";
-  if (current(state_, timeout_s_) && state_->value->localization_valid && state_->value->speed_valid &&
-      state_->value->header.frame_id == frame_ && current(path_, timeout_s_) &&
-      validPath(*path_->value, frame_) && current(limit_, timeout_s_) && limit_->value->valid &&
+  if (current(motion_, timeout_s_) && motion_->value->speed_valid &&
+      std::isfinite(motion_->value->speed_mps) && motion_->value->speed_mps >= 0.0 &&
+      motion_->value->header.frame_id == base_frame_ && current(path_, timeout_s_) &&
+      (validPath(*path_->value, frame_) || validPath(*path_->value, base_frame_)) && current(limit_, timeout_s_) && limit_->value->valid &&
       limit_->value->header.frame_id == frame_ && std::isfinite(limit_->value->max_speed_mps) &&
       limit_->value->max_speed_mps >= 0.0 && current(objects_, timeout_s_) &&
       objects_->value->valid && objects_->value->obstacle_valid) {
+    plan.header.frame_id = path_->value->header.frame_id;
     plan.reference_path = *path_->value;
     plan.valid = true;
     // Baseline stops for every detected obstacle; avoidance is deliberately unimplemented.

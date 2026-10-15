@@ -14,7 +14,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/VehicleState.msg" "msg/LaneState.msg" "msg/ObjectState.msg"
+  "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LaneState.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
   "msg/GuidanceStatus.msg" "msg/TrackingStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
@@ -33,7 +33,8 @@ function(add_control_node executable class_name)
   install(TARGETS ${executable} RUNTIME DESTINATION lib/${PROJECT_NAME})
 endfunction()
 add_control_node(sensor_interface_node SensorInterfaceNode)
-add_control_node(state_estimator_node StateEstimatorNode)
+add_control_node(gnss_state_estimator_node GnssStateEstimatorNode)
+add_control_node(motion_state_estimator_node MotionStateEstimatorNode)
 add_control_node(path_planning_node PathPlanningNode)
 add_control_node(object_manager_node ObjectManagerNode)
 add_control_node(mission_based_limit_node MissionBasedLimitNode)
@@ -56,7 +57,7 @@ install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
-install(FILES doc/guidance_modes.md DESTINATION share/${PROJECT_NAME}/doc)
+install(FILES doc/guidance_modes.md doc/state_split.md DESTINATION share/${PROJECT_NAME}/doc)
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
 ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
 ament_package()

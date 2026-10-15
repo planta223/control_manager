@@ -9,7 +9,7 @@ struct LateralResult {
 class LateralController {
  public:
   virtual ~LateralController() = default;
-  virtual LateralResult compute(const VehicleState &, const std::vector<Point> &) const = 0;
+  virtual LateralResult compute(const TrackingState &, const std::vector<Point> &) const = 0;
 };
 struct PurePursuitConfig {
   double wheelbase_m{1.328};
@@ -20,7 +20,7 @@ struct PurePursuitConfig {
 class AdaptivePurePursuit final : public LateralController {
  public:
   explicit AdaptivePurePursuit(PurePursuitConfig config);
-  LateralResult compute(const VehicleState &, const std::vector<Point> &) const override;
+  LateralResult compute(const TrackingState &, const std::vector<Point> &) const override;
  private:
   PurePursuitConfig config_;
 };

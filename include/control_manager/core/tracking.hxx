@@ -26,11 +26,11 @@ struct PathError {
 };
 // Signed correction: path to the left of the vehicle => positive e_y.
 // Tangent comes from the nearest non-degenerate segment in path order.
-PathError pathError(const VehicleState &, const std::vector<Point> &);
+PathError pathError(const TrackingState &, const std::vector<Point> &);
 class PidLateralController {
  public:
   explicit PidLateralController(PidConfig config);
-  TrackingResult compute(const VehicleState &, const std::vector<Point> &, double dt_s);
+  TrackingResult compute(const TrackingState &, const std::vector<Point> &, double dt_s);
   void reset();
  private:
   PidConfig config_;
@@ -45,7 +45,7 @@ class TrackingController {
   std::uint8_t requested() const { return requested_; }
   // Empty string means implemented selection (not input/config validity).
   std::string selectionError() const;
-  TrackingResult compute(const VehicleState &, const std::vector<Point> &, double dt_s,
+  TrackingResult compute(const TrackingState &, const std::vector<Point> &, double dt_s,
                          bool accumulate_pid = true);
   void reset();
  private:

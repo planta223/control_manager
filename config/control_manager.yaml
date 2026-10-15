@@ -21,7 +21,8 @@
       sensor_rgb: /control/sensors/rgb
       sensor_depth: /control/sensors/depth
       sensor_lidar: /control/sensors/lidar
-      vehicle_state: /control/vehicle_state
+      global_pose: /control/global_pose
+      motion_state: /control/motion_state
       lane_state: /control/lane_state
       object_state: /control/object_state
       global_path: /control/global_path
@@ -39,17 +40,21 @@
       tracking_mode_request: /control/tracking_mode_request
       tracking_status: /control/tracking_status
       estop: /control/estop
-/control/state_estimator:
+/control/gnss_state_estimator:
   ros__parameters:
-    estimation_mode: GNSS_ONLY
-    fusion_enable: false             # GNSS_IMU / true is an explicit startup error
+    estimation_mode: GNSS           # GNSS_IMU publishes invalid/NOT_IMPLEMENTED
     localization_reference_verified: false # TODO NOT_VERIFIED: rear axle lever arm
     max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
     max_yaw_variance_rad2: 0.25       # TUNE
+/control/motion_state_estimator:
+  ros__parameters:
+    estimation_mode: GNSS           # WHEEL: input contract missing, invalid/NOT_IMPLEMENTED
+    # vehicle.wheelbase_m comes from vehicle.yaml, used only by future WHEEL estimator.
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
 /control/path_planning:
   ros__parameters:
-    guidance_mode: GPS_ONLY          # LANE_ONLY / HYBRID report NOT_IMPLEMENTED and stop
+    guidance_mode: GPS               # LANE / HYBRID validate inputs, then NOT_IMPLEMENTED
+    lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
     map_file: ""                     # Loader TODO. Nonempty value is rejected.
     map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
     lane_correction_enabled: false   # true rejected until correction is implemented

@@ -16,7 +16,8 @@
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 #include "control_manager/core/types.hxx"
-#include "control_manager/msg/vehicle_state.hpp"
+#include "control_manager/msg/global_pose.hpp"
+#include "control_manager/msg/motion_state.hpp"
 #include "control_manager/msg/lane_state.hpp"
 #include "control_manager/msg/object_state.hpp"
 #include "control_manager/msg/mission_limit.hpp"
@@ -34,7 +35,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"sensor_gnss", "/control/sensors/gnss_odom"}, {"sensor_imu", "/control/sensors/imu"},
   {"sensor_rgb", "/control/sensors/rgb"}, {"sensor_depth", "/control/sensors/depth"},
   {"sensor_lidar", "/control/sensors/lidar"},
-  {"vehicle_state", "/control/vehicle_state"}, {"lane_state", "/control/lane_state"},
+  {"global_pose", "/control/global_pose"}, {"motion_state", "/control/motion_state"}, {"lane_state", "/control/lane_state"},
   {"object_state", "/control/object_state"}, {"global_path", "/control/global_path"},
   {"reference_path", "/control/reference_path"}, {"mission_limit", "/control/mission_limit"},
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
@@ -103,10 +104,17 @@ class NodeBase : public rclcpp::Node {
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subscriptions_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
-inline core::VehicleState toCore(const msg::VehicleState &s) {
-  return {s.x_m, s.y_m, s.yaw_rad, s.speed_mps, s.yaw_rate_radps,
-          s.localization_valid, s.speed_valid, s.yaw_rate_valid,
+inline core::GlobalPose toCore(const msg::GlobalPose &s) {
+  return {s.x_m, s.y_m, s.yaw_rad, s.position_variance_x_m2, s.position_variance_y_m2,
+          s.yaw_variance_rad2, s.valid, rclcpp::Time(s.header.stamp).nanoseconds()};
+}
+inline core::MotionState toCore(const msg::MotionState &s) {
+  return {s.speed_mps, s.yaw_rate_radps, s.speed_valid, s.yaw_rate_valid,
           rclcpp::Time(s.header.stamp).nanoseconds()};
+}
+inline core::TrackingState trackingInput(const msg::GlobalPose &p, const msg::MotionState &m) {
+  return {p.x_m, p.y_m, p.yaw_rad, m.speed_mps, m.yaw_rate_radps,
+          p.valid, m.speed_valid, m.yaw_rate_valid, rclcpp::Time(p.header.stamp).nanoseconds()};
 }
 inline core::Command toCore(const msg::VehicleCommand &c) {
   return {c.target_steer_rad, c.target_speed_mps, c.target_brake, c.valid,

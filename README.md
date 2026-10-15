@@ -1,140 +1,195 @@
 # control_manager
 
-ROS 2 Humble / C++17 / ament_cmake 기반 상위제어 **1차 architecture와 실행 가능한 skeleton**입니다.
-기존 기본 패키지를 확장했으며 `.cxx` / `.hxx`, XML launch를 사용합니다.
-실차 주행 준비가 완료된 패키지가 아닙니다. 기본 실행은 `IDLE`, `dry_run=true`이고,
-미확정 조건에서는 `final_cmd`가 속도 0 / brake=true / valid=false로 닫힙니다.
-**액추에이터 UDP 구현 자체가 없으며 `dry_run=false`는 시작 오류입니다.**
+ROS 2 Humble / C++17 / ament_cmake, `.cxx` / `.hxx`, XML launch 기반 상위제어 skeleton입니다.
+**실차 주행 준비 완료를 뜻하지 않습니다.** 기본 IDLE, PID disabled/zero gains, 미확정 운용 한계는 0,
+`dry_run=true`를 유지합니다. UDP backend가 없으며 `dry_run=false`는 시작 오류입니다.
 
-## Architecture / node 책임
+## 현재 architecture (0.3.0: 상태 분리)
+
+이전 VehicleState에 섞여 있던 global localization과 motion validity를 독립 메시지/estimator로 분리했습니다.
+기존에는 planner, motion planning, safety가 모두 같은 localization 조건에 묶여 No-GNSS LANE을
+표현하기 어려웠습니다. 현재 LANE 입력 검사는 GNSS/지도 없이 가능하지만 실제 Lane 경로 생성은 미구현입니다.
 
 ```text
-/gnss/odom ───────┐
-/imu/data (opt) ─┤
-/camera/image_raw│  sensor_interface_node → /control/sensors/*
-/lidar/points ───┤       ├── GNSS → state_estimator_node → VehicleState
-/depth (opt) ────┘       └── RGB + LiDAR (+Depth) → object_manager_node → ObjectState
+Raw GNSS / optional IMU / RGB / LiDAR / optional Depth
+                         |
+                 sensor_interface
+                  |             +--> object_manager --> ObjectState
+                  +-- GNSS --> gnss_state_estimator [GNSS / GNSS_IMU TODO]
+                  |                         +--> GlobalPose
+                  +-- GNSS --> motion_state_estimator [GNSS / WHEEL TODO]
+                                            +--> MotionState
+Future actual wheel speed + steering feedback --(contract TODO)--> WHEEL input
 
-external LaneState ─────────────┐
-external global_path + VehicleState → path_planning_node → ReferencePath
-ObjectState + configured baseline → mission_based_limit_node → MissionLimit
-VehicleState + ReferencePath + ObjectState + MissionLimit
-  → motion_planning_node → MotionPlan
-VehicleState + MotionPlan
-  → motion_control_node [PID / legacy Pure Pursuit / additional Adaptive PP TODO] → AutoCommand
+GlobalPose + GlobalPath + external LaneState (direct, no sensor relay)
+                 |
+       path_planning [GPS / LANE / HYBRID: per-mode requirements]
+                 |
+           ReferencePath
+                 +-- MotionState + ObjectState + MissionLimit
+                 v
+          motion_planning (NO GlobalPose subscription)
+                 |
+             MotionPlan + MotionState + GlobalPose*
+                 v
+          motion_control [PID / legacy PP; algorithms preserved]
+                 |
+              auto_cmd + manual_cmd
+                 v
+          control_manager [IDLE / MANUAL / AUTO; FSM]
+                 |
+             selected_cmd
+                 v
+          safety_limit [MotionState always; GlobalPose mode-dependent;
+                        GuidanceStatus + ObjectState + E-STOP]
+                 |
+              final_cmd --> vehicle_interface [dry_run only]
 
-ManualCommand ─┐
-AutoCommand ───┴→ control_manager_node [ControlMode + arbitration + FSM/status]
-  → selected_cmd → safety_limit_node [VehicleState + ObjectState + E-STOP]
-  → final_cmd → vehicle_interface_node [DRY RUN ONLY]
+* Existing PID/PP still require map pose. Local Lane tracking-frame adaptation is a blocker.
 ```
 
-| Executable | 책임 / 현재 구현 |
-|---|---|
-| `sensor_interface_node` | 원본 Odometry/Image/PointCloud2/optional Imu relay. stamp/frame/covariance 보존, 추정 TF 없음 |
-| `state_estimator_node` | GNSS Odometry를 VehicleState로 변환; frame, covariance, quaternion, timestamp, 속도 validity 확인 |
-| `object_manager_node` | RGB / LiDAR / optional Depth 입력 자리, invalid/UNKNOWN ObjectState 발행. detection 없음 |
-| `path_planning_node` | Guidance 요청/상태 소유. GPS_ONLY에서 global Path 검증·전달; invalid/미지원 Guidance는 empty Path |
-| `mission_based_limit_node` | 명시적으로 활성화한 baseline speed cap, 유효 sign cap, 신호 적용 구간의 GREEN 외 stop |
-| `motion_planning_node` | 신선하고 유효한 입력에서 경로 + 제한된 목표 속도 전달. obstacle detected이면 stop. 조향 계산 없음 |
-| `motion_control_node` | 독립 Tracking 선택(PID 기본), lateral PID / 기존 PP + m/s pass-through, invalid 입력은 stop |
-| `control_manager_node` | AUTO/MANUAL source 선택, 모드 요청, final command 기반 FSM/status |
-| `safety_limit_node` | 선택 이후 최종 timeout/validity/range/E-STOP/obstacle 제한 |
-| `vehicle_interface_node` | 최종 물리 명령 수신·로그 / final timeout 감시. socket 생성 없음 |
+## Node별 subscribe / publish
 
-launch는 위 10개 노드만 `/control` namespace로 시작합니다. 기존 센서, guidance, trans,
-manual reader를 시작하지 않습니다. 내부 topic 이름과 원본 sensor topic 이름은
-`topics.*` parameter이며 기본 문자열은 `ros_support.hxx` 한 곳에 모았습니다.
+표의 제어 topic은 `/control/` 접두사입니다. 원본 topic/config default는 `ros_support.hxx`와 YAML에 모았습니다.
+기존 외부 node는 launch하지 않습니다. launch는 아래 **11개 executable**만 시작합니다.
 
-## Message / topic contract
-
-| Topic (`/control/` prefix) | Type | Publisher → Subscriber |
+| Executable | Subscribe | Publish / 책임 |
 |---|---|---|
-| `sensors/gnss_odom` | `nav_msgs/Odometry` | sensor_interface → state_estimator |
-| `sensors/imu` | `sensor_msgs/Imu` | optional relay → future assist |
-| `sensors/rgb`, `sensors/depth` | `sensor_msgs/Image` | relay → object_manager / future lane |
-| `sensors/lidar` | `sensor_msgs/PointCloud2` | relay → object_manager |
-| `vehicle_state` | `control_manager/VehicleState` | estimator → path / motion planning / motion control / safety |
-| `lane_state` | `control_manager/LaneState` | **future external publisher** → path planning |
-| `object_state` | `control_manager/ObjectState` | object manager → mission / motion planning / safety |
-| `global_path` | `nav_msgs/Path` | **external validated map provider** → path planning |
-| `reference_path` | `nav_msgs/Path` | path planning → motion planning |
-| `mission_limit` | `control_manager/MissionLimit` | mission → motion planning |
-| `motion_plan` | `control_manager/MotionPlan` | motion planning → motion control |
-| `auto_cmd` | `control_manager/VehicleCommand` | motion control → manager |
-| `manual_cmd` | `control_manager/VehicleCommand` | **future physical-unit adapter** → manager |
-| `selected_cmd` | `control_manager/VehicleCommand` | manager → safety |
-| `final_cmd` | `control_manager/VehicleCommand` | safety → vehicle interface / manager status |
-| `status` | `control_manager/ControlStatus` | manager → future GUI (기존 monitor는 미연결) |
-| `mode_request` | `std_msgs/UInt8` | operator → manager; 0=IDLE, 1=MANUAL, 2=AUTO |
-| `guidance_mode_request` | `std_msgs/UInt8` | operator → path planning; 0=GPS_ONLY, 1=LANE_ONLY, 2=HYBRID |
-| `guidance_status` | `control_manager/GuidanceStatus` | path planning → future GUI |
-| `tracking_mode_request` | `std_msgs/UInt8` | operator → motion control; 0=PID, 1=PURE_PURSUIT, 2=ADAPTIVE_PURE_PURSUIT |
-| `tracking_status` | `control_manager/TrackingStatus` | motion control → future GUI |
-| `estop` | `std_msgs/Bool` | safety input → safety; true=set, false=explicit reset |
+| sensor_interface_node | 원본 GNSS/IMU/RGB/LiDAR/Depth | sensors/*; 원본 stamp/frame/covariance 보존, IMU/Depth optional |
+| gnss_state_estimator_node | sensors/gnss_odom; GNSS_IMU 선택 시 sensors/imu | global_pose; 위치·yaw·uncertainty 검증 |
+| motion_state_estimator_node | GNSS mode: sensors/gnss_odom | motion_state; 속도 검증, WHEEL은 invalid placeholder |
+| path_planning_node | global_pose, global_path, lane_state, guidance_mode_request | reference_path, guidance_status; Guidance owner |
+| object_manager_node | sensors/rgb, sensors/lidar, optional sensors/depth | object_state; detection 없음, UNKNOWN/invalid |
+| mission_based_limit_node | object_state | mission_limit; opt-in speed cap/신호 정책 |
+| motion_planning_node | reference_path, motion_state, object_state, mission_limit | motion_plan; 경로와 제한 속도, obstacle stop |
+| motion_control_node | global_pose, motion_state, motion_plan, status, tracking_mode_request | auto_cmd, tracking_status; PID/PP, speed pass-through |
+| control_manager_node | auto_cmd, manual_cmd, final_cmd, mode_request | selected_cmd, status; arbitration/FSM |
+| safety_limit_node | global_pose, motion_state, guidance_status, selected_cmd, object_state, estop | final_cmd; 최종 위험/시스템 제한 |
+| vehicle_interface_node | final_cmd | 로그/timeout 감시; actuator 송신 없음 |
 
-원본 기본값: `/gnss/odom`, `/imu/data`, `/camera/image_raw`,
-`/camera_dep/depth/image_raw`, `/lidar/points`. 기존 guidance의 `/localization/odom` remap이
-필요하면 `topics.gnss`만 변경합니다. 원본/relay는 SensorDataQoS, 제어 topic은 reliable volatile입니다.
-`global_path`는 reliable transient-local depth 1이고 **publisher도 transient-local**이어야 합니다.
-`estop`도 reliable transient-local depth 1이므로 **publisher에 같은 QoS**를 지정합니다.
-E-STOP true는 explicit false 전까지 유지됩니다. 기본 false는 물리 E-STOP 정상 상태의 증명이 아니며,
-현재는 하드웨어 E-STOP, heartbeat, 인증, 재시작 시 latch 복원 기능을 구현하지 않았습니다.
+## Message / 시간 계약
 
-### 상태 분리 / 단위 / 시간
+- **GlobalPose** (`/control/global_pose`): Header, `x_m, y_m, yaw_rad`,
+  `position_variance_x_m2, position_variance_y_m2, yaw_variance_rad2`, `valid`, `reason`.
+  map 기준 rear-axle pose 계약. uncertainty는 GNSS marginal variance이며 full fusion covariance가 아닙니다.
+- **MotionState** (`/control/motion_state`): Header, `speed_mps, yaw_rate_radps`,
+  `speed_valid, yaw_rate_valid`, `reason`. body-frame longitudinal speed와 motion validity를 분리합니다.
+  GNSS speed는 기존 `Odometry.twist.twist.linear.x`를 그대로 사용합니다. yaw-rate는 항상 invalid입니다.
+- **LaneState** (`/control/lane_state`): Header, `lateral_error_m`, `longitudinal_error_m`, `confidence`.
+  **타 팀이 제공할 네 정보는 횡오차·종오차·confidence·측정 timestamp(header.stamp)**입니다.
+  기존 `heading_error_rad`와 `valid` 필드는 제거했습니다. heading/곡률/polyline은 가정하지 않습니다.
+  오차 부호·기준점·frame의 구체적 의미는 외부 팀과 합의가 필요합니다. 현재는 경로 변환에 사용하지 않습니다.
+  finite 값, confidence 범위 [0,1]와 `lane_min_confidence`, source/receipt freshness로 내부 가용성을 판단합니다.
+- **ObjectState**: traffic light/sign/obstacle 상태. `obstacle_valid=false`는 장애물 없음이 아닙니다.
+  현재 perception은 미구현이며 invalid 관측만 발행합니다. LiDAR가 obstacle primary, Depth는 optional 보조입니다.
+- **ReferencePath / GlobalPath**: 표준 `nav_msgs/Path`. global_path는 검증된 외부 정적 map snapshot;
+  reliable transient-local depth 1이며 시간 만료 대신 datum/frame/finite/비퇴화 경로를 검사합니다.
+  reference_path는 계획 생성 시각을 사용하며 invalid이면 빈 경로입니다.
+- **MotionPlan**: Header, Path, target_speed_mps, stop_request, valid, reason.
+  motion planning은 map 또는 base_frame Path를 전달할 수 있고 Path frame을 plan에 보존합니다.
+  비기하학적 MissionLimit의 기존 map Header 계약은 유지합니다.
+- **VehicleCommand**: 좌측 양수 `target_steer_rad`, 전진 `target_speed_mps`, bool brake, valid, reason.
+  내부 물리 단위이며 motor raw/normalized joystick/실제 feedback과 다릅니다.
+- **GuidanceStatus**: requested_mode / actual_mode / active_source / valid / degraded / reason.
+  0=GPS, 1=LANE, 2=HYBRID, actual NONE=255. 미구현이면 actual=NONE, valid=false, degraded=false.
+- **ControlStatus / TrackingStatus**: 기존 모드/FSM과 Tracking 요청·실제 상태 계약 유지.
 
-- **VehicleState**: rear axle centre의 ENU `x_m, y_m, yaw_rad, speed_mps, yaw_rate_radps`,
-  `localization_valid`, `speed_valid`, `yaw_rate_valid`, `header.stamp`.
-  독립 C++ `core::VehicleState`도 제공하며 ROS 변환은 `ros_support.hxx`에 있습니다.
-- **LaneState**: `lateral_error_m, heading_error_rad, confidence, valid, header.stamp`.
-  양의 lateral은 좌측, heading은 CCW. 도로 상대 상태이며 VehicleState에 섞지 않습니다.
-  현재 lane_AI overlay를 숫자 차선 상태로 변환하지 않습니다.
-- **ObjectState**: UNKNOWN/RED/YELLOW/GREEN, optional speed limit, obstacle detected/distance,
-  전체 및 필드별 validity, timestamp. **false detected + obstacle_valid=false는 장애물 없음이 아닙니다.**
-  현재 모든 관측은 invalid이며 timestamp는 unavailable 보고 시각입니다. 미래 detector는 acquisition
-  timestamp와 필드별 freshness를 검사해 aggregate해야 합니다. 거리 기준은 차량 외곽까지의 거리로
-  계약 확정이 필요합니다. 단일 공통 stamp 한계 때문에 비동기 detector 통합 때 계약 재검토가 필요합니다.
-- **VehicleCommand**: 실제 전륜 road-wheel `target_steer_rad` (좌측 +),
-  `target_speed_mps` (전진 >=0), `target_brake` bool, `valid`, `reason`.
-  normalized joystick / steering actuator raw / motor raw와 호환되지 않습니다.
-  `valid=false`도 speed=0 / brake=true인 정지 요구로 취급해야 합니다.
-- **MotionPlan**: Path + target_speed_mps + stop_request + valid/reason.
-  **ReferencePath**는 표준 `nav_msgs/Path`; 빈 경로는 unavailable입니다.
+GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS VehicleState/msg/topic은 제거했습니다.
+`TrackingState`는 기존 PID/PP 호출 직전에만 만드는 **알고리즘 인자**입니다. estimator output이나
+공유 state cache/ROS topic이 아닙니다. pose와 motion freshness를 먼저 각각 검사합니다.
 
-GNSS observation timestamp는 heartbeat 때 갱신하지 않습니다. 선택된 명령도 source timestamp를
-보존하므로 상위 노드가 죽으면 반복 전달로 timeout이 숨겨지지 않습니다. 소비자는 receipt monotonic
-age와 ROS source stamp를 함께 확인합니다. 0 / 미래 / 만료 stamp는 거부합니다. `use_sim_time` 사용 시
-입력과 모든 노드의 clock을 일치시켜야 합니다. 서로 다른 호스트도 clock 동기화가 필요합니다.
-Map Path는 정적 snapshot이라 시간 만료 없이 유지하며, ReferencePath는 매 tick 현재 계획 시각으로
-발행합니다. map provider는 좌표 원점·version을 별도 검증해야 합니다.
+센서 source stamp는 반복 발행으로 갱신하지 않습니다. 수신 monotonic age와 ROS source age를 함께 검사하며
+0/미래/만료 stamp를 거부합니다. 입력이 없거나 unsupported estimator이면 stamp=0, validity=false입니다.
+서로 다른 시각의 pose/motion은 각각 timeout으로 제한하지만 시간 동기화/보간은 구현하지 않았습니다.
+선택 명령도 원본 stamp를 보존합니다. sim clock/호스트 간 clock 동기화는 운용 측의 전제입니다.
 
-## GNSS / IMU / camera / LiDAR 정책
+## 서로 독립적인 모드
 
-GNSS primary, IMU optional assist. 기본 `GNSS_ONLY`, `fusion_enable=false`입니다.
-`GNSS_IMU` / `GNSS_IMU_WHEEL` 또는 fusion=true 요청은 미구현 오류로 종료하며 조용히 GNSS-only로 위장하지 않습니다.
-GNSS-only의 yaw-rate는 항상 invalid입니다. GNSS speed covariance도 확인합니다.
-GNSS frame은 `map`, child frame은 rear axle `base_link` 계약입니다.
-`localization_reference_verified=false` 기본값은 미실측 antenna lever arm을 정상으로 가정하지 않습니다.
-현장 측정 및 외부 GNSS 설정 확인 후에만 이 parameter를 변경해야 합니다.
+| 축 | 값 | 소유 node |
+|---|---|---|
+| Vehicle Control | IDLE / MANUAL / AUTO | control_manager |
+| Guidance | GPS / LANE / HYBRID | path_planning |
+| Global estimation | GNSS / GNSS_IMU | gnss_state_estimator |
+| Motion estimation | GNSS / WHEEL | motion_state_estimator |
+| Tracking | PID / PURE_PURSUIT / ADAPTIVE_PURE_PURSUIT | motion_control |
 
-**Pure Pursuit는 Motion Control / Lateral Control 소속**입니다. GNSS package의 책임이 아닙니다.
-`gnss_tools`는 읽기 전용 참고했으며 독립 구현에는 빌드/런타임 의존성이 없습니다.
-`PURE_PURSUIT` 선택은 기존 `AdaptivePurePursuit` class를 그대로 사용합니다. 이 기존 구현은 이미
-**speed-adaptive**이며 이번에 알고리즘을 재작성하지 않았습니다. nearest segment projection에서
-`clamp(min + gain * speed, min, max)`만큼 경로를 따라 target을 찾고 실제 target chord 길이로
-`atan2(2 * wheelbase * lateral, chord²)`를 계산합니다. 뒤쪽 target, 퇴화 경로는 invalid입니다.
-전진 단순 경로 baseline이며 loop/교차 경로 progress, off-path gate, smoothing, steering rate 제한은
-아직 없습니다. 실제 steering calibration이나 물리 한계값을 추측하지 않습니다.
+### Estimator 동작
 
-RGB → traffic light / sign / future LaneState. **Obstacle primary는 LiDAR**입니다.
-`object_manager/{traffic_light,traffic_sign,obstacle}.hxx`는 교체 가능한 detector interface만 제공합니다.
-Depth는 optional이며 기본 구독/relay도 비활성화됩니다. near-field 보조와 object validation은 TODO입니다.
+`gnss_state_estimator` 기본 `estimation_mode=GNSS`:
+원래 position/yaw 추출 및 quaternion norm, parent map/child base_link, timestamp,
+finite XY, position variance 각각 및 합, yaw variance, `localization_reference_verified` 검사를 보존했습니다.
+미확정 GNSS lever arm을 valid로 가정하지 않도록 reference_verified 기본값은 false입니다.
+`GNSS_IMU`는 IMU 입력 자리만 두고 **GNSS_IMU_NOT_IMPLEMENTED** invalid heartbeat를 발행합니다.
+EKF/가짜 fusion이나 GNSS fallback은 없습니다. 잘못된 mode 문자열은 시작 오류입니다.
+
+`motion_state_estimator` 기본 `estimation_mode=GNSS`:
+Odometry twist speed, speed variance, frame/child-frame, finite, source/receipt age를 검사합니다.
+위치 covariance가 나쁘더라도 유효 speed는 독립적으로 사용 가능합니다. GNSS yaw-rate는 계산하지 않습니다.
+`WHEEL`은 **WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED**, speed/yaw-rate invalid, stamp=0입니다.
+actual wheel/motor speed와 실제 steering angle의 topic/type/calibration/time 계약이 없으므로
+외부 계약을 만들지 않았습니다. 입력 접속 위치는 `MotionStateEstimatorNode` 내부 TODO입니다.
+향후 검증된 입력에 `v/L*tan(delta)`를 적용할 수 있으며 L은 `vehicle.yaml`에서 읽습니다.
+현재 WHEEL 분기에서는 이 수식을 계산하지 않습니다. standalone에서 wheelbase 미설정은 0=unavailable입니다.
+
+### Guidance required input
+
+| Guidance | GlobalPose | GlobalPath | LaneState | 현재 실제 결과 |
+|---|---|---|---|---|
+| GPS | 필수 | 필수 | 무시 | 검증 후 global Path pass-through |
+| LANE | 불필요 | 불필요 | 필수 | Lane 검사 후 LANE_NOT_IMPLEMENTED, empty Path |
+| HYBRID | 필수 | 필수 | 필수 | 세 입력 검사 후 HYBRID_NOT_IMPLEMENTED, empty Path |
+
+GPS/HYBRID는 GlobalPose → GlobalPath 순으로 결손을 보고합니다. LANE은 이 두 조건을 검사하지 않습니다.
+LANE/HYBRID Lane 오류: `LANE_STATE_UNAVAILABLE`, `LANE_VALUES_INVALID`, `LANE_CONFIDENCE_LOW`.
+Lane이 정상이어도 현재 네 정보만으로 검증된 ReferencePath를 만들 수 없어 미구현 상태로 닫습니다.
+GPS로 silent fallback하거나 fake lane correction을 만들지 않습니다. HYBRID는 GPS+Lane이며 IMU fusion과 다릅니다.
+`guidance_mode_request`는 UInt8이며 잘못된 값은 보존/INVALID_GUIDANCE_MODE; 초기 잘못된 문자열은 시작 오류입니다.
+Status 및 Path는 기본 20 Hz 생성 시각으로 발행합니다. GUI는 request source이며 safety authority가 아닙니다.
+
+### Downstream / safety / architecture blocker
+
+Motion planning은 **GlobalPose를 구독하지 않습니다**. ReferencePath + 유효 MotionState + MissionLimit + ObjectState로
+계획합니다. mission_based_limit는 정상 주행 속도/신호 정책이고, safety_limit는 선택 명령 이후 최종 제한입니다.
+Obstacle detected이면 motion planning은 회피 대신 정지합니다. speed PID는 없습니다.
+
+**현재 PID/PP는 map pose와 map 경로가 필요합니다.** local/base_link ReferencePath가 오면
+`LOCAL_REFERENCE_PATH_NOT_SUPPORTED`로 명시적으로 차단합니다. 0 pose/identity TF로 우회하지 않습니다.
+LANE planner의 No-GNSS dependency 분리는 완료됐지만 No-GNSS end-to-end 주행은 아직 구현되지 않았습니다.
+향후 local reference frame/시간 기준과 controller tracking-frame adapter가 합의되어야 합니다.
+
+Safety는 MotionState speed validity/freshness/finite를 모든 모드에서 확인합니다.
+planner의 **신선한 GuidanceStatus.requested_mode=LANE**일 때 GlobalPose를 요구하지 않습니다.
+actual=NONE이어도 LANE 요청의 dependency 정책은 유지됩니다. 미구현 LANE의 AUTO 정지는 empty Path →
+invalid MotionPlan → invalid AutoCommand로 처리합니다. invalid guidance가 MANUAL source를 대체하지 않습니다.
+GPS/HYBRID 및 status missing/stale/unknown일 때는 보수적으로 GlobalPose를 요구합니다.
+이 정책은 MANUAL에도 적용됩니다. Guidance 전환은 callback/timer/timeout 단위이며 원자적 전환 보장은 아닙니다.
+
+기존 E-STOP, command timeout, object freshness, invalid/NaN command, 범위 초과, 미확정 한계 차단은 유지합니다.
+`require_obstacle_state=true` 기본값이며 최종 범위 초과는 clamp 대신 stop입니다. E-STOP true는 explicit false까지 유지합니다.
+물리 E-STOP/재시작 latch/인증/하드웨어 watchdog은 미구현입니다. 안전 범위 및 PID gain은 모두 기존 값 그대로입니다.
+
+AUTO는 auto_cmd만, MANUAL은 manual_cmd만 선택합니다. invalid ControlMode 요청은 IDLE입니다.
+FSM INIT/READY/DRIVING/STOPPED/FAULT는 그대로이며 DRIVING은 명령 단계이지 actual motion feedback이 아닙니다.
+RGB는 traffic light/sign/Lane 입력용이며 실제 recognition은 없습니다. IMU/Depth는 config opt-in이고 runtime toggle은 없습니다.
+Pure Pursuit는 GNSS 패키지 책임이 아니라 Motion Control 내부 lateral controller입니다.
+
+## Breaking changes / 다음 구현 경계
+
+- `VehicleState.msg`, `/control/vehicle_state`, `state_estimator_node` 제거. 별도 compatibility bridge 없음.
+- `gnss_state_estimator_node` 및 `/control/gnss_state_estimator` YAML로 rename;
+  `motion_state_estimator_node` 추가. 두 메시지 소비자는 새 계약으로 이행해야 합니다.
+- Guidance 문자열/constants GPS_ONLY/LANE_ONLY → GPS/LANE (wire 값 0/1/2 유지).
+- LaneState heading_error/valid 제거, longitudinal_error 추가. 외부 Lane 팀과 빌드/계약 동기화 필요.
+- Localization GNSS_ONLY/fusion_enable → estimation_mode=GNSS/GNSS_IMU.
+- 외부 launch/GUI/센서/펌웨어는 수정하지 않았습니다. 이름 변경 반영은 외부 담당 팀 작업입니다.
+- 우선순위: (1) 실제 wheel speed/steering 및 Lane 오차 기준 계약, (2) local-path frame/controller adapter,
+  (3) 검증된 Lane/Hybrid path algorithm, (4) 검증된 fusion 및 실차 튜닝/actuator 계약.
 
 ## Tracking Controller (2026-10-15)
 
-기존 10-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
-Guidance(GPS_ONLY/LANE_ONLY/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
-`VehicleState.x_m/y_m/yaw_rad/speed_mps`, `header.stamp`, localization/speed validity와
+11-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
+Guidance(GPS/LANE/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
+`GlobalPose.x_m/y_m/yaw_rad`, `MotionState.speed_mps` 및 각각의 stamp/validity와
 `MotionPlan.reference_path`의 `poses[].pose.position.x/y`, frame/stamp를 그대로 사용합니다.
 Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분의 tangent를 계산합니다.
 `MotionPlan.valid/stop_request/target_speed_mps`와 AutoCommand의 VehicleCommand 계약은 유지합니다.
@@ -188,7 +243,7 @@ AUTO가 READY/DRIVING/STOPPED이고 status도 신선할 때만 I/D 이력을 유
 기다리며 모든 AUTO 출력을 막는 순환 대기 없이 기존 안전 조건이 회복될 수 있도록 preview는 허용합니다.
 preview AutoCommand도 실제로 선택할지는 기존 manager/safety가 결정합니다.
 
-VehicleState/MotionPlan은 source stamp와 수신 timeout을 검사하고, 주행 계산에서는 nested
+GlobalPose/MotionState/MotionPlan은 source stamp와 수신 timeout을 검사하고, 주행 계산에서는 nested
 reference_path.header.stamp도 검사합니다. 잘못되거나 만료된 경로로 유효 steering을 만들지 않습니다.
 ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되며 upstream Global Path는 정적 snapshot입니다.
 
@@ -213,79 +268,6 @@ PID가 disabled, max_steering_rad=0, 또는 모든 gain=0이면 PID_NOT_CONFIGUR
 steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계나 actuator calibration을 추정하지 않았습니다.
 기존 `lookahead_min_m/max_m/gain_s`, `goal_tolerance_m`, measured wheelbase 설정은 유지합니다.
 추가 Adaptive PP는 현재 mode/interface/거부 테스트만 있으며 가짜 오차 적응 gain이나 PP fallback은 없습니다.
-
-## Planning / mission / safety / mode
-
-Path planner가 Guidance Mode의 요청과 실제 상태를 소유합니다. 기본 `guidance_mode=GPS_ONLY`이며
-runtime 요청은 `/control/guidance_mode_request`입니다. ControlMode/FSM 및 localization 모드와 독립적입니다.
-
-| 구분 | 모드 | 현재 구현 |
-|---|---|---|
-| Vehicle Control | IDLE / MANUAL / AUTO | manager의 명령 source 선택 |
-| Guidance | GPS_ONLY / LANE_ONLY / HYBRID | path planner; GPS_ONLY만 실제 지원 |
-| Localization | GNSS_ONLY / GNSS_IMU / GNSS_IMU_WHEEL | GNSS_ONLY만 지원; 나머지는 future enum, 시작 오류 |
-| Optional sensors | IMU / LiDAR / Depth | 추정 보조 / 장애물 primary / optional 보조; Guidance와 독립 |
-
-- **GPS_ONLY**: datum 확인 + frame/유한 수치/신선도/localization_valid 검사 + valid Global Path일 때
-  경로를 그대로 전달합니다. LaneState의 존재/validity/내용은 결과에 영향을 주지 않습니다.
-- **LANE_ONLY**: INTERFACE_READY / NOT_IMPLEMENTED. 항상 빈 경로, actual=NONE, valid=false,
-  reason=LANE_ONLY_NOT_IMPLEMENTED입니다. GPS로 fallback하지 않습니다.
-- **HYBRID**: INTERFACE_READY / NOT_IMPLEMENTED. 입력 상태와 관계없이 빈 경로,
-  actual=NONE, valid=false, reason=HYBRID_NOT_IMPLEMENTED입니다. lane correction 및 degraded
-  GPS fallback은 이번 버전에 없습니다. future HYBRID는 GPS+Lane이며 GNSS+IMU fusion이 아닙니다.
-- **잘못된 요청 값**: requested_mode에 원래 값을 남기고 actual=NONE/valid=false,
-  reason=INVALID_GUIDANCE_MODE로 닫습니다. 이후 유효한 요청이 오기 전까지 유지합니다.
-  잘못된 초기 문자열 parameter는 시작 오류입니다.
-
-`GuidanceStatus`의 requested_mode는 마지막 요청(시작 시 parameter), actual_mode는 실제 유효하게
-생성한 Guidance이며 경로가 invalid이면 NONE(255)입니다. active_source는 GLOBAL_PATH 또는 NONE입니다.
-`degraded`는 **유효한 축소 기능 fallback이 실제 실행될 때만 true**로 사용할 필드이며 지금은 항상 false입니다.
-향후 HYBRID/GPS fallback은 requested=HYBRID, actual=GPS_ONLY, degraded=true, reason=LANE_INVALID로
-표현할 수 있습니다. lane-only fallback은 실제 알고리즘이 구현된 뒤에만 허용해야 합니다.
-현재는 어느 조합도 미구현 algorithm을 성공으로 표시하지 않습니다.
-
-Status와 ReferencePath는 동일한 계획 시각 stamp를 사용하며 기본 20 Hz로 발행합니다.
-UI는 늦거나 끊긴 status를 STALE/UNKNOWN으로 표시해야 합니다(기존 input_timeout_s=0.5 s 정책 참고).
-Status는 출력 설명이며 safety authority가 아닙니다. 빈 ReferencePath가 MotionPlan invalid/stop_request,
-AutoCommand invalid/brake로 전파됩니다. 전달과 정지는 ROS callback/timer/기존 timeout 범위에서 처리되며
-원자적 전환이나 실시간 deadline 보장을 의미하지 않습니다. path planner 중단 시 reference_path timeout으로
-정지합니다. Guidance 요청은 MANUAL command 선택이나 ControlMode를 변경하지 않습니다.
-MANUAL에도 기존 safety 조건은 그대로 적용됩니다.
-
-Global Path는 기존 계약대로 **정적 transient-local snapshot**이며 관측 센서처럼 시간 만료시키지 않습니다.
-유효하지 않은 경로로 교체하면 즉시 사용할 수 없게 됩니다. provider는 datum/version을 보증해야 합니다.
-VehicleState와 생성된 ReferencePath는 source timestamp와 수신 age를 모두 검사하며,
-새 callback으로 과거/미래/0 timestamp를 정상으로 만들지 않습니다. lane은 현재 사용하지 않으므로
-stale lane을 유효 Guidance 입력으로 판단하지 않습니다.
-
-`lane_correction_enabled=true`와 nonempty `map_file`은 시작 오류입니다.
-`MapLoader` / `LaneCorrection` interface만 있으며 final-map JSON/CSV는 읽지 않습니다.
-IMU/Depth 활성 설정은 시작 시 read-only입니다. runtime sensor toggle과 센서 health 종합 status는 추가하지 않았습니다.
-GUI가 종료되어도 요청 상태와 freshness/safety 처리는 ROS node 안에 남습니다. GUI heartbeat 기반 정지는 구현하지 않았습니다.
-기존 GUI READ ONLY 조사 및 BEFORE/AFTER 설계는 [Guidance 설계 문서](doc/guidance_modes.md)에 있습니다.
-
-**mission_based_limit**는 정상 주행 정책입니다. opt-in baseline max speed, 유효 speed sign cap,
-명시적으로 `traffic_light_applies=true`인 context의 red/yellow stop 및 unknown stop만 구현했습니다.
-동적 map mission section, curve/turn 감속, sign 적용 해제/수명은 TODO입니다. baseline은 기본 비활성입니다.
-Motion planner는 state/path/mission/object가 모두 유효해야 정상 plan을 내며, obstacle detected이면
-거리와 무관하게 정지합니다. avoidance/trajectory optimizer는 없습니다.
-
-**safety_limit**는 선택 이후 최종 위험/시스템 이상 제한입니다. AUTO/MANUAL 모두 localization과
-speed validity, timeout, object freshness, E-STOP, NaN/Inf, 음의 속도, brake+양의 속도,
-steer/speed 범위, 검증되지 않은 운용 한계를 확인합니다. 범위 초과는 clamp 대신 정지합니다.
-`require_obstacle_state=true` 기본값으로 perception 미구현 상태는 주행을 차단합니다.
-검증된 장애물이 있고 emergency distance가 미설정(0)이면 정지합니다.
-어떤 설정도 이 버전에서 액추에이터 송신을 활성화할 수 없습니다.
-
-ControlMode는 IDLE/MANUAL/AUTO입니다. 초기 `mode` parameter는 read-only이고 runtime 전환은
-`mode_request`를 사용합니다. 다른 mode의 drive command로 fallback하지 않습니다.
-전환 시 입력 cache를 지워 다음 source callback을 기다리고 즉시 stop을 발행합니다.
-잘못된 mode 요청은 IDLE로 전환합니다. 다른 parameter도 read-only이며 변경은 재시작이 필요합니다.
-
-Vehicle FSM은 별도의 INIT/READY/DRIVING/STOPPED/FAULT입니다. 최초 final 대기=INIT,
-invalid/stale final=FAULT, 유효 final + IDLE=READY, 유효 brake/zero speed=STOPPED,
-유효 양의 command=DRIVING의 최소 상태 관리입니다. **DRIVING은 실제 차량 운동 확인이 아니라 명령 단계**입니다.
-FAULT는 조건 해소 시 자동 회복하는 skeleton이며 fault latch/reset 및 운전자 승인 전이는 후속 설계 대상입니다.
 
 ## Configuration / 측정값
 
@@ -339,7 +321,7 @@ ros2 launch control_manager control_manager.xml
 ```
 
 하드웨어 없는 검증은 기존 실행 중인 ROS 시스템과 분리된 ROS_DOMAIN_ID / localhost 환경에서 수행합니다.
-`test/smoke_test.py`는 10-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
+`test/smoke_test.py`는 11-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
 GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/timeout을 검증합니다.
 테스트 fixture의 센서/명령/limits는 **테스트 전용**이며 runtime perception이 가짜 관측을 생성하지 않습니다.
 실행 절차 및 결과는 아래 검증 기록을 참고합니다.
@@ -352,7 +334,7 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 - gnss_tools 내부 정책은 guidance의 UDP 소유와 custom msg 금지를 규정합니다.
   이 신규 package는 요청한 정책대로 custom msg와 별도 actuator ownership 경계를 설계했습니다.
   외부 AGENTS/코드/설정은 변경하지 않았습니다.
-- 기존 teleop 정책은 localization gate를 제외하지만 신규 최종 safety는 MANUAL에도 적용합니다.
+- 기존 teleop 정책은 localization gate를 제외하지만 신규 최종 safety는 MANUAL에도 Guidance별 GlobalPose 조건을 적용합니다.
   실내 수동 주행 예외 정책은 팀 결정 사항이며 여기서 외부 정책을 수정하지 않습니다.
 - 기존 wheelbase 기본 1.04 m 등은 이 패키지에 복사하지 않고 사용자 실측 1.328 m를 사용합니다.
   GNSS lever arm 수치와 LiDAR x=0.559 m를 혼동해서 적용하지 않습니다.
@@ -364,14 +346,19 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 
 ## 미구현 목록
 
-추가 error-adaptive PP, 실차 lateral PID tuning, LANE_ONLY guidance, HYBRID lane correction 및 fallback,
+추가 error-adaptive PP, 실차 lateral PID tuning, LANE guidance, HYBRID lane correction 및 fallback,
 차량 제어 RQT UI, 센서 health 통합 status,
 실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
 Depth 보조, GNSS+IMU fusion/EKF, map loader/mission section rules, obstacle avoidance,
 vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
 실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
 
-## Tracking 추가 검증 (2026-10-15)
+## 상태 분리 검증 (0.3.0)
+
+검증 결과와 변경 파일 전체 목록은 [상태 분리 보고서](doc/state_split.md)에 기록합니다.
+이 버전의 smoke는 새 메시지 구조를 사용합니다. 기존 검증 기록의 구 버전 node/message 수는 아래에 보존합니다.
+
+## 이전 버전 검증 기록: Tracking 추가 (2026-10-15)
 
 - ROS 2 Humble package-only configure/build 성공. node 10개, custom msg 9개.
 - **GTest 26개 통과** (기존 core 8 + Guidance 4 + 신규 Tracking/PID 14).
@@ -386,7 +373,7 @@ vehicle speed PID, physical brake model, actuator calibration/raw conversion, UD
 - 빌드/테스트 산출물은 package 내부에만 두었으며 scope 비교 기록은
   `log/guidance_audit/tracking_before.json`, `tracking_after.json`입니다.
 
-## Guidance Mode 추가 검증 (2026-10-14)
+## 이전 버전 검증 기록: Guidance 추가 (2026-10-14)
 
 - Humble isolated configure/build 성공. GuidanceStatus C++/Python 생성 및 기존 10 executable 유지.
 - GTest 12개 (기존 8 + Guidance 4), CTest 포함 **14 tests / 0 errors / 0 failures / 0 skipped**.
@@ -419,6 +406,7 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/src/control_manager/test/dds_local.xml
 python3 -B src/control_manager/test/smoke_test.py
 python3 -B src/control_manager/test/tracking_smoke_test.py
+python3 -B src/control_manager/test/state_split_smoke_test.py
 ```
 
 결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,

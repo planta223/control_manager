@@ -1,6 +1,6 @@
 # Request: std_msgs/UInt8 on guidance_mode_request (only 0, 1, 2).
-uint8 GPS_ONLY=0
-uint8 LANE_ONLY=1
+uint8 GPS=0
+uint8 LANE=1
 uint8 HYBRID=2
 uint8 NONE=255
 # Planning report time; same stamp as the associated ReferencePath.

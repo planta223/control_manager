@@ -27,7 +27,8 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   else if (mode == "ADAPTIVE_PURE_PURSUIT") tracking_->request(msg::TrackingStatus::ADAPTIVE_PURE_PURSUIT);
   else if (mode != "PID")
     throw std::invalid_argument("tracking_mode must be PID, PURE_PURSUIT or ADAPTIVE_PURE_PURSUIT");
-  state_ = input<msg::VehicleState>("vehicle_state");
+  pose_ = input<msg::GlobalPose>("global_pose");
+  motion_ = input<msg::MotionState>("motion_state");
   plan_ = input<msg::MotionPlan>("motion_plan");
   control_status_ = std::make_shared<Input<msg::ControlStatus>>();
   subscriptions_.push_back(create_subscription<msg::ControlStatus>(topic("status"), 10,
@@ -75,15 +76,23 @@ void MotionControlNode::update() {
   };
   const auto selection_error = tracking_->selectionError();
   if (!selection_error.empty()) { stop(selection_error); return; }
-  if (!current(state_, timeout_s_) || !current(plan_, timeout_s_) ||
-      !state_->value->localization_valid || !state_->value->speed_valid ||
-      state_->value->header.frame_id != frame_ || !plan_->value->valid ||
+  // Existing PID/PP require a pose and path in the same global frame. A local
+  // lane path needs an agreed tracking-frame adapter, not a fabricated zero pose.
+  if (current(plan_, timeout_s_) && plan_->value->valid &&
+      (plan_->value->header.frame_id != frame_ ||
+       (!plan_->value->reference_path.header.frame_id.empty() &&
+        plan_->value->reference_path.header.frame_id != frame_))) {
+    stop("LOCAL_REFERENCE_PATH_NOT_SUPPORTED"); return;
+  }
+  if (!current(pose_, timeout_s_) || !current(motion_, timeout_s_) || !current(plan_, timeout_s_) ||
+      !pose_->value->valid || !motion_->value->speed_valid ||
+      motion_->value->header.frame_id != base_frame_ || pose_->value->header.frame_id != frame_ || !plan_->value->valid ||
       plan_->value->header.frame_id != frame_ || !std::isfinite(plan_->value->target_speed_mps) ||
       plan_->value->target_speed_mps < 0.0) {
     stop("INVALID_OR_STALE_STATE_OR_PLAN"); return;
   }
   const auto &plan = *plan_->value;
-  const auto state = toCore(*state_->value);
+  const auto state = trackingInput(*pose_->value, *motion_->value);
   // Stop plans retain the previous speed/brake policy but do not claim valid tracking.
   if (!std::isfinite(state.x_m) || !std::isfinite(state.y_m) || !std::isfinite(state.yaw_rad) ||
       !std::isfinite(state.speed_mps) || state.speed_mps < 0.0) {

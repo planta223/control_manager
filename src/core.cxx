@@ -15,7 +15,8 @@ Command selectCommand(ControlMode mode, const Command &manual, const Command &au
   if (mode == ControlMode::AUTO) return automatic;
   return stop(now, "IDLE", true);
 }
-Command applySafety(const Command &c, const VehicleState &s, const ObstacleObservation &o,
+Command applySafety(const Command &c, const GlobalPose &p, const MotionState &m,
+                    bool require_global_pose, const ObstacleObservation &o,
                     bool estop, std::int64_t now, const SafetyConfig &cfg) {
   if (estop) return stop(now, "E_STOP");
   if (!c.valid || !fresh(c.timestamp_ns, now, cfg.command_timeout_s))
@@ -23,10 +24,11 @@ Command applySafety(const Command &c, const VehicleState &s, const ObstacleObser
   if (!std::isfinite(c.target_steer_rad) || !std::isfinite(c.target_speed_mps) ||
       c.target_speed_mps < 0.0 || (c.target_brake && c.target_speed_mps != 0.0))
     return stop(now, "INVALID_COMMAND_VALUES");
-  if (!s.localization_valid || !s.speed_valid ||
-      !fresh(s.timestamp_ns, now, cfg.state_timeout_s) ||
-      !std::isfinite(s.x_m) || !std::isfinite(s.y_m) || !std::isfinite(s.yaw_rad) ||
-      !std::isfinite(s.speed_mps)) return stop(now, "INVALID_OR_STALE_LOCALIZATION");
+  if (require_global_pose && (!p.valid || !fresh(p.timestamp_ns, now, cfg.state_timeout_s) ||
+      !std::isfinite(p.x_m) || !std::isfinite(p.y_m) || !std::isfinite(p.yaw_rad)))
+    return stop(now, "INVALID_OR_STALE_GLOBAL_POSE");
+  if (!m.speed_valid || !fresh(m.timestamp_ns, now, cfg.state_timeout_s) ||
+      !std::isfinite(m.speed_mps)) return stop(now, "INVALID_OR_STALE_MOTION_STATE");
   if (!cfg.operating_limits_verified || !std::isfinite(cfg.max_steer_rad) ||
       !std::isfinite(cfg.max_speed_mps) || cfg.max_steer_rad <= 0.0 || cfg.max_speed_mps <= 0.0)
     return stop(now, "OPERATING_LIMITS_NOT_VERIFIED");

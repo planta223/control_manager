@@ -15,7 +15,7 @@ std::string TrackingController::selectionError() const {
     return "INVALID_TRACKING_MODE";
   return {};
 }
-TrackingResult TrackingController::compute(const VehicleState &s, const std::vector<Point> &path,
+TrackingResult TrackingController::compute(const TrackingState &s, const std::vector<Point> &path,
                                             double dt_s, bool accumulate_pid) {
   TrackingResult out;
   out.reason = selectionError();

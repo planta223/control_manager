@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import VehicleState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState, TrackingStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LaneState, TrackingStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -60,7 +60,7 @@ def wait_for(node, condition, label, timeout=10):
 
 def observe(node):
     values = {}
-    for topic, cls in [('vehicle_state', VehicleState), ('selected_cmd', VehicleCommand),
+    for topic, cls in [('global_pose', GlobalPose), ('motion_state', MotionState), ('selected_cmd', VehicleCommand),
                        ('final_cmd', VehicleCommand), ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
                        ('object_state', ObjectState), ('guidance_status', GuidanceStatus),
@@ -76,7 +76,7 @@ def default_stack():
     stack = Stack(['ros2', 'launch', 'control_manager', 'control_manager.xml'], 'smoke_default')
     try:
         wait_for(node, lambda: len([n for n, ns in node.get_node_names_and_namespaces()
-                                   if ns == '/control']) == 10, 'XML launches all ten nodes')
+                                   if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'final_cmd' in values and 'object_state' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
         wait_for(node, lambda: 'tracking_status' in values, 'TrackingStatus delivered')
@@ -88,7 +88,7 @@ def default_stack():
         assert not values['object_state'].valid and not values['object_state'].obstacle_valid
         assert not values['auto_cmd'].valid
         print('PASS: default IDLE, unknown objects, final safe stop', flush=True)
-        required = {'/control/' + s for s in ['vehicle_state', 'lane_state', 'object_state',
+        required = {'/control/' + s for s in ['global_pose', 'motion_state', 'lane_state', 'object_state',
                     'reference_path', 'mission_limit', 'motion_plan', 'auto_cmd', 'manual_cmd',
                     'selected_cmd', 'final_cmd', 'status', 'guidance_status', 'guidance_mode_request', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
@@ -100,12 +100,11 @@ def default_stack():
 
 def startup_rejections():
     cases = [('vehicle_interface_node', 'dry_run:=false', 'UDP backend does not exist'),
-             ('state_estimator_node', 'fusion_enable:=true', 'not implemented'),
-             ('state_estimator_node', 'estimation_mode:=GNSS_IMU', 'not implemented'),
+             ('gnss_state_estimator_node', 'estimation_mode:=INVALID', 'estimation_mode must be'),
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
              ('path_planning_node', 'map_file:=unsupported.json', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
-             ('state_estimator_node', 'estimation_mode:=GNSS_IMU_WHEEL', 'not implemented'),
+             ('motion_state_estimator_node', 'estimation_mode:=INVALID', 'estimation_mode must be'),
              ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be')]
     for executable, parameter, reason in cases:
         result = subprocess.run(['ros2', 'run', 'control_manager', executable, '--ros-args', '-p',
@@ -117,7 +116,7 @@ def startup_rejections():
 def integrated_fixtures():
     config = yaml.safe_load((ROOT / 'config/control_manager.yaml').read_text())
     overrides = {
-        'state_estimator': {'localization_reference_verified': True},
+        'gnss_state_estimator': {'localization_reference_verified': True},
         'path_planning': {'map_datum_verified': True},
         'mission_based_limit': {'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0},
         'motion_planning': {'cruise_speed_mps': 1.0},
@@ -194,11 +193,11 @@ def integrated_fixtures():
         if active['path'] == 'wrong_frame': sent_path.header.frame_id = 'wrong_frame'
         path_pub.publish(sent_path)
         if active['lane'] != 'absent':
-            lane = LaneState(valid=active['lane'] != 'invalid', confidence=1.0)
+            lane = LaneState(confidence=0.0 if active['lane'] == 'invalid' else 1.0)
             lane.header.stamp = copy.deepcopy(stamp)
             lane.header.frame_id = 'base_link'
             lane.lateral_error_m = 2.0
-            lane.heading_error_rad = 0.3
+            lane.longitudinal_error_m = 0.3
             if active['lane'] == 'stale': lane.header.stamp.sec -= 10
             if active['lane'] == 'nan': lane.lateral_error_m = float('nan')
             lane_pub.publish(lane)
@@ -207,9 +206,11 @@ def integrated_fixtures():
     stack = Stack(['ros2', 'launch', str(fixture_launch), 'params_file:=' + str(fixture_config)],
                   'smoke_integration')
     try:
-        wait_for(node, lambda: 'vehicle_state' in values and values['vehicle_state'].localization_valid,
+        wait_for(node, lambda: 'global_pose' in values and values['global_pose'].valid,
                  'GNSS relay and covariance/pose adapter')
-        assert not values['vehicle_state'].yaw_rate_valid
+        wait_for(node, lambda: 'motion_state' in values and values['motion_state'].speed_valid,
+                 'GNSS velocity independently produces MotionState')
+        assert not values['motion_state'].yaw_rate_valid
         wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and
                  values['auto_cmd'].target_speed_mps == 1.0 and values['auto_cmd'].target_steer_rad > 0.0,
                  'global Path -> mission -> plan -> Adaptive Pure Pursuit')
@@ -228,19 +229,20 @@ def integrated_fixtures():
         wait_for(node, lambda: values['final_cmd'].valid and values['final_cmd'].target_speed_mps == 1.0,
                  'AUTO selects only auto')
         wait_for(node, lambda: 'guidance_status' in values and values['guidance_status'].valid,
-                 'GPS_ONLY default publishes valid GuidanceStatus')
+                 'GPS default publishes valid GuidanceStatus')
         for lane_input in ['valid', 'invalid', 'stale', 'nan', 'absent']:
             active['lane'] = lane_input
             deadline = time.monotonic() + 0.7
             while time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.05)
                 status = values['guidance_status']
-                assert status.requested_mode == status.GPS_ONLY == status.actual_mode
+                assert status.requested_mode == status.GPS == status.actual_mode
                 assert status.valid and not status.degraded and status.active_source == 'GLOBAL_PATH'
                 assert [(p.pose.position.x, p.pose.position.y) for p in values['reference_path'].poses] == [(0., 1.), (10., 1.), (20., 1.)]
-            print('PASS: GPS_ONLY ignores LaneState ' + lane_input, flush=True)
+            print('PASS: GPS ignores LaneState ' + lane_input, flush=True)
 
-        for request, reason in [(GuidanceStatus.LANE_ONLY, 'LANE_ONLY_NOT_IMPLEMENTED'),
+        active['lane'] = 'valid'
+        for request, reason in [(GuidanceStatus.LANE, 'LANE_NOT_IMPLEMENTED'),
                                 (GuidanceStatus.HYBRID, 'HYBRID_NOT_IMPLEMENTED'),
                                 (255, 'INVALID_GUIDANCE_MODE')]:
             guidance_pub.publish(UInt8(data=request))
@@ -257,12 +259,14 @@ def integrated_fixtures():
             assert values['guidance_status'].active_source == 'NONE'
             # Even healthy lane input and absent GNSS cannot fake lane/hybrid support.
             active['lane'], active['gnss'] = 'valid', False
-            wait_for(node, lambda: not values['vehicle_state'].localization_valid,
+            wait_for(node, lambda: not values['global_pose'].valid,
                      'unsupported guidance fixture: localization expires')
             assert not values['guidance_status'].valid
-            assert values['guidance_status'].reason == reason
+            expected = 'GLOBAL_POSE_UNAVAILABLE' if request == GuidanceStatus.HYBRID else reason
+            wait_for(node, lambda: values['guidance_status'].reason == expected,
+                     'mode-specific global dependency: ' + expected)
             active['gnss'] = True
-            wait_for(node, lambda: values['vehicle_state'].localization_valid, 'restore fixture GNSS')
+            wait_for(node, lambda: values['global_pose'].valid, 'restore fixture GNSS')
             mode_pub.publish(UInt8(data=ControlStatus.MANUAL))
             wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
                      values['final_cmd'].valid and values['final_cmd'].target_speed_mps == 0.4,
@@ -272,11 +276,11 @@ def integrated_fixtures():
             wait_for(node, lambda: values['status'].mode == ControlStatus.AUTO and
                      not values['final_cmd'].valid and values['final_cmd'].target_brake,
                      'AUTO cannot use manual command with invalid guidance')
-            guidance_pub.publish(UInt8(data=GuidanceStatus.GPS_ONLY))
-            wait_for(node, lambda: values['guidance_status'].requested_mode == GuidanceStatus.GPS_ONLY and
-                     values['guidance_status'].actual_mode == GuidanceStatus.GPS_ONLY and
+            guidance_pub.publish(UInt8(data=GuidanceStatus.GPS))
+            wait_for(node, lambda: values['guidance_status'].requested_mode == GuidanceStatus.GPS and
+                     values['guidance_status'].actual_mode == GuidanceStatus.GPS and
                      values['guidance_status'].valid and values['final_cmd'].valid and
-                     values['final_cmd'].target_speed_mps == 1.0, 'explicit GPS_ONLY recovery')
+                     values['final_cmd'].target_speed_mps == 1.0, 'explicit GPS recovery')
 
         for shape in ['empty', 'wrong_frame']:
             active['path'] = shape
@@ -289,7 +293,7 @@ def integrated_fixtures():
                      'restore valid global path')
         for timestamp in ['stale', 'future', 'zero']:
             active['gnss_stamp'] = timestamp
-            wait_for(node, lambda: values['guidance_status'].reason == 'LOCALIZATION_UNAVAILABLE' and
+            wait_for(node, lambda: values['guidance_status'].reason == 'GLOBAL_POSE_UNAVAILABLE' and
                      not values['guidance_status'].valid and not values['reference_path'].poses and
                      not values['final_cmd'].valid and values['final_cmd'].target_brake,
                      'fresh callbacks cannot hide bad source timestamp: ' + timestamp)
@@ -318,7 +322,7 @@ def integrated_fixtures():
         wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_COMMAND_VALUES', 'NaN command stop')
         manual.target_steer_rad = -0.15
         active['gnss'] = False
-        wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_LOCALIZATION',
+        wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_GLOBAL_POSE',
                  'GNSS timeout applies in MANUAL')
         active['gnss'] = True
         wait_for(node, lambda: values['final_cmd'].valid, 'fresh localization recovery')

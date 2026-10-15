@@ -13,7 +13,7 @@ AdaptivePurePursuit::AdaptivePurePursuit(PurePursuitConfig config) : config_(con
       !std::isfinite(config.goal_tolerance_m) || config.goal_tolerance_m < 0.0)
     throw std::invalid_argument("invalid Pure Pursuit geometry/tuning");
 }
-LateralResult AdaptivePurePursuit::compute(const VehicleState &s,
+LateralResult AdaptivePurePursuit::compute(const TrackingState &s,
                                           const std::vector<Point> &path) const {
   if (!s.localization_valid || !s.speed_valid || path.size() < 2 ||
       !std::isfinite(s.x_m) || !std::isfinite(s.y_m) || !std::isfinite(s.yaw_rad) ||

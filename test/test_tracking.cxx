@@ -5,7 +5,7 @@
 namespace cm = control_manager::core;
 namespace {
 const std::vector<cm::Point> straight{{0,0},{20,0}};
-cm::VehicleState state(double x = 1, double y = 0, double yaw = 0) {
+cm::TrackingState state(double x = 1, double y = 0, double yaw = 0) {
   return {x,y,yaw,1,0,true,true,false,10000000000LL};
 }
 cm::PidConfig config() {

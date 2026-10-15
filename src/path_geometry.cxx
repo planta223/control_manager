@@ -4,7 +4,7 @@
 #include <limits>
 
 namespace control_manager::core {
-PathError pathError(const VehicleState &s, const std::vector<Point> &path) {
+PathError pathError(const TrackingState &s, const std::vector<Point> &path) {
   if (!s.localization_valid || !s.speed_valid || path.size() < 2 ||
       !std::isfinite(s.x_m) || !std::isfinite(s.y_m) || !std::isfinite(s.yaw_rad) ||
       !std::isfinite(s.speed_mps) || s.speed_mps < 0.0) return {};

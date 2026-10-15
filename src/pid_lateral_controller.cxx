@@ -15,7 +15,7 @@ PidLateralController::PidLateralController(PidConfig config) : config_(config) {
 void PidLateralController::reset() {
   previous_valid_ = false; integral_m_s_ = 0.0; previous_error_m_ = 0.0;
 }
-TrackingResult PidLateralController::compute(const VehicleState &s,
+TrackingResult PidLateralController::compute(const TrackingState &s,
                                             const std::vector<Point> &path, double dt_s) {
   TrackingResult out;
   auto fail = [this, &out](const std::string &reason) {

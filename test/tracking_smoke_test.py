@@ -11,7 +11,7 @@ import yaml
 from nav_msgs.msg import Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import UInt8
-from control_manager.msg import VehicleState, VehicleCommand, MotionPlan, ObjectState, ControlStatus, TrackingStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, MotionPlan, ObjectState, ControlStatus, TrackingStatus
 from smoke_test import ROOT, LOG, Stack, observe, wait_for
 
 
@@ -19,16 +19,19 @@ def run():
     node = rclpy.create_node('tracking_fixture_test')
     values = observe(node)
     pubs = {name: node.create_publisher(cls, '/control/' + name, 10) for name, cls in [
-        ('vehicle_state', VehicleState), ('motion_plan', MotionPlan), ('object_state', ObjectState),
+        ('global_pose', GlobalPose), ('motion_state', MotionState), ('motion_plan', MotionPlan), ('object_state', ObjectState),
         ('manual_cmd', VehicleCommand), ('mode_request', UInt8), ('tracking_mode_request', UInt8)]}
-    active = dict(state=True, plan=True, state_age=0, plan_age=0, path_age=0,
+    active = dict(state=True, motion=True, speed_valid=True, motion_age=0, motion_frame='base_link',
+                  plan=True, state_age=0, plan_age=0, path_age=0,
                   localization=True, plan_valid=True, stop=False, path='normal', y=0.0,
                   state_y=-1.0, status_frame='map')
 
     def publish():
         stamp = node.get_clock().now().to_msg()
-        s = VehicleState(x_m=1., y_m=active['state_y'], yaw_rad=0., speed_mps=1.,
-                         localization_valid=active['localization'], speed_valid=True)
+        s = GlobalPose(x_m=1., y_m=active['state_y'], yaw_rad=0., valid=active['localization'])
+        m = MotionState(speed_mps=1., speed_valid=active['speed_valid'])
+        m.header.frame_id = active['motion_frame']; m.header.stamp = copy.deepcopy(stamp)
+        m.header.stamp.sec -= active['motion_age']
         s.header.frame_id = active['status_frame']; s.header.stamp = copy.deepcopy(stamp)
         s.header.stamp.sec -= active['state_age']
         path = PathMsg(); path.header.frame_id = 'map'; path.header.stamp = copy.deepcopy(stamp)
@@ -37,6 +40,7 @@ def run():
             p = PoseStamped(); p.header.frame_id = 'map'; p.pose.position.x = x
             p.pose.position.y = active['y']; p.pose.orientation.w = 1.
             path.poses.append(p)
+        if active['path'] == 'empty': path = PathMsg()
         if active['path'] == 'one': path.poses = path.poses[:1]
         if active['path'] == 'nan': path.poses[1].pose.position.y = float('nan')
         if active['path'] == 'inf': path.poses[1].pose.position.x = float('inf')
@@ -45,7 +49,9 @@ def run():
                           valid=active['plan_valid'], reason='TEST_ONLY')
         plan.header.stamp = copy.deepcopy(stamp); plan.header.frame_id = 'map'
         plan.header.stamp.sec -= active['plan_age']
-        if active['state']: pubs['vehicle_state'].publish(s)
+        if active['state']:
+            pubs['global_pose'].publish(s)
+        if active['motion']: pubs['motion_state'].publish(m)
         if active['plan']: pubs['motion_plan'].publish(plan)
         obj = ObjectState(valid=True, obstacle_valid=True, obstacle_detected=False)
         obj.header.frame_id = 'base_link'; obj.header.stamp = stamp
@@ -149,11 +155,13 @@ def run():
                  'MANUAL resets PID state while arbitration stays independent')
         pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
         wait_for(node, auto_pid, 'AUTO resumes after MANUAL')
-        for key, bad, good in [('state',False,True), ('plan',False,True),
+        for key, bad, good in [('state',False,True), ('motion',False,True),
+                               ('speed_valid',False,True), ('motion_age',10,0),
+                               ('motion_frame','other','base_link'), ('plan',False,True),
                                ('state_age',10,0), ('plan_age',10,0), ('path_age',10,0),
                                ('localization',False,True), ('plan_valid',False,True),
                                ('status_frame','other','map'), ('state_y',float('nan'),-1.),
-                               ('path','one','normal'), ('path','nan','normal'),
+                               ('path','empty','normal'), ('path','one','normal'), ('path','nan','normal'),
                                ('path','inf','normal'), ('path','wrong_frame','normal')]:
             active[key]=bad
             wait_for(node, invalid, 'invalid/stale input stops AUTO: '+key+'='+str(bad))
@@ -164,6 +172,10 @@ def run():
                  not values['tracking_status'].valid and values['auto_cmd'].valid and
                  values['auto_cmd'].target_brake and values['auto_cmd'].target_speed_mps==0.,
                  'MotionPlan stop keeps brake/speed policy and resets tracking')
+        active['path']='empty'
+        wait_for(node, lambda: selected(TrackingStatus.PID,'PLAN_STOP') and values['auto_cmd'].valid,
+                 'stop-only plan needs no nested path geometry')
+        active['path']='normal'
         active['stop']=False
         wait_reset('resume after stop has zero PID history')
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad>0.28,

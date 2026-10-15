@@ -2,7 +2,7 @@
 
 이 문서의 AFTER control_manager는 실제 구현입니다. AFTER RQT는 **설계안**이며 GUI 소스는 수정하지 않았습니다.
 Guidance는 path_planning_node가 소유하고, ControlMode는 기존 control_manager_node가 소유합니다.
-새 node는 추가하지 않았습니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
+0.3.0 상태 분리로 motion_state_estimator를 추가했습니다. 현재 계약은 README 및 state_split.md를 참고합니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
 
 ## BEFORE control_manager (변경 전 source)
 
@@ -35,39 +35,42 @@ flowchart TD
   SL --> VI[vehicle_interface: dry_run]
 ```
 
-## AFTER control_manager (구현)
+## AFTER control_manager (0.3.0 현재 구현)
 
 ```mermaid
 flowchart TD
-  S[GNSS / RGB / LiDAR / optional IMU·Depth] --> SI[sensor_interface]
-  SI --> E[Localization: GNSS_ONLY]
-  FUT[future GNSS_IMU / GNSS_IMU_WHEEL: 미구현] -.-> E
-  E --> V[VehicleState]
-  SI --> O[Object: RGB + LiDAR primary / optional Depth; detection TODO]
-  G[external Global Path] --> P[path_planning: Guidance owner]
-  L[external LaneState: algorithm TODO] -.-> P
-  V --> P
-  QG[guidance_mode_request: GPS_ONLY / LANE_ONLY / HYBRID] --> P
-  P --> GS[GuidanceStatus: requested / actual / source / validity / reason]
-  P --> R[ReferencePath: GPS_ONLY만 지원 / 미지원은 empty]
+  S[Raw sensors] --> SI[sensor_interface]
+  SI --> E[gnss_state_estimator: GNSS / GNSS_IMU TODO]
+  E --> GP[GlobalPose]
+  SI --> ME[motion_state_estimator: GNSS / WHEEL TODO]
+  ME --> MS[MotionState]
+  SI --> O[Object: LiDAR primary / RGB / optional Depth]
+  GP --> P[path_planning: GPS / LANE / HYBRID]
+  G[GlobalPath] --> P
+  L[external LaneState: direct input] --> P
+  QG[guidance_mode_request] --> P
+  P --> GS[GuidanceStatus]
+  P --> RP[ReferencePath]
+  RP --> MP[motion_planning]
+  MS --> MP
   O --> M[mission_based_limit]
-  R --> MP[motion_planning: empty 또는 stale path이면 stop]
-  V --> MP
   O --> MP
   M --> MP
-  MP --> MC[motion_control: Pure Pursuit]
-  V --> MC
-  MC --> A[AutoCommand]
-  U[ManualCommand] --> CM[Vehicle Control: IDLE / MANUAL / AUTO]
-  A --> CM
-  QC[mode_request] --> CM
-  CM --> ST[ControlStatus / FSM]
+  MP --> MC[motion_control: PID / PP]
+  MS --> MC
+  GP -->|existing global tracking dependency| MC
+  MC --> CM[control_manager: IDLE / MANUAL / AUTO]
+  U[ManualCommand] --> CM
   CM --> SL[safety_limit]
-  V --> SL
+  GS --> SL
+  MS --> SL
+  GP -->|GPS / HYBRID required| SL
   O --> SL
   ES[E-STOP] --> SL
   SL --> VI[vehicle_interface: dry_run]
 ```
+
+LANE의 planner dependency는 LaneState만입니다. Lane/Hybrid 알고리즘과 local-path controller adapter는 미구현입니다.
 
 ## 실제 GUI 조사 근거 (READ ONLY)
 
@@ -120,13 +123,13 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 │ Vehicle Control: [IDLE] [MANUAL] [AUTO]       │
 │ Actual control / FSM: -- / --               │
 ├─────────────────────────────────────────────┤
-│ Guidance: [GPS_ONLY] [LANE_ONLY*] [HYBRID*]   │
+│ Guidance: [GPS] [LANE*] [HYBRID*]   │
 │ * NOT_IMPLEMENTED: 요청 시 AUTO stop        │
 │ Requested: HYBRID     Actual: NONE          │
 │ Source: NONE   Valid: NO   Degraded: NO      │
 │ Reason: HYBRID_NOT_IMPLEMENTED              │
 ├─────────────────────────────────────────────┤
-│ Localization: GNSS_ONLY                     │
+│ Localization: GNSS / GNSS_IMU*                     │
 │ future fusion: NOT_IMPLEMENTED              │
 │ GNSS / Lane / Path: validity + age / --     │
 │ IMU / LiDAR / Depth: config + RX age / --   │
@@ -134,7 +137,7 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 ├─────────────────────────────────────────────┤
 │ Vehicle: x / y / yaw / speed / yaw rate: -- │
 │ Target: steer(rad) / speed(m/s) / brake: -- │
-│ Feedback: speed=VehicleState (valid일 때)   │
+│ Feedback: speed=MotionState (valid일 때)   │
 │ actual steering / brake: UNKNOWN           │
 ├─────────────────────────────────────────────┤
 │ Safety / Fault / Reason / status age       │
@@ -178,7 +181,8 @@ flowchart LR
   UI -->|guidance_mode_request UInt8| PP[path_planning]
   PP -->|guidance_status GuidanceStatus| UI
   CM -->|status ControlStatus| UI
-  VS[vehicle_state] --> UI
+  GP[global_pose] --> UI
+  MS[motion_state] --> UI
   LN[lane_state] --> UI
   RP[reference_path] --> UI
   OS[object_state] --> UI
@@ -192,8 +196,8 @@ flowchart LR
 ```
 
 기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.
-추가 계약은 `/control/guidance_mode_request` (UInt8, reliable volatile)와
-`/control/guidance_status` (GuidanceStatus, reliable volatile)뿐입니다.
+Guidance 계약은 `/control/guidance_mode_request` (UInt8, reliable volatile)와
+`/control/guidance_status` (GuidanceStatus, reliable volatile)입니다. 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
 요청 값은 0/1/2이며 NONE=255는 actual status sentinel입니다.
 GUI는 단순 요청/표시 source이고 정지 판정 권한은 node/safety에 있습니다.
 GUI가 없어도 source freshness 검사와 AUTO invalid guidance stop 경로는 유지됩니다.

@@ -13,15 +13,29 @@ class SensorInterfaceNode : public NodeBase {
       [publisher](typename T::ConstSharedPtr value) { publisher->publish(*value); }));
   }
 };
-class StateEstimatorNode : public NodeBase {
- public: StateEstimatorNode();
+class GnssStateEstimatorNode : public NodeBase {
+ public: GnssStateEstimatorNode();
  private:
   void update();
   std::shared_ptr<Input<nav_msgs::msg::Odometry>> gnss_;
-  rclcpp::Publisher<msg::VehicleState>::SharedPtr publisher_;
+  rclcpp::Publisher<msg::GlobalPose>::SharedPtr publisher_;
+  core::GlobalEstimationMode mode_;
+  std::shared_ptr<Input<sensor_msgs::msg::Imu>> imu_;
   std::string map_frame_, base_frame_;
-  double timeout_s_, max_position_std_m_, max_yaw_variance_, max_speed_variance_;
+  double timeout_s_, max_position_std_m_, max_yaw_variance_;
   bool reference_verified_;
+};
+class MotionStateEstimatorNode : public NodeBase {
+ public: MotionStateEstimatorNode();
+ private:
+  void update();
+  std::shared_ptr<Input<nav_msgs::msg::Odometry>> gnss_;
+  rclcpp::Publisher<msg::MotionState>::SharedPtr publisher_;
+  core::MotionEstimationMode mode_;
+  std::string map_frame_, base_frame_;
+  double timeout_s_, max_speed_variance_, wheelbase_m_;
+  // TODO: attach measured wheel speed/steering feedback inputs here ONLY after
+  // topic/type, physical units, calibration, frame and source-time contract agreement.
 };
 class ObjectManagerNode : public NodeBase {
  public: ObjectManagerNode();
@@ -33,13 +47,13 @@ class PathPlanningNode : public NodeBase {
  private:
   void update();
   std::shared_ptr<Input<nav_msgs::msg::Path>> global_;
-  std::shared_ptr<Input<msg::VehicleState>> state_;
+  std::shared_ptr<Input<msg::GlobalPose>> pose_;
   std::shared_ptr<Input<msg::LaneState>> lane_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_;
   rclcpp::Publisher<msg::GuidanceStatus>::SharedPtr guidance_publisher_;
-  std::uint8_t requested_guidance_{msg::GuidanceStatus::GPS_ONLY};
+  std::uint8_t requested_guidance_{msg::GuidanceStatus::GPS};
   std::string frame_;
-  double timeout_s_;
+  double timeout_s_, lane_min_confidence_;
   bool datum_verified_;
 };
 class MissionBasedLimitNode : public NodeBase {
@@ -56,13 +70,13 @@ class MotionPlanningNode : public NodeBase {
  public: MotionPlanningNode();
  private:
   void update();
-  std::shared_ptr<Input<msg::VehicleState>> state_;
+  std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<nav_msgs::msg::Path>> path_;
   std::shared_ptr<Input<msg::ObjectState>> objects_;
   std::shared_ptr<Input<msg::MissionLimit>> limit_;
   rclcpp::Publisher<msg::MotionPlan>::SharedPtr publisher_;
   double timeout_s_, cruise_speed_mps_;
-  std::string frame_;
+  std::string frame_, base_frame_;
 };
 class MotionControlNode : public NodeBase {
  public: MotionControlNode();
@@ -72,7 +86,8 @@ class MotionControlNode : public NodeBase {
   std::unique_ptr<core::TrackingController> tracking_;
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
-  std::shared_ptr<Input<msg::VehicleState>> state_;
+  std::shared_ptr<Input<msg::GlobalPose>> pose_;
+  std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<msg::MotionPlan>> plan_;
   std::shared_ptr<Input<msg::ControlStatus>> control_status_;
   rclcpp::Publisher<msg::VehicleCommand>::SharedPtr publisher_;
@@ -85,7 +100,9 @@ class SafetyLimitNode : public NodeBase {
  private:
   void update();
   core::SafetyConfig config_;
-  std::shared_ptr<Input<msg::VehicleState>> state_;
+  std::shared_ptr<Input<msg::GuidanceStatus>> guidance_;
+  std::shared_ptr<Input<msg::GlobalPose>> pose_;
+  std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
   std::shared_ptr<Input<msg::ObjectState>> objects_;
   rclcpp::Publisher<msg::VehicleCommand>::SharedPtr publisher_;
