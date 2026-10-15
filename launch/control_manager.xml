@@ -34,11 +34,7 @@
     <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>
-  <node pkg="control_manager" exec="control_manager_node" name="control_manager" namespace="/control" output="screen">
-    <param from="$(var vehicle_file)"/>
-    <param from="$(var params_file)"/>
-  </node>
-  <node pkg="control_manager" exec="safety_limit_node" name="safety_limit" namespace="/control" output="screen">
+  <node pkg="control_manager" exec="control_selector_node" name="control_selector" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var params_file)"/>
   </node>

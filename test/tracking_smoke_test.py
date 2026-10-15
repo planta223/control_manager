@@ -77,14 +77,14 @@ def run():
     config['/control/motion_control']['ros__parameters']['pid'].update({
         'enabled': True, 'kp_lateral': 0.2, 'ki_lateral': 0.3, 'kd_lateral': 0.02,
         'kp_heading': 0.4, 'integral_limit_m_s': 0.5, 'max_steering_rad': 0.5})
-    config['/control/safety_limit']['ros__parameters'].update({
+    config['/control/vehicle_interface']['ros__parameters'].update({
         'operating_limits_verified': True, 'max_steer_rad': 0.6,
-        'max_speed_mps': 2.0, 'emergency_distance_m': 1.0})
+        'max_speed_mps': 2.0, 'command_timeout_s': 0.5})
     cfg = LOG/'tracking_fixture.yaml'; cfg.write_text(yaml.safe_dump(config))
     xml = ET.parse(ROOT/'launch/control_manager.xml')
     for elem in list(xml.getroot()):
         if elem.tag == 'node' and elem.attrib['name'] not in {
-                'motion_control','control_manager','safety_limit','vehicle_interface'}:
+                'motion_control','control_selector','vehicle_interface'}:
             xml.getroot().remove(elem)
     launch = LOG/'tracking_fixture.xml'; xml.write(launch, encoding='unicode')
     values.clear()
@@ -97,13 +97,13 @@ def run():
     def auto_pid():
         return (selected(TrackingStatus.PID) and values['tracking_status'].valid and
                 values['tracking_status'].actual_mode == TrackingStatus.PID and
-                'final_cmd' in values and values['final_cmd'].valid and
-                values['final_cmd'].target_speed_mps == 1.)
+                'protected_cmd' in values and values['protected_cmd'].valid and
+                values['protected_cmd'].target_speed_mps == 1.)
 
     def invalid():
         return ('auto_cmd' in values and not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
                 not values['tracking_status'].valid and values['tracking_status'].actual_mode == TrackingStatus.NONE and
-                'final_cmd' in values and not values['final_cmd'].valid and values['final_cmd'].target_brake)
+                'protected_cmd' in values and not values['protected_cmd'].valid and values['protected_cmd'].target_brake)
 
     def wait_reset(label, expected=0.2):
         wait_for(node, lambda: auto_pid() and abs(values['auto_cmd'].target_steer_rad-expected)<1e-6, label)
@@ -138,7 +138,7 @@ def run():
             assert values['status'].mode == ControlStatus.AUTO
             pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
             wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
-                     values['final_cmd'].valid and values['final_cmd'].target_speed_mps==0.4,
+                     values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==0.4,
                      'invalid tracking does not select or replace MANUAL')
             assert selected(mode,reason)
             pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))

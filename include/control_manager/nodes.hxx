@@ -107,26 +107,14 @@ class MotionControlNode : public NodeBase {
   std::string frame_, base_frame_;
   double timeout_s_;
 };
-class SafetyLimitNode : public NodeBase {
- public: SafetyLimitNode();
- private:
-  void update();
-  core::SafetyConfig config_;
-  std::shared_ptr<Input<msg::GuidanceStatus>> guidance_;
-  std::shared_ptr<Input<msg::GlobalPose>> pose_;
-  std::shared_ptr<Input<msg::MotionState>> motion_;
-  std::shared_ptr<Input<msg::VehicleCommand>> selected_;
-  std::shared_ptr<Input<msg::ObjectState>> objects_;
-  rclcpp::Publisher<msg::VehicleCommand>::SharedPtr publisher_;
-  bool estop_{false}, require_obstacle_state_;
-  double object_timeout_s_;
-  std::string frame_, map_frame_;
-};
 class VehicleInterfaceNode : public NodeBase {
  public: VehicleInterfaceNode();
  private:
   void update();
-  std::shared_ptr<Input<msg::VehicleCommand>> final_;
-  double timeout_s_;
+  core::ActuatorProtectionConfig config_;
+  std::shared_ptr<Input<msg::VehicleCommand>> selected_;
+  rclcpp::Publisher<msg::VehicleInterfaceStatus>::SharedPtr status_publisher_;
+  std::string frame_;
+  bool estop_{false};
 };
 }  // namespace control_manager

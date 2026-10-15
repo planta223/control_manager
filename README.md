@@ -35,9 +35,9 @@ External GNSS / IMU / motor·steering feedback / Lane AI / RGB / LiDAR / Depth
                                     |
                                AutoCommand + ManualCommand
                                     |
-                      control_manager [IDLE/MANUAL/AUTO]
+                      control_selector [IDLE/MANUAL/AUTO]
                                     |
-                      selected_cmd → safety_limit → final_cmd → dry_run
+                      selected_cmd → vehicle_interface (protection / dry_run)
 
 * Global/map tracking dependency remains; local Lane tracking adapter is NOT_IMPLEMENTED.
 ```
@@ -48,7 +48,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 ## Node별 subscribe / publish
 
 표의 제어 topic은 `/control/` 접두사입니다. 원본 topic/config default는 `ros_support.hxx`와 YAML에 모았습니다.
-기존 외부 node는 launch하지 않습니다. launch는 아래 **11개 executable**만 시작합니다.
+기존 외부 node는 launch하지 않습니다. launch는 아래 **10개 executable**만 시작합니다.
 
 | Executable | Subscribe | Publish / 책임 |
 |---|---|---|
@@ -60,9 +60,8 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | mission_based_limit_node | object_state | mission_limit; opt-in speed cap/신호 정책 |
 | motion_planning_node | reference_path, motion_state, object_state, mission_limit | motion_plan; 경로와 제한 속도, obstacle stop |
 | motion_control_node | global_pose, motion_state, motion_plan, status, tracking_mode_request | auto_cmd, tracking_status; PID/PP, speed pass-through |
-| control_manager_node | auto_cmd, manual_cmd, final_cmd, mode_request | selected_cmd, status; arbitration/FSM |
-| safety_limit_node | global_pose, motion_state, guidance_status, selected_cmd, object_state, estop | final_cmd; 최종 위험/시스템 제한 |
-| vehicle_interface_node | final_cmd | 로그/timeout 감시; actuator 송신 없음 |
+| control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
+| vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
 
 ## Sensor ingress 경계
 
@@ -102,7 +101,7 @@ actual steering을 표현할 메시지로 재사용하지 않았습니다. 외�
 그때 실제 adapter lifecycle/timeout 처리로 교체해야 합니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
-mode/guidance/tracking request는 각 owner node, ManualCommand는 manager, E-STOP은 safety로 직접 전달합니다.
+mode/guidance/tracking request는 각 owner node, ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
 어느 것도 ingress나 estimator를 경유하지 않습니다.
 
 ## Message / 시간 계약
@@ -134,6 +133,8 @@ mode/guidance/tracking request는 각 owner node, ManualCommand는 manager, E-ST
   비기하학적 MissionLimit의 기존 map Header 계약은 유지합니다.
 - **VehicleCommand**: 좌측 양수 `target_steer_rad`, 전진 `target_speed_mps`, bool brake, valid, reason.
   내부 물리 단위이며 motor raw/normalized joystick/실제 feedback과 다릅니다.
+- **VehicleInterfaceStatus**: Header, dry_run, protected_command. 최종 보호 결과의 진단 전용이며
+  실제 feedback이나 actuator 입력이 아닙니다. protected_command는 VehicleCommand 타입을 재사용합니다.
 - **GuidanceStatus**: requested_mode / actual_mode / active_source / valid / degraded / reason.
   0=GPS, 1=LANE, 2=HYBRID, actual NONE=255. 미구현이면 actual=NONE, valid=false, degraded=false.
 - **ControlStatus / TrackingStatus**: 기존 모드/FSM과 Tracking 요청·실제 상태 계약 유지.
@@ -151,7 +152,7 @@ GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS Vehicl
 
 | 축 | 값 | 소유 node |
 |---|---|---|
-| Vehicle Control | IDLE / MANUAL / AUTO | control_manager |
+| Vehicle Control | IDLE / MANUAL / AUTO | control_selector |
 | Guidance | GPS / LANE / HYBRID | path_planning |
 | GlobalPose source (pose_mode) | GNSS / GNSS_IMU / NONE | global_state_estimator |
 | Motion source (motion_mode) | GNSS / GNSS_IMU / WHEEL / NONE | global_state_estimator |
@@ -218,7 +219,7 @@ Status 및 Path는 기본 20 Hz 생성 시각으로 발행합니다. GUI는 requ
 ### Downstream / safety / architecture blocker
 
 Motion planning은 **GlobalPose를 구독하지 않습니다**. ReferencePath + 유효 MotionState + MissionLimit + ObjectState로
-계획합니다. mission_based_limit는 정상 주행 속도/신호 정책이고, safety_limit는 선택 명령 이후 최종 제한입니다.
+계획합니다. mission_based_limit는 정상 주행 속도/신호 정책이고, vehicle_interface는 선택 명령 이후 actuator-facing 보호를 담당합니다.
 Obstacle detected이면 motion planning은 회피 대신 정지합니다. speed PID는 없습니다.
 
 **현재 PID/PP는 map pose와 map 경로가 필요합니다.** local/base_link ReferencePath가 오면
@@ -226,21 +227,35 @@ Obstacle detected이면 motion planning은 회피 대신 정지합니다. speed 
 LANE planner의 No-GNSS dependency 분리는 완료됐지만 No-GNSS end-to-end 주행은 아직 구현되지 않았습니다.
 향후 local reference frame/시간 기준과 controller tracking-frame adapter가 합의되어야 합니다.
 
-Safety는 MotionState speed validity/freshness/finite를 모든 모드에서 확인합니다.
-planner의 **신선한 GuidanceStatus.requested_mode=LANE**일 때 GlobalPose를 요구하지 않습니다.
-actual=NONE이어도 LANE 요청의 dependency 정책은 유지됩니다. 미구현 LANE의 AUTO 정지는 empty Path →
-invalid MotionPlan → invalid AutoCommand로 처리합니다. invalid guidance가 MANUAL source를 대체하지 않습니다.
-GPS/HYBRID 및 status missing/stale/unknown일 때는 보수적으로 GlobalPose를 요구합니다.
-이 정책은 MANUAL에도 적용됩니다. Guidance 전환은 callback/timer/timeout 단위이며 원자적 전환 보장은 아닙니다.
+상태 validity/freshness 검사는 해당 planning/control node에서 담당합니다. 후단 selector/interface는
+GlobalPose, MotionState, GuidanceStatus, ObjectState를 구독하지 않습니다. AUTO는 invalid/stale planning 입력이
+invalid MotionPlan → invalid AutoCommand → selector stop으로 이어집니다. MANUAL에는 localization/obstacle gate를 적용하지 않습니다.
+장애물 검출/관측 만료에 따른 AUTO 정지는 기존 motion_planning에서 처리하며 추가 판단 알고리즘은 없습니다.
 
-기존 E-STOP, command timeout, object freshness, invalid/NaN command, 범위 초과, 미확정 한계 차단은 유지합니다.
-`require_obstacle_state=true` 기본값이며 최종 범위 초과는 clamp 대신 stop입니다. E-STOP true는 explicit false까지 유지합니다.
+control_selector는 mode별 source 선택, source frame/validity/timeout 검사, IDLE 정지를 담당합니다.
+vehicle_interface는 E-STOP, 선택 명령 수신/source timeout, non-finite/음수 속도/제동·속도 모순,
+미검증 운용 한계와 범위 초과를 검사합니다. 범위 초과는 기존처럼 clamp 대신 stop입니다.
+E-STOP true는 explicit false까지 유지됩니다. vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
+최종 보호 결과는 내부 값이며 actuator backend는 미구현입니다. `/control/vehicle_interface/status`는
+`VehicleInterfaceStatus` 진단 전용으로 dry_run과 protected_command를 표시합니다. 실제 feedback이 아닙니다.
+control_selector는 이 진단을 FSM에만 사용하고 source 선택에는 사용하지 않습니다. 기존 final-protection 기반
+FAULT/READY/DRIVING 관찰 및 PID reset 계약을 유지합니다. 진단 중단은 FSM FAULT이며 actuator 입력 경로가 되지 않습니다.
+
 물리 E-STOP/재시작 latch/인증/하드웨어 watchdog은 미구현입니다. 안전 범위 및 PID gain은 모두 기존 값 그대로입니다.
 
 AUTO는 auto_cmd만, MANUAL은 manual_cmd만 선택합니다. invalid ControlMode 요청은 IDLE입니다.
 FSM INIT/READY/DRIVING/STOPPED/FAULT는 그대로이며 DRIVING은 명령 단계이지 actual motion feedback이 아닙니다.
 RGB는 traffic light/sign/Lane 입력용이며 실제 recognition은 없습니다. IMU/Depth는 config opt-in이고 runtime toggle은 없습니다.
 Pure Pursuit는 GNSS 패키지 책임이 아니라 Motion Control 내부 lateral controller입니다.
+
+## Command path 단순화
+
+현재 변경 및 상세 책임표는 [Command path 보고서](doc/command_path.md)를 참조합니다.
+패키지 이름은 control_manager이며 arbitration node는 control_selector입니다.
+SelectedCommand는 기존 VehicleCommand 의미와 `/control/selected_cmd` 토픽을 유지합니다.
+최종 command 중계 토픽 없이 vehicle_interface 안에서 보호 후 dry-run을 수행합니다.
+검증 결과: Humble 격리 빌드 성공, GTest 36개 + CTest 4개 통과,
+6개 smoke suite의 350개 확인 항목 통과. Planning/Control/PID/PP 알고리즘 소스는 동일합니다.
 
 ## Breaking changes / 다음 구현 경계
 
@@ -258,7 +273,7 @@ Pure Pursuit는 GNSS 패키지 책임이 아니라 Motion Control 내부 lateral
 
 ## Tracking Controller (2026-10-15)
 
-11-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
+10-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
 Guidance(GPS/LANE/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
 `GlobalPose.x_m/y_m/yaw_rad`, `MotionState.speed_mps` 및 각각의 stamp/validity와
 `MotionPlan.reference_path`의 `poses[].pose.position.x/y`, frame/stamp를 그대로 사용합니다.
@@ -312,7 +327,7 @@ PID 이력을 지우고 **P + heading P preview만** 계산합니다. 이때 rea
 AUTO가 READY/DRIVING/STOPPED이고 status도 신선할 때만 I/D 이력을 유지합니다.
 이 구독은 ControlMode를 바꾸거나 safety 권한을 이전하지 않습니다. FAULT의 원인인 final command를
 기다리며 모든 AUTO 출력을 막는 순환 대기 없이 기존 안전 조건이 회복될 수 있도록 preview는 허용합니다.
-preview AutoCommand도 실제로 선택할지는 기존 manager/safety가 결정합니다.
+preview AutoCommand도 실제로 선택할지는 control_selector/vehicle_interface가 결정합니다.
 
 GlobalPose/MotionState/MotionPlan은 source stamp와 수신 timeout을 검사하고, 주행 계산에서는 nested
 reference_path.header.stamp도 검사합니다. 잘못되거나 만료된 경로로 유효 steering을 만들지 않습니다.
@@ -392,7 +407,7 @@ ros2 launch control_manager control_manager.xml
 ```
 
 하드웨어 없는 검증은 기존 실행 중인 ROS 시스템과 분리된 ROS_DOMAIN_ID / localhost 환경에서 수행합니다.
-`test/smoke_test.py`는 11-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
+`test/smoke_test.py`는 10-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
 GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/timeout을 검증합니다.
 테스트 fixture의 센서/명령/limits는 **테스트 전용**이며 runtime perception이 가짜 관측을 생성하지 않습니다.
 실행 절차 및 결과는 아래 검증 기록을 참고합니다.
@@ -405,8 +420,8 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 - gnss_tools 내부 정책은 guidance의 UDP 소유와 custom msg 금지를 규정합니다.
   이 신규 package는 요청한 정책대로 custom msg와 별도 actuator ownership 경계를 설계했습니다.
   외부 AGENTS/코드/설정은 변경하지 않았습니다.
-- 기존 teleop 정책은 localization gate를 제외하지만 신규 최종 safety는 MANUAL에도 Guidance별 GlobalPose 조건을 적용합니다.
-  실내 수동 주행 예외 정책은 팀 결정 사항이며 여기서 외부 정책을 수정하지 않습니다.
+- MANUAL은 명령 유효성/timeout과 actuator 보호를 적용하며 localization/object 의미 검사는 하지 않습니다.
+  해당 자동주행 조건은 planning/control에서만 검사합니다.
 - 기존 wheelbase 기본 1.04 m 등은 이 패키지에 복사하지 않고 사용자 실측 1.328 m를 사용합니다.
   GNSS lever arm 수치와 LiDAR x=0.559 m를 혼동해서 적용하지 않습니다.
 - manual_control의 `cmd` Float32MultiArray, keyboard_control의 steering_cmd/speed_cmd는
@@ -424,7 +439,7 @@ Depth 보조, GNSS+IMU fusion/EKF, map loader/mission section rules, obstacle av
 vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
 실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
 
-## LanePose 계약 변경 검증 (2026-10-15)
+## LanePose 계약 변경 검증 (2026-10-15, 이전 작업)
 
 - 최종 상태 메시지: **GlobalPose / LanePose / MotionState**.
 - `External Lane AI → sensor_interface → lane_observation → lane_state_estimator → lane_pose → path_planning`.
@@ -510,6 +525,7 @@ python3 -B src/control_manager/test/tracking_smoke_test.py
 python3 -B src/control_manager/test/state_split_smoke_test.py
 python3 -B src/control_manager/test/ingress_smoke_test.py
 python3 -B src/control_manager/test/estimator_modes_smoke_test.py
+python3 -B src/control_manager/test/command_path_smoke_test.py
 ```
 
 결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,

@@ -6,7 +6,6 @@
     base_frame: base_link
     state_timeout_s: 0.5
     command_timeout_s: 0.5
-    object_timeout_s: 0.5
     input_timeout_s: 0.5
     imu_enabled: false
     depth_enabled: false
@@ -37,7 +36,7 @@
       auto_cmd: /control/auto_cmd
       manual_cmd: /control/manual_cmd
       selected_cmd: /control/selected_cmd
-      final_cmd: /control/final_cmd
+      vehicle_interface_status: /control/vehicle_interface/status
       status: /control/status
       mode_request: /control/mode_request
       guidance_mode_request: /control/guidance_mode_request
@@ -97,17 +96,14 @@
     lookahead_max_m: 6.0             # TUNE
     lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
     goal_tolerance_m: 0.3            # TUNE
-/control/control_manager:
+/control/control_selector:
   ros__parameters:
     mode: IDLE                      # Initial mode; mode_request changes runtime mode
-/control/safety_limit:
-  ros__parameters:
-    operating_limits_verified: false
-    max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving
-    max_speed_mps: 0.0               # TODO NOT_VERIFIED; zero disables driving
-    emergency_distance_m: 0.0        # TODO NOT_VERIFIED; detected obstacle => stop
-    require_obstacle_state: true    # Unknown obstacle state blocks AUTO AND MANUAL
-    # Steering road-wheel calibration, motor raw/mps and brake model are NOT_VERIFIED.
 /control/vehicle_interface:
   ros__parameters:
     dry_run: true                   # false rejected: no UDP backend implemented
+    operating_limits_verified: false
+    max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving
+    max_speed_mps: 0.0               # TODO NOT_VERIFIED; zero disables driving
+    # Out-of-range commands STOP, preserving the existing policy (no saturation).
+    # Steering road-wheel calibration, motor raw/mps and brake model are NOT_VERIFIED.

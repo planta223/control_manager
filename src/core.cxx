@@ -15,29 +15,17 @@ Command selectCommand(ControlMode mode, const Command &manual, const Command &au
   if (mode == ControlMode::AUTO) return automatic;
   return stop(now, "IDLE", true);
 }
-Command applySafety(const Command &c, const GlobalPose &p, const MotionState &m,
-                    bool require_global_pose, const ObstacleObservation &o,
-                    bool estop, std::int64_t now, const SafetyConfig &cfg) {
+Command protectActuatorCommand(const Command &c, bool estop,
+                               std::int64_t now, const ActuatorProtectionConfig &cfg) {
   if (estop) return stop(now, "E_STOP");
   if (!c.valid || !fresh(c.timestamp_ns, now, cfg.command_timeout_s))
     return stop(now, "INVALID_OR_STALE_COMMAND");
   if (!std::isfinite(c.target_steer_rad) || !std::isfinite(c.target_speed_mps) ||
       c.target_speed_mps < 0.0 || (c.target_brake && c.target_speed_mps != 0.0))
     return stop(now, "INVALID_COMMAND_VALUES");
-  if (require_global_pose && (!p.valid || !fresh(p.timestamp_ns, now, cfg.state_timeout_s) ||
-      !std::isfinite(p.x_m) || !std::isfinite(p.y_m) || !std::isfinite(p.yaw_rad)))
-    return stop(now, "INVALID_OR_STALE_GLOBAL_POSE");
-  if (!m.speed_valid || !fresh(m.timestamp_ns, now, cfg.state_timeout_s) ||
-      !std::isfinite(m.speed_mps)) return stop(now, "INVALID_OR_STALE_MOTION_STATE");
   if (!cfg.operating_limits_verified || !std::isfinite(cfg.max_steer_rad) ||
       !std::isfinite(cfg.max_speed_mps) || cfg.max_steer_rad <= 0.0 || cfg.max_speed_mps <= 0.0)
     return stop(now, "OPERATING_LIMITS_NOT_VERIFIED");
-  if (o.valid && o.detected) {
-    if (!std::isfinite(o.distance_m) || o.distance_m < 0.0 ||
-        !std::isfinite(cfg.emergency_distance_m) ||
-        cfg.emergency_distance_m <= 0.0 || o.distance_m <= cfg.emergency_distance_m)
-      return stop(now, "OBSTACLE_EMERGENCY_OR_UNSET_DISTANCE");
-  }
   if (std::abs(c.target_steer_rad) > cfg.max_steer_rad || c.target_speed_mps > cfg.max_speed_mps)
     return stop(now, "COMMAND_OUT_OF_RANGE");
   return c;  // Preserve source time; periodic forwarding must not renew a dead source.

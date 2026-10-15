@@ -1,5 +1,7 @@
 # Estimator 통합 결과 (0.5.0)
 
+검증 수치는 통합 당시 기록입니다. 현재 후반 command path는 [command_path.md](command_path.md)를 따릅니다.
+
 ## 1. 최종 명칭과 책임
 
 executable / ROS node / YAML section의 기준 이름은 **global_state_estimator**, **lane_state_estimator**입니다.
@@ -32,7 +34,7 @@ GlobalPath -----------------|--> path_planning
                             |     MotionPlan
                             +--> motion_control <-- GlobalPose (existing map tracking)
                                       |
-                             AUTO/MANUAL → safety → dry_run
+                             control_selector → vehicle_interface (protection / dry_run)
 ```
 
 Map/Path는 planning reference입니다. mode request, ManualCommand, E-STOP은 command/event입니다.
@@ -111,8 +113,8 @@ GNSS absence가 실패 이유가 아니며 유효 feedback fixture를 넣어도 
 | /control/sensors/gnss_odom | sensor_interface | global_state_estimator (선택 모드에 따라) |
 | /control/sensors/imu | sensor_interface (optional) | global_state_estimator (GNSS_IMU 선택 시) |
 | /control/vehicle_feedback | sensor_interface (현재 unavailable) | global_state_estimator (WHEEL) |
-| /control/global_pose | global_state_estimator | planning / tracking / mode별 safety |
-| /control/motion_state | global_state_estimator | motion planning / tracking / safety |
+| /control/global_pose | global_state_estimator | planning / tracking |
+| /control/motion_state | global_state_estimator | motion planning / tracking |
 | /control/lane_observation | sensor_interface | lane_state_estimator |
 | /control/lane_pose | lane_state_estimator | path_planning |
 

@@ -219,7 +219,7 @@ def downstream():
     timer = node.create_timer(.05, publish)
     stacks = [start('motion_planning', 'split_motion_planning', 'cruise_speed_mps:=0.5'),
               start('motion_control', 'split_local_path_blocker', 'tracking_mode:=PURE_PURSUIT'),
-              start('safety_limit', 'split_safety', 'operating_limits_verified:=true',
+              start('vehicle_interface', 'split_safety', 'operating_limits_verified:=true',
                     'max_steer_rad:=0.5', 'max_speed_mps:=1.0')]
     try:
         wait_for(node, lambda: 'motion_plan' in values and values['motion_plan'].valid and
@@ -228,27 +228,22 @@ def downstream():
         wait_for(node, lambda: 'auto_cmd' in values and not values['auto_cmd'].valid and
                  values['auto_cmd'].reason == 'LOCAL_REFERENCE_PATH_NOT_SUPPORTED',
                  'legacy controller explicitly rejects local path, never invents zero pose')
-        wait_for(node, lambda: 'final_cmd' in values and values['final_cmd'].valid,
-                 'LANE safety does not require absent GlobalPose (isolated selected-command fixture)')
+        wait_for(node, lambda: 'protected_cmd' in values and values['protected_cmd'].valid,
+                 'isolated selected command needs no GlobalPose or Guidance at actuator boundary')
         state['speed_valid'] = False
-        wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_MOTION_STATE' and
-                 not values['motion_plan'].valid, 'LANE always requires valid MotionState')
+        wait_for(node, lambda: not values['motion_plan'].valid and values['protected_cmd'].valid,
+                 'invalid MotionState blocks planning; no duplicate actuator state gate')
         state['speed_valid'] = True
-        wait_for(node, lambda: values['final_cmd'].valid, 'restore valid MotionState')
+        wait_for(node, lambda: values['motion_plan'].valid, 'restore valid MotionState')
         state['motion'] = False
-        wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_MOTION_STATE' and
-                 not values['motion_plan'].valid, 'LANE MotionState receipt timeout stops motion')
+        wait_for(node, lambda: not values['motion_plan'].valid and values['protected_cmd'].valid,
+                 'MotionState timeout blocks planning')
         state['motion'] = True
-        wait_for(node, lambda: values['final_cmd'].valid, 'restore fresh MotionState')
-        for mode in [GuidanceStatus.GPS, GuidanceStatus.HYBRID, 255]:
-            state['mode'] = mode
-            wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_GLOBAL_POSE',
-                     'global dependency retained for GPS/HYBRID/unknown: ' + str(mode))
-            state['mode'] = GuidanceStatus.LANE
-            wait_for(node, lambda: values['final_cmd'].valid, 'LANE restores independent motion safety')
-        state['guidance'] = False
-        wait_for(node, lambda: values['final_cmd'].reason == 'INVALID_OR_STALE_GLOBAL_POSE',
-                 'stale GuidanceStatus cannot retain no-global safety policy')
+        wait_for(node, lambda: values['motion_plan'].valid, 'restore fresh MotionState')
+        for topic in ['global_pose','motion_state','guidance_status','object_state']:
+            assert all(info.node_name!='vehicle_interface' for info in
+                       node.get_subscriptions_info_by_topic('/control/'+topic))
+        print('PASS: actuator boundary has no state/guidance/object subscriptions',flush=True)
     finally:
         for stack in stacks: stack.close()
         node.destroy_timer(timer); node.destroy_node()

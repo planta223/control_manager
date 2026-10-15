@@ -19,6 +19,7 @@
 #include "control_manager/msg/global_pose.hpp"
 #include "control_manager/msg/motion_state.hpp"
 #include "control_manager/msg/vehicle_feedback.hpp"
+#include "control_manager/msg/vehicle_interface_status.hpp"
 #include "control_manager/msg/lane_pose.hpp"
 #include "control_manager/msg/object_state.hpp"
 #include "control_manager/msg/mission_limit.hpp"
@@ -44,7 +45,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"reference_path", "/control/reference_path"}, {"mission_limit", "/control/mission_limit"},
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
-  {"final_cmd", "/control/final_cmd"}, {"status", "/control/status"},
+  {"vehicle_interface_status", "/control/vehicle_interface/status"}, {"status", "/control/status"},
   {"mode_request", "/control/mode_request"}, {"estop", "/control/estop"},
   {"guidance_mode_request", "/control/guidance_mode_request"},
   {"guidance_status", "/control/guidance_status"},

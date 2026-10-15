@@ -16,7 +16,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
-  "msg/GuidanceStatus.msg" "msg/TrackingStatus.msg" "msg/VehicleFeedback.msg"
+  "msg/GuidanceStatus.msg" "msg/TrackingStatus.msg" "msg/VehicleFeedback.msg" "msg/VehicleInterfaceStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
@@ -40,8 +40,7 @@ add_control_node(object_manager_node ObjectManagerNode)
 add_control_node(mission_based_limit_node MissionBasedLimitNode)
 add_control_node(motion_planning_node MotionPlanningNode)
 add_control_node(motion_control_node MotionControlNode)
-add_control_node(control_manager_node ControlManagerNode)
-add_control_node(safety_limit_node SafetyLimitNode)
+add_control_node(control_selector_node ControlSelectorNode)
 add_control_node(vehicle_interface_node VehicleInterfaceNode)
 
 if(BUILD_TESTING)
@@ -59,7 +58,7 @@ install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
-install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc/estimators.md DESTINATION share/${PROJECT_NAME}/doc)
+install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc/estimators.md doc/command_path.md DESTINATION share/${PROJECT_NAME}/doc)
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
 ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
 ament_package()

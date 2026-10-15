@@ -1,12 +1,12 @@
 # Guidance Mode / GUI 설계 기록
 
 이 문서의 AFTER control_manager는 실제 구현입니다. AFTER RQT는 **설계안**이며 GUI 소스는 수정하지 않았습니다.
-Guidance는 path_planning_node가 소유하고, ControlMode는 기존 control_manager_node가 소유합니다.
+Guidance는 path_planning_node가 소유하고, ControlMode는 control_selector_node가 소유합니다.
 현재 상태 출력은 global_state_estimator와 lane_state_estimator가 맡습니다. README 및 estimators.md를 참고합니다. HYBRID는 GPS+Lane guidance이며 localization fusion과 다릅니다.
 
 ## BEFORE control_manager (변경 전 source)
 
-아래는 당시 흐름을 보존한 그림이며, Lane 메시지 표기만 현재 LanePose 명칭으로 갱신했습니다.
+아래는 초기 센서/planning 구조를 설명하는 그림이며, Lane 메시지와 후반 command path는 현재 명칭/구조로 갱신했습니다.
 
 ```mermaid
 flowchart TD
@@ -26,15 +26,12 @@ flowchart TD
   MP --> MC[motion_control: Pure Pursuit]
   V --> MC
   MC --> A[AutoCommand]
-  U[ManualCommand] --> CM[control_manager: IDLE / MANUAL / AUTO]
+  U[ManualCommand] --> CM[control_selector: IDLE / MANUAL / AUTO]
   A --> CM
   Q[mode_request] --> CM
   CM --> ST[ControlStatus / FSM]
-  CM --> SL[safety_limit]
-  V --> SL
-  O --> SL
-  ES[E-STOP] --> SL
-  SL --> VI[vehicle_interface: dry_run]
+  CM -->|selected_cmd| VI[vehicle_interface: protection / dry_run]
+  ES[E-STOP] --> VI
 ```
 
 ## AFTER control_manager (상태 분리 + ingress 현재 구현)
@@ -67,15 +64,11 @@ flowchart TD
   MP --> MC[motion_control: PID / PP]
   MS --> MC
   GP -->|existing global tracking dependency| MC
-  MC --> CM[control_manager: IDLE / MANUAL / AUTO]
+  MC --> CM[control_selector: IDLE / MANUAL / AUTO]
   U[ManualCommand] --> CM
-  CM --> SL[safety_limit]
-  GS --> SL
-  MS --> SL
-  GP -->|GPS / HYBRID required| SL
-  O --> SL
-  ES[E-STOP] --> SL
-  SL --> VI[vehicle_interface: dry_run]
+  CM -->|selected_cmd| VI[vehicle_interface: protection / dry_run]
+  ES[E-STOP] --> VI
+  VI -.->|diagnostic status for FSM| CM
 ```
 
 LANE의 planner dependency는 LanePose만입니다. Lane/Hybrid 알고리즘과 local-path controller adapter는 미구현입니다.
@@ -185,7 +178,7 @@ Web Dashboard는 control_manager의 Guidance 및 arbitration 요청 UI를 갖고
 
 ```mermaid
 flowchart LR
-  UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_manager]
+  UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_selector]
   UI -->|guidance_mode_request UInt8| PP[path_planning]
   PP -->|guidance_status GuidanceStatus| UI
   CM -->|status ControlStatus| UI
@@ -194,13 +187,12 @@ flowchart LR
   LN[lane_pose] --> UI
   RP[reference_path] --> UI
   OS[object_state] --> UI
-  FC[final_cmd: 목표 명령과 reason] --> UI
+  VS[vehicle_interface/status: 보호 결과 진단] --> UI
   RX[sensors topics: 수신 age] --> UI
   CFG[시작 config: optional sensor 활성 설정] -.-> UI
-  UI -->|estop Bool: true 요청| SL[safety_limit]
-  CM -->|selected_cmd| SL
-  SL --> FC
-  FC --> VI[vehicle_interface dry_run]
+  UI -->|estop Bool: true 요청| VI[vehicle_interface dry_run]
+  CM -->|selected_cmd| VI
+  VI --> VS
 ```
 
 기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.

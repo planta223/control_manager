@@ -1,6 +1,7 @@
 # Sensor ingress 경계 / 이전 검증 기록
 
 현재 estimator 통합 사항은 [estimators.md](estimators.md)가 기준입니다.
+후반 command path의 현재 책임과 연결은 [command_path.md](command_path.md)를 참조합니다.
 
 ## 1. 기존 역할
 
@@ -80,8 +81,8 @@ Future hardware callbacks → sensor_interface::publishFeedback → 내부 Vehic
 
 - Global Map/Path: reference/planning data → planner.
 - Control/Guidance/Tracking request: operator command → 각 owner node.
-- ManualCommand: command path → control_manager.
-- E-STOP: safety event → safety_limit.
+- ManualCommand: command path → control_selector.
+- E-STOP: safety event → vehicle_interface.
 
 ## 10. Custom message
 

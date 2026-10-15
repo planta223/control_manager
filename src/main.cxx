@@ -2,7 +2,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include "control_manager/nodes.hxx"
-#include "control_manager/control_manager_node.hxx"
+#include "control_manager/control_selector_node.hxx"
 #ifndef CONTROL_MANAGER_NODE_CLASS
 #error "Build target must specify its node class"
 #endif

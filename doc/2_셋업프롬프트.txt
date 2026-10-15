@@ -1,3 +1,6 @@
+역사적 요구사항 원문입니다. 현재 architecture/실행 방법은 README.md와 doc/command_path.md를 따릅니다.
+후반 command path는 control_selector → selected_cmd → vehicle_interface로 대체되었습니다. 아래의 이전 node/topic 지시는 현재 적용하지 않습니다.
+
 현재 repository를 분석하고, ROS 2 Humble 기반 신규 상위제어 패키지
 main/src/control_manager/의 1차 아키텍처와 코드 skeleton을 구현해라.
 ======================================================================

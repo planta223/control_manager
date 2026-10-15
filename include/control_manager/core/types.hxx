@@ -37,24 +37,17 @@ struct Command {
   std::int64_t timestamp_ns{0};
   std::string reason;
 };
-struct SafetyConfig {
+struct ActuatorProtectionConfig {
   bool operating_limits_verified{false};
   double max_steer_rad{0.0}, max_speed_mps{0.0};
-  double state_timeout_s{0.5}, command_timeout_s{0.5};
-  double emergency_distance_m{0.0};
-};
-struct ObstacleObservation {
-  bool valid{false}, detected{false};
-  double distance_m{0.0};
+  double command_timeout_s{0.5};
 };
 bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);
 Command stop(std::int64_t now_ns, const std::string &reason, bool valid = false);
 Command selectCommand(ControlMode mode, const Command &manual, const Command &automatic,
                       std::int64_t now_ns);
-Command applySafety(const Command &command, const GlobalPose &pose, const MotionState &motion,
-                    bool require_global_pose,
-                    const ObstacleObservation &obstacle, bool estop,
-                    std::int64_t now_ns, const SafetyConfig &config);
+Command protectActuatorCommand(const Command &command, bool estop,
+                               std::int64_t now_ns, const ActuatorProtectionConfig &config);
 VehicleFsmState fsmState(bool has_final, bool final_fresh, const Command &final,
                          ControlMode mode);
 }  // namespace control_manager::core
