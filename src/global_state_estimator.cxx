@@ -14,7 +14,6 @@ GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_es
   else throw std::invalid_argument("motion_mode must be GNSS, GNSS_IMU, WHEEL or NONE");
   map_frame_ = param<std::string>("map_frame", "map");
   base_frame_ = param<std::string>("base_frame", "base_link");
-  reference_verified_ = param<bool>("localization_reference_verified", false);
   timeout_s_ = positive("state_timeout_s", 0.5);
   max_position_std_m_ = positive("max_position_std_m", 1.0);
   max_yaw_variance_ = positive("max_yaw_variance_rad2", 0.25);
@@ -40,8 +39,6 @@ GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_es
   }
   pose_publisher_ = output<msg::GlobalPose>("global_pose");
   motion_publisher_ = output<msg::MotionState>("motion_state");
-  if (pose_mode_ == core::PoseMode::GNSS && !reference_verified_)
-    RCLCPP_WARN(get_logger(), "Rear-axle reference / GNSS lever arm not verified; GlobalPose remains invalid");
   if (pose_mode_ == core::PoseMode::GNSS_IMU || motion_mode_ == core::MotionMode::GNSS_IMU)
     RCLCPP_ERROR(get_logger(), "GNSS_IMU_NOT_IMPLEMENTED for the selected output(s); no fusion or gyro frame assumption");
   if (motion_mode_ == core::MotionMode::WHEEL)
@@ -82,7 +79,8 @@ msg::GlobalPose GlobalStateEstimatorNode::estimatePose() {
       variance_ok(cov[7], max_position_std_m_*max_position_std_m_) &&
       cov[0] + cov[7] <= max_position_std_m_*max_position_std_m_;
     const bool frames_ok = odom.header.frame_id == map_frame_ && odom.child_frame_id == base_frame_;
-    out.valid = reference_verified_ && current(gnss_, timeout_s_) && frames_ok &&
+    // GNSS owns the antenna-to-rear-axle correction; preserve its base_link pose.
+    out.valid = current(gnss_, timeout_s_) && frames_ok &&
       position_ok && variance_ok(cov[35], max_yaw_variance_) && orientation_valid &&
       std::isfinite(out.x_m) && std::isfinite(out.y_m);
     out.position_variance_x_m2 = cov[0];

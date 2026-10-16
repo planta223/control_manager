@@ -195,8 +195,9 @@ GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS Vehicl
 invalid/disabled와 stamp=0으로 명시합니다. 메시지·topic은 서로 합치지 않았습니다.
 
 GNSS pose의 position/yaw, quaternion norm, parent map/child base_link, source/receipt freshness,
-finite XY, position variance 각각 및 합, yaw variance, localization_reference_verified 검사를 보존했습니다.
-reference_verified 기본 false이며 미실측 lever arm을 유효하다고 가정하지 않습니다.
+finite XY, position variance 각각 및 합, yaw variance 검사를 유지합니다.
+GNSS odom의 base_link는 후륜축 중심 계약이며, GNSS부가 antenna offset x=0.559 m / y=0.0 m를 보정합니다.
+수동 기준점 확인 스위치는 사용하지 않으며, 여기서 lever arm을 중복 보정하지 않습니다.
 GNSS motion은 기존 twist.linear.x와 speed variance/frame/freshness/finite를 검사합니다.
 IMU/VehicleFeedback이 없어도 GNSS 모드의 두 출력은 유효할 수 있습니다.
 

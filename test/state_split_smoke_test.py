@@ -74,7 +74,7 @@ def estimators():
         pub.publish(o)
 
     timer = node.create_timer(.05, publish)
-    stacks = [start('global_state_estimator', 'split_global', 'localization_reference_verified:=true')]
+    stacks = [start('global_state_estimator', 'split_global')]
     try:
         def good():
             return ('global_pose' in values and 'motion_state' in values and
@@ -113,13 +113,12 @@ def estimators():
     state['send'] = True
     for executable, params, key, reason in [
         ('global_state_estimator', ['pose_mode:=GNSS_IMU'], 'global_pose', 'GNSS_IMU_NOT_IMPLEMENTED'),
-        ('global_state_estimator', ['motion_mode:=WHEEL'], 'motion_state', 'WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED'),
-        ('global_state_estimator', [], 'global_pose', 'INVALID_OR_STALE_GNSS_POSE')]:
+        ('global_state_estimator', ['motion_mode:=WHEEL'], 'motion_state', 'WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED')]:
         values.clear()
         stack = start(executable, 'split_' + reason.lower(), *params)
         try:
             wait_for(node, lambda: key in values and values[key].reason == reason,
-                     'explicit unsupported/reference-unverified state: ' + reason)
+                     'explicit unsupported state: ' + reason)
             out = values[key]
             assert not (out.valid if key == 'global_pose' else out.speed_valid)
             if 'NOT_IMPLEMENTED' in reason:

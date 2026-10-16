@@ -46,7 +46,7 @@ def run_mode(pose_mode, motion_mode):
             pubs['feedback'].publish(fb)
     timer=node.create_timer(.05,publish)
     stack=start('global_state_estimator','modes_'+pose_mode+'_'+motion_mode,
-                'pose_mode:='+pose_mode,'motion_mode:='+motion_mode,'localization_reference_verified:=true')
+                'pose_mode:='+pose_mode,'motion_mode:='+motion_mode)
     expected_pose={'GNSS':'GNSS_POSE_VALID','GNSS_IMU':'GNSS_IMU_NOT_IMPLEMENTED','NONE':'POSE_DISABLED'}[pose_mode]
     expected_motion={'GNSS':'GNSS_SPEED_VALID','GNSS_IMU':'GNSS_IMU_NOT_IMPLEMENTED',
                      'WHEEL':'WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED','NONE':'MOTION_DISABLED'}[motion_mode]

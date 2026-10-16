@@ -28,6 +28,7 @@
 
     # Mission Based Limit 구독·발행토픽 활성화 (false이면 입력/출력/timer 없음)
     mission_limit_enabled: false    # Motion Planning도 같은 key로 의존성 조절
+
 /control/sensor_interface:
   ros__parameters:
     # Sensor Interface 입력 검증 설정
@@ -36,6 +37,7 @@
     # External motor/steering encoder inputs are reserved in pipeline.yaml.
     # Adapters/type/unit contracts are TODO: keep encoder enable flags false.
     input_timeout_s: 0.5
+
 /control/global_state_estimator:
   ros__parameters:
     # Global State Estimator 구독: 선택 모드가 요구하는 활성 입력만 구독, 모순이면 시작 오류.
@@ -44,16 +46,17 @@
     pose_mode: GNSS                 # GNSS / GNSS_IMU (TODO) / NONE
     # Motion Mode 설정
     motion_mode: GNSS               # GNSS / GNSS_IMU (TODO) / WHEEL (TODO) / NONE
-    # Global State Estimator 기준점·품질 검증 설정
-    localization_reference_verified: false # TODO NOT_VERIFIED: rear axle lever arm
+    # Global State Estimator 품질 검증 설정
     max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
     max_yaw_variance_rad2: 0.25       # TUNE
     # vehicle.wheelbase_m comes from vehicle.yaml, used only by future WHEEL estimator.
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
+
 /control/lane_state_estimator:
   ros__parameters:
     # Lane State Estimator 구독·발행: 공통 lane_enabled에 연동, false이면 둘 다 생성하지 않음.
     state_timeout_s: 0.5            # Observation source freshness; no filtering/geometry
+
 /control/path_planning:
   ros__parameters:
     # Path Planning 구독: global_pose / global_path / guidance_mode_request 유지.
@@ -64,6 +67,7 @@
     lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
     map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
     lane_correction_enabled: false   # true rejected until correction is implemented
+
 /control/mission_based_limit:
   ros__parameters:
     # Mission Based Limit 구독·발행: 공통 mission_limit_enabled에 연동.
@@ -72,6 +76,7 @@
     mission_baseline_enabled: false  # Mission section policy not agreed
     mission_max_speed_mps: 0.0       # Disabled, NOT physical max speed
     traffic_light_applies: false     # Explicit baseline context, future map-section input
+
 /control/motion_planning:
   ros__parameters:
     # Motion Planning 구독: reference_path / motion_state 필수.
@@ -79,6 +84,7 @@
     # 비활성 입력은 reason에 명시하며 가짜 valid ObjectState/MissionLimit을 만들지 않음.
     # Motion Planning 발행: motion_plan 항상 발행. Mission 비활성 시 cruise speed 사용.
     cruise_speed_mps: 0.0            # Disabled target, NOT physical max speed
+
 /control/motion_control:
   ros__parameters:
     # Motion Control 구독: global_pose / motion_state / motion_plan / status / tracking_mode_request.
@@ -101,12 +107,14 @@
     lookahead_max_m: 6.0             # TUNE
     lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
     goal_tolerance_m: 0.3            # TUNE
+
 /control/control_selector:
   ros__parameters:
     # Control Selector 구독: auto_cmd / manual_cmd / mode_request / vehicle_interface_status.
     # Control Selector 발행: selected_cmd / status 항상 발행.
     # Vehicle Control Mode 설정
     mode: IDLE                      # Initial mode; mode_request changes runtime mode
+    
 /control/vehicle_interface:
   ros__parameters:
     # Vehicle Interface 구독: selected_cmd / estop 항상 유지 (보호 입력 비활성화 없음).

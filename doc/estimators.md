@@ -70,7 +70,9 @@ Guidance GPS/LANE/HYBRID는 source mode와 독립입니다.
 구독은 선택한 두 모드의 required input 합집합입니다. 예를 들어 NONE/WHEEL에서는 GNSS와 IMU를 구독하지 않습니다.
 
 GNSS pose의 quaternion norm, frame/child_frame, source/receipt freshness, position covariance 각각/합,
-yaw covariance, finite position, localization reference verification 검사를 보존했습니다.
+yaw covariance, finite position 검사를 유지합니다.
+GNSS부에서 antenna offset x=0.559 m / y=0.0 m를 보정한 후륜축 중심 base_link odom을 사용합니다.
+수동 기준점 확인 스위치는 없으며, estimator에서 lever arm을 중복 보정하지 않습니다.
 GNSS motion의 twist.linear.x 추출 및 speed covariance/frame/source/receipt freshness/finite 검사도 보존했습니다.
 pose covariance/quaternion 오류는 speed를 무효화하지 않고 speed variance/NaN 오류는 pose를 무효화하지 않습니다.
 source stamp는 heartbeat로 갱신하지 않습니다. 서로 다른 source 사이 시간 동기화/보간은 새로 구현하지 않았습니다.

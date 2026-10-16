@@ -41,7 +41,6 @@ class GlobalStateEstimatorNode : public NodeBase {
   core::MotionMode motion_mode_;
   std::string map_frame_, base_frame_;
   double timeout_s_, max_position_std_m_, max_yaw_variance_, max_speed_variance_, wheelbase_m_;
-  bool reference_verified_;
 };
 class LanePoseEstimatorNode : public NodeBase {
  public: LanePoseEstimatorNode();

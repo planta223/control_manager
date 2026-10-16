@@ -125,7 +125,7 @@ def run():
     stacks=[wheel,
             start('sensor_interface','ingress_enabled','topics.external_lane:=/test/external_lane',
                   'imu_enabled:=true','depth_enabled:=true'),
-            start('global_state_estimator','ingress_global','localization_reference_verified:=true'),
+            start('global_state_estimator','ingress_global'),
             start('lane_state_estimator','ingress_lane'),
             start('path_planning','ingress_planner','guidance_mode:=LANE')]
     try:

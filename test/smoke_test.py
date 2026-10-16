@@ -123,7 +123,6 @@ def integrated_fixtures():
     config['/**']['ros__parameters'].update({
         'lane_enabled': True, 'object_state_enabled': True, 'mission_limit_enabled': True})
     overrides = {
-        'global_state_estimator': {'localization_reference_verified': True},
         'sensor_interface': {'topics.external_lane': '/test/external_lane'},
         'path_planning': {'map_datum_verified': True},
         'mission_based_limit': {'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0},
