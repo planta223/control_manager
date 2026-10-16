@@ -23,7 +23,7 @@ OVERRIDES = itertools.count()
 def command(executable, *params):
     args = [str(get_package_prefix('control_manager') + '/lib/control_manager/' + executable),
             '--ros-args', '-r', '__ns:=/control']
-    for filename in ('vehicle.yaml', 'pipeline.yaml', 'operation.yaml'):
+    for filename in ('vehicle.yaml', 'pipeline.yaml', 'mission.yaml', 'operation.yaml'):
         args += ['--params-file', str(ROOT / 'config' / filename)]
     name = executable[:-5] if executable.endswith('_node') else executable
     if params:

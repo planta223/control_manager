@@ -21,6 +21,9 @@
       # Global Path Provider 발행 토픽: 기존 최종 지도 파일을 읽어 발행, Path Planning이 구독
       # map_file=""이면 파일 제공자 비활성; 대신 외부 nav_msgs/Path 발행자를 연결 가능.
       global_path: /control/global_path
+      # Global Path Provider 발행: 경로 + 원본 누적거리 + task_sections를 원자적으로 전달.
+      # Mission 구간 정책 활성 시에만 발행, Mission Based Limit만 구독.
+      mission_map: /control/mission_map
 
       # 외부 토픽: GUI/CLI/수동 명령 adapter가 발행 (이 패키지는 발행자를 기동하지 않음)
       manual_cmd: /control/manual_cmd # VehicleCommand 필요; keyboard raw 명령의 변환 필요

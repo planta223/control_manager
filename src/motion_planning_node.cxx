@@ -5,7 +5,7 @@ MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
   frame_ = param<std::string>("map_frame", "map");
   base_frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("input_timeout_s", 0.5);
-  cruise_speed_mps_ = nonnegative("cruise_speed_mps", 0.0);
+  cruise_speed_mps_ = nonnegative("cruise_speed_mps", nonnegative("cruise_speed_kph", 0.0) / 3.6);
   motion_ = input<msg::MotionState>("motion_state");
   path_ = input<nav_msgs::msg::Path>("reference_path");
   objects_enabled_ = enabled("object_state_enabled", true);

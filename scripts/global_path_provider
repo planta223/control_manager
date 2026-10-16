@@ -11,7 +11,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
-from global_path_map import load_route, project_route
+from global_path_map import load_final_map, mission_metadata, project_route
+from control_manager.msg import MissionMap
 
 
 class GlobalPathProvider(Node):
@@ -28,7 +29,10 @@ class GlobalPathProvider(Node):
         self.base_frame = param('base_frame', 'base_link')
         gnss_node = param('gnss_node', '/gnss_node')
         topic = param('topics.global_path', '/control/global_path')
+        mission_enabled = param('mission_limit_enabled', False)
+        sections_enabled = param('mission_sections_enabled', False)
         self.publisher = None
+        self.mission_publisher = None
         self.active_datum = None
         self.pending = None
         self.last_reason = None
@@ -37,17 +41,26 @@ class GlobalPathProvider(Node):
             return  # Empty map_file permits an independent external ROS Path publisher.
         if not self.frame or not self.base_frame or not topic or not gnss_node.startswith('/'):
             raise ValueError('frames/topic must be nonempty; gnss_node must be an absolute ROS node name')
-        self.route = load_route(filename)  # Read-only; project/edit/background JSON is rejected.
+        data = load_final_map(filename)  # One immutable read for path + metadata.
+        self.route = [(p['lat'], p['lon']) for p in data['points']]
         self.publisher = self.create_publisher(Path, topic, QoSProfile(
             depth=1, reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        if mission_enabled and sections_enabled:
+            self.metadata = mission_metadata(data)
+            mission_topic = param('topics.mission_map', '/control/mission_map')
+            if not mission_topic or self.resolve_topic_name(mission_topic) == self.resolve_topic_name(topic):
+                raise ValueError('mission_map and global_path must be nonempty and distinct')
+            self.mission_publisher = self.create_publisher(MissionMap, mission_topic, QoSProfile(
+                depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.client = self.create_client(GetParameters, gnss_node.rstrip('/') + '/get_parameters')
         self.create_timer(1.0, self.poll)
         self.get_logger().info(f'Loaded {len(self.route)} rear-axle points from {filename}; waiting for GNSS datum')
 
     def invalidate(self, reason):
         if self.active_datum is not None:
-            self.publisher.publish(self.make_path([]))  # Withdraw the previous latched route.
+            self.publish_path(self.make_path([]))  # Withdraw both latched snapshots.
             self.active_datum = None
         if reason != self.last_reason:
             self.get_logger().warning(reason)
@@ -87,12 +100,22 @@ class GlobalPathProvider(Node):
             datum = (lat, lon)
             if datum != self.active_datum:
                 points = project_route(self.route, lat, lon)
-                self.publisher.publish(self.make_path(points))
+                self.publish_path(self.make_path(points))
                 self.active_datum = datum
                 self.last_reason = None
                 self.get_logger().info(f'Published {len(points)} global-path points at GNSS datum {datum}')
         except (ValueError, AttributeError, RuntimeError) as exc:
             self.invalidate(str(exc))
+
+    def publish_path(self, path):
+        self.publisher.publish(path)
+        if self.mission_publisher is not None:
+            msg = MissionMap()
+            msg.header = path.header
+            msg.path = path
+            if path.poses:
+                msg.stations_m, msg.section_names, msg.section_start_s_m, msg.section_end_s_m = self.metadata
+            self.mission_publisher.publish(msg)
 
     def make_path(self, points):
         path = Path()

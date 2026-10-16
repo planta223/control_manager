@@ -3,6 +3,7 @@
 #include "control_manager/core/lateral_controller.hxx"
 #include "control_manager/core/tracking.hxx"
 #include "control_manager/core/guidance.hxx"
+#include "control_manager/core/mission.hxx"
 
 namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
@@ -72,10 +73,20 @@ class MissionBasedLimitNode : public NodeBase {
  public: MissionBasedLimitNode();
  private:
   void update();
+  core::MissionDecision sectionLimit();
+  struct SectionPolicy {
+    std::string map_section;
+    double max_speed_mps, margin_before_m, margin_after_m;
+    bool stop_required;
+  };
+  std::shared_ptr<Input<msg::GlobalPose>> pose_;
+  std::shared_ptr<Input<msg::MissionMap>> map_;
+  std::vector<SectionPolicy> section_policies_;
+  core::MissionConfig mission_config_{};
   std::shared_ptr<Input<msg::ObjectState>> objects_;
   rclcpp::Publisher<msg::MissionLimit>::SharedPtr publisher_;
-  double max_speed_mps_, timeout_s_;
-  bool baseline_enabled_, traffic_light_applies_;
+  double max_speed_mps_, timeout_s_, pose_timeout_s_;
+  bool baseline_enabled_, traffic_light_applies_, sections_enabled_;
   std::string frame_;
 };
 class MotionPlanningNode : public NodeBase {

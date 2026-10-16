@@ -15,12 +15,12 @@ find_package(nav_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
-  "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
+  "msg/MissionLimit.msg" "msg/MissionMap.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
   "msg/TrackingStatus.msg" "msg/VehicleFeedback.msg" "msg/VehicleInterfaceStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
-add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx
+add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx src/mission.cxx
   src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx)
 target_include_directories(control_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
@@ -54,6 +54,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_control_core control_core)
   ament_add_gtest(test_guidance test/test_guidance.cxx)
   target_link_libraries(test_guidance control_core)
+  ament_add_gtest(test_mission test/test_mission.cxx)
+  target_link_libraries(test_mission control_core)
   ament_add_gtest(test_tracking test/test_tracking.cxx)
   target_link_libraries(test_tracking control_core)
   ament_add_gtest(test_ingress test/test_ingress.cxx)

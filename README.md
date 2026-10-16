@@ -59,7 +59,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | global_path_provider | 기존 최종 지도 JSON 파일 + GNSS GetParameters 읽기 전용 조회 | global_path; 실제 GNSS 원점/투영식으로 변환한 후륜축 경로 |
 | path_planning_node | GPS: global_pose + global_path; LANE: lane_pose; HYBRID: 세 입력 | reference_path만 발행; Guidance owner |
 | object_manager_node | object_state_enabled=true일 때 활성 RGB/LiDAR/Depth만 | 같은 조건으로 object_state; detection 없음, UNKNOWN/invalid |
-| mission_based_limit_node | mission_limit_enabled=true, Object 활성일 때 object_state | mission 활성 시 mission_limit; opt-in speed cap/신호 정책 |
+| mission_based_limit_node | mission 활성 시 optional object_state; 구간 정책 활성 시 global_pose + mission_map | mission_limit; 구간 속도 상한·마진·정지·불확실성 판단 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status, tracking_mode_request | auto_cmd, tracking_status; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
@@ -281,6 +281,51 @@ Motion planning은 **GlobalPose를 구독하지 않습니다**. ReferencePath + 
 계획합니다. mission_based_limit는 정상 주행 속도/신호 정책이고, vehicle_interface는 선택 명령 이후 actuator-facing 보호를 담당합니다.
 Obstacle detected이면 motion planning은 회피 대신 정지합니다. speed PID는 없습니다.
 
+### GNSS-only Mission 구간 정책
+
+운용속도와 Mission 상수는 `config/mission.yaml`에 둡니다. 공통 `cruise_speed_kph`가
+등속 목표이며 수정 가능합니다. Motion Planning/Mission이 m/s로 변환합니다.
+Mission 비활성 상태에서도 Motion Planning은 이 등속 목표를 사용합니다.
+기존 `cruise_speed_mps`를 명시적으로 override하면 해당 m/s 값이 우선하며,
+기존 `mission_max_speed_mps` override는 기본 Mission 상한만 따로 제한할 때 사용할 수 있습니다.
+일반 운용 설정에서는 이 중복 단위 key를 추가하지 않고 `cruise_speed_kph` 하나를 수정합니다.
+
+`mission.yaml` 공통 영역의 두 활성화 key를 사용합니다.
+
+| mission_limit_enabled | mission_sections_enabled | 동작 |
+|---|---|---|
+| false | false/true | Mission node는 입력·출력·timer 없음, Motion Planning은 공통 등속 목표 사용 |
+| true | false | Mission은 기본 속도 상한 발행, 위치·지도 구간 구독 없음 |
+| true | true | 실제 위치와 지도 task_sections로 구간별 제한 계산 |
+
+기본값은 둘 다 false입니다. 구간 정책만 켜기 위해 운용 모드나 센서 선택을 바꾸지 않습니다.
+MissionLimit의 소비자는 기존 Motion Planning 하나이며 Ld나 sensor/Guidance mode를 바꾸지 않습니다.
+Pure Pursuit Ld는 실제 MotionState 속도로 계산하며 기본 PID는 Ld를 사용하지 않습니다.
+
+구간 정책 활성 시 파일 제공자가 `/control/mission_map`에 `MissionMap`을 reliable/transient-local/depth 1로 발행합니다.
+이 메시지는 GNSS에 맞춘 전체 경로, 원본 s_m 배열, task_sections 이름·시작·끝을 한 snapshot에 담습니다.
+기존 global_path/ReferencePath 계약은 그대로입니다. GNSS datum/frame 조회 실패 시 두 지도 snapshot을 철회합니다.
+Mission 구간 정책 비활성 시 추가 map publisher가 없습니다.
+
+`section_ids`의 정책별 `map_section`을 지도 구간 이름에 연결합니다. 현재 `straight_1 → 직진1`을 준비했으며,
+지도 구간 경계인 약 18.47~56.51 m는 설정에 중복 기입하지 않습니다.
+`max_speed_kph` 생략 시 공통 운용속도, `margin_before_m`/`margin_after_m`는 각각 감속 적용 구간의 앞/뒤 확장 거리입니다.
+예를 들어 원래 [100,120] m 구간에 앞 10 m / 뒤 5 m 마진이면 [90,125] m에서 제한 속도를 적용합니다.
+`stop_required=true`는 원래 구간에 적용하며 감속 마진만으로 조기 정지를 요구하지 않습니다.
+정지 지점으로의 가감속 프로파일·정차 유지 시간·자동 재출발 조건은 이번 구현에 없습니다.
+stop_required 구간에서 정지하면 별도 정책/설정 변경 없이 스스로 그 구간을 빠져나오지 못합니다.
+
+GlobalPose를 선분에 투영하고 원본 누적거리를 보간합니다. GNSS XY 분산의 trace와
+`position_sigma_multiplier`로 위치 여유를 계산합니다. 이것은 full covariance 기반 확률 보장이 아닌 보수적인 정책입니다.
+경계에 걸치면 가능한 구간 중 최소 속도 / 정지 요구 OR를 적용합니다.
+경로 이탈, 서로 떨어진 경로 후보, invalid/stale/잘못된 stamp의 pose,
+지도 철회/불량 및 설정한 이름이 지도에 없으면 invalid/stop입니다.
+겹치는 정책은 최소 속도 / 정지 OR이며, 명시적으로 정책을 연결하지 않은 지도 구간은 기본 상한을 사용합니다.
+불확실성 상수는 실차 보정 완료값이 아닌 software policy/TUNE입니다.
+속도 제한은 단계적으로 바뀌며 미리 넓힌 적용 구간이 자동 가감속 프로파일을 생성하는 것은 아닙니다.
+
+검증은 `test/test_mission.cxx`, `test/mission_smoke_test.py`, `test/global_path_smoke_test.py`에서 수행합니다.
+
 **현재 PID/PP는 map pose와 map 경로가 필요합니다.** local/base_link ReferencePath가 오면
 `LOCAL_REFERENCE_PATH_NOT_SUPPORTED`로 명시적으로 차단합니다. 0 pose/identity TF로 우회하지 않습니다.
 LANE planner의 No-GNSS dependency 분리는 완료됐지만 No-GNSS end-to-end 주행은 아직 구현되지 않았습니다.
@@ -417,15 +462,16 @@ steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계�
 ## Configuration / 측정값
 
 차량 수치는 `main/config/vehicle.jsonc`을 기준으로 이 패키지의 `vehicle.yaml`에 유지합니다.
-현재 설정은 다음 세 파일로 나눕니다. 파일 사이에 같은 node/parameter key를 중복 정의하지 않습니다.
+현재 설정은 다음 네 파일로 나눕니다. Mission 상수와 구간별 정책은 mission.yaml에서 관리합니다.
 
 | 파일 | 책임 |
 |---|---|
 | `config/pipeline.yaml` | 토픽 연결, map/base frame, map 입력 파일 경로 |
-| `config/operation.yaml` | 시작 모드, 구현된 활성화 설정, 주기·timeout·품질 기준·제어 tuning·운용 한계 |
+| `config/operation.yaml` | 시작 모드, Mission 외 활성화 설정, 주기·timeout·품질 기준·제어 tuning·운용 한계 |
+| `config/mission.yaml` | Mission 노드·구간 정책 활성화, 공통 운용속도, 구간별 제한·마진·정지·불확실성 상수 |
 | `config/vehicle.yaml` | 차량 치수와 센서 장착 수치 |
 
-launch는 각 노드에 vehicle → pipeline → operation 순서로 세 파일을 로드합니다.
+launch는 각 노드에 vehicle → pipeline → mission → operation 순서로 네 파일을 로드합니다.
 node-specific parameter key는 `/control/<node name>`입니다.
 기존 통합 설정은 `config/legacy/control_manager.yaml`의 legacy snapshot으로 보존하며,
 기본 launch와 현재 smoke fixture는 사용하지 않습니다. 앞으로의 설정 변경은 분리한 파일에 반영합니다.
@@ -435,17 +481,20 @@ node-specific parameter key는 `/control/<node name>`입니다.
 ```bash
 ros2 launch control_manager control_manager.xml \
   pipeline_file:=/absolute/path/pipeline.yaml \
+  mission_file:=/absolute/path/mission.yaml \
   operation_file:=/absolute/path/operation.yaml
 
 ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
   --params-file /absolute/path/vehicle.yaml \
   --params-file /absolute/path/pipeline.yaml \
+  --params-file /absolute/path/mission.yaml \
   --params-file /absolute/path/operation.yaml
 ```
 
 operation의 mode는 시작값입니다. 실행 중 Control/Tracking 전환은 기존 request topic을 사용합니다.
 Guidance, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
-활성화 key는 공통 영역에서 한 번 정의하고 ingress와 consumer가 함께 사용합니다.
+활성화 key는 각 파일의 공통 영역에서 한 번 정의하고 consumer가 함께 사용합니다.
+Mission 활성화는 mission.yaml, 다른 센서/Object 활성화는 operation.yaml에서 설정합니다.
 기본 operation은 GNSS만 활성입니다. RGB/LiDAR/IMU/Depth/Lane/encoder와 보조 feedback/Object/Mission은 비활성입니다.
 원시 센서·Lane relay는 입력과 대응 출력을 함께 끄며, vehicle_feedback은 별도 발행 스위치입니다.
 Lane/Object/Mission 비활성 node는 관측 구독·출력·timer를 만들지 않습니다.
@@ -453,8 +502,8 @@ Lane/Object/Mission 비활성 node는 관측 구독·출력·timer를 만들지 
 외부 Lane 연결은 lane_enabled=true와 `pipeline.yaml`의 `topics.external_lane`을 함께 지정합니다.
 Motion Planning은 object_state_enabled/mission_limit_enabled가 true인 입력만 구독하고
 기존 validity/timeout/stop 정책을 적용합니다. false인 입력은 가짜 valid 관측 대신 해당 의존성을 제외하고
-MotionPlan.reason에 OBJECT_DISABLED/MISSION_DISABLED를 표시합니다. Mission 비활성 시 cruise_speed_mps를 사용합니다.
-기본 cruise_speed=0, PID disabled, IDLE, dry_run 및 최종 actuator 보호는 유지합니다.
+MotionPlan.reason에 OBJECT_DISABLED/MISSION_DISABLED를 표시합니다. Mission 비활성 시 공통 운용속도를 사용합니다.
+기본 운용속도는 mission.yaml의 cruise_speed_kph를 따릅니다. PID disabled, IDLE, dry_run 및 최종 actuator 보호는 유지합니다.
 YAML은 연결 설정을 제공하며 실제 노드 기동은 launch, 구독·발행 생성은 C++가 담당합니다.
 
 `test/operation_smoke_test.py`는 구독·발행 graph, 필수 입력/모드 모순, Object/Mission 네 조합의
@@ -534,7 +583,7 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 추가 error-adaptive PP, 실차 lateral PID tuning, LANE guidance, HYBRID lane correction 및 fallback,
 차량 제어 RQT UI, 센서 health 통합 status,
 실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
-Depth 보조, GNSS+IMU fusion/EKF, mission section rules, obstacle avoidance,
+Depth 보조, GNSS+IMU fusion/EKF, 복합 mission 진행/재출발 규칙, obstacle avoidance,
 vehicle speed PID, physical brake model, actuator calibration/raw conversion, UDP sender,
 실제 keyboard/manual adapter, hardware E-STOP/watchdog, 실차 검증.
 

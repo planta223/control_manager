@@ -11,7 +11,7 @@ def coordinate(value, limit):
     return float(value)
 
 
-def load_route(filename):
+def load_final_map(filename):
     data = json.loads(Path(filename).read_text(encoding='utf-8'))
     if not isinstance(data, dict) or data.get('format') != 'gps-final-map' or data.get('version') != 1:
         raise ValueError('map_file requires gps-final-map version 1 (MAP_*.json)')
@@ -26,7 +26,6 @@ def load_route(filename):
     points = data.get('points')
     if not isinstance(points, list) or len(points) < 2:
         raise ValueError('map_file requires at least two ordered points')
-    route = []
     previous_s = -1.0
     for index, point in enumerate(points, 1):
         if not isinstance(point, dict) or point.get('index') != index:
@@ -36,8 +35,37 @@ def load_route(filename):
                 not math.isfinite(s) or s < 0 or s <= previous_s):
             raise ValueError('map_file s_m must be finite, nonnegative and increasing')
         previous_s = s
-        route.append((coordinate(point.get('lat'), 90), coordinate(point.get('lon'), 180)))
-    return route
+        coordinate(point.get('lat'), 90)
+        coordinate(point.get('lon'), 180)
+    return data
+
+
+def load_route(filename):
+    return [(p['lat'], p['lon']) for p in load_final_map(filename)['points']]
+
+
+def mission_metadata(data):
+    stations = [p['s_m'] for p in data['points']]
+    sections = data.get('task_sections')
+    if not isinstance(sections, list):
+        raise ValueError('mission map requires task_sections array')
+    names, starts, ends = [], [], []
+    for section in sections:
+        if not isinstance(section, dict):
+            raise ValueError('invalid mission section')
+        name = section.get('name')
+        if not isinstance(name, str) or not name.strip() or name in names:
+            raise ValueError('mission section names must be unique and nonempty')
+        if not isinstance(section.get('start'), dict) or not isinstance(section.get('end'), dict):
+            raise ValueError('mission section requires start/end')
+        start, end = section['start'].get('s_m'), section['end'].get('s_m')
+        for value in (start, end):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError('mission section stations must be finite')
+        if not stations[0] <= start < end <= stations[-1]:
+            raise ValueError('mission section outside route or reversed')
+        names.append(name); starts.append(float(start)); ends.append(float(end))
+    return [float(s) for s in stations], names, starts, ends
 
 
 def project_route(route, latitude, longitude):

@@ -122,11 +122,17 @@ def startup_rejections():
 def integrated_fixtures():
     config = yaml.safe_load((ROOT / 'config/operation.yaml').read_text())
     config['/**']['ros__parameters'].update({
-        'lane_enabled': True, 'object_state_enabled': True, 'mission_limit_enabled': True})
+        'lane_enabled': True, 'object_state_enabled': True})
+    mission_config = yaml.safe_load((ROOT / 'config/mission.yaml').read_text())
+    mission_config['/**']['ros__parameters'].update({
+        'mission_limit_enabled': True, 'mission_sections_enabled': False})
+    mission_config['/control/mission_based_limit']['ros__parameters'].update({
+        'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0})
+    fixture_mission = LOG / 'fixture_mission.yaml'
+    fixture_mission.write_text(yaml.safe_dump(mission_config))
     overrides = {
         'sensor_interface': {'topics.external_lane': '/test/external_lane'},
         'path_planning': {'map_datum_verified': True},
-        'mission_based_limit': {'mission_baseline_enabled': True, 'mission_max_speed_mps': 2.0},
         'motion_planning': {'cruise_speed_mps': 1.0},
         'motion_control': {'tracking_mode': 'PURE_PURSUIT'},  # Preserve legacy regression fixture.
         'vehicle_interface': {'operating_limits_verified': True, 'max_steer_rad': 0.7,
@@ -210,7 +216,8 @@ def integrated_fixtures():
             lane_pub.publish(lane)
 
     timer = node.create_timer(0.05, publish)
-    stack = Stack(['ros2', 'launch', str(fixture_launch), 'operation_file:=' + str(fixture_config)],
+    stack = Stack(['ros2', 'launch', str(fixture_launch), 'operation_file:=' + str(fixture_config),
+                   'mission_file:=' + str(fixture_mission)],
                   'smoke_integration')
     try:
         wait_for(node, lambda: 'global_pose' in values and values['global_pose'].valid,

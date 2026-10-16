@@ -9,7 +9,7 @@ from rcl_interfaces.srv import GetParameters
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from nav_msgs.msg import Path as PathMsg
 
-from control_manager.msg import GlobalPose
+from control_manager.msg import GlobalPose, MissionMap
 from smoke_test import ROOT, Stack, wait_for
 from operation_smoke_test import command
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -36,6 +36,8 @@ def main():
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     paths, references, late = [], [], []
+    mission_maps = []
+    node.create_subscription(MissionMap, '/control/mission_map', mission_maps.append, durable)
     node.create_subscription(PathMsg, '/control/global_path', paths.append, durable)
     node.create_subscription(PathMsg, '/control/reference_path', references.append, 10)
     pub = node.create_publisher(GlobalPose, '/control/global_pose', 10)
@@ -56,13 +58,19 @@ def main():
             stack.close()
             wait_for(node, lambda: ('global_path_provider', '/control') not in
                      node.get_node_names_and_namespaces(), 'inactive provider stopped')
-    stacks = [Stack(command('global_path_provider'), 'map_provider'),
+    stacks = [Stack(command('global_path_provider', 'mission_limit_enabled:=true',
+                            'mission_sections_enabled:=true'), 'map_provider'),
               Stack(command('path_planning_node'), 'map_path_planning')]
     try:
         wait_for(node, lambda: state['calls'] >= 2 and bool(references), 'GNSS datum awaited')
         assert not paths and not references[-1].poses
         state.update(lat=origin[0], lon=origin[1])
         wait_for(node, lambda: bool(paths) and len(paths[-1].poses) == len(route), 'real final map published')
+        wait_for(node, lambda: mission_maps and len(mission_maps[-1].path.poses) == len(route),
+                 'atomic mission map published with real route')
+        assert mission_maps[-1].section_names == ['직진1']
+        assert len(mission_maps[-1].stations_m) == len(route)
+        assert abs(mission_maps[-1].section_start_s_m[0] - 18.471582529673963) < 1e-9
         expected = project_route(route, *origin)
         for i in (0, 1200, len(route) - 1):
             position = paths[-1].poses[i].pose.position
@@ -95,6 +103,7 @@ def main():
         node.destroy_service(service); service = None
         wait_for(node, lambda: not paths[-1].poses and not references[-1].poses,
                  'lost GNSS parameter service withdraws route')
+        wait_for(node, lambda: not mission_maps[-1].path.poses, 'GNSS service loss also withdraws mission map')
         node.destroy_subscription(subscription)
     finally:
         for stack in stacks:

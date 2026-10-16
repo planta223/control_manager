@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from global_path_map import load_route, project_route
+from global_path_map import load_route, load_final_map, mission_metadata, project_route
 
 
 class GlobalPathMapTest(unittest.TestCase):
@@ -74,6 +74,16 @@ class GlobalPathMapTest(unittest.TestCase):
         self.assertTrue(all(math.dist(a, b) < .11 for a, b in zip(points, points[1:])))
         shifted = project_route(route, origin[0] + .0001, origin[1])
         self.assertAlmostEqual(points[0][1] - shifted[0][1], 11.1, delta=.1)
+
+    def test_mission_metadata_matches_original_stations(self):
+        data = copy.deepcopy(self.data)
+        data['task_sections'] = [{'name': 'turn', 'start': {'s_m': 0.2}, 'end': {'s_m': .8}}]
+        self.assertEqual(mission_metadata(data), ([0., 1.], ['turn'], [.2], [.8]))
+        data['task_sections'][0]['end']['s_m'] = 2.
+        with self.assertRaises(ValueError):
+            mission_metadata(data)
+        data['task_sections'] = []
+        self.assertEqual(mission_metadata(data), ([0., 1.], [], [], []))
 
 
 if __name__ == '__main__':
