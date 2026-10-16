@@ -1,4 +1,5 @@
 #include "control_manager/nodes.hxx"
+#include "control_manager/ingress.hxx"
 #include <algorithm>
 namespace control_manager {
 MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
@@ -53,15 +54,19 @@ void MotionControlNode::update() {
   };
   const auto selection_error = tracking_->selectionError();
   if (!selection_error.empty()) { stop(selection_error); return; }
+  const auto current_input = [this](const auto &in) {
+    return in && in->value && ingress::validStampFormat(in->value->header.stamp) &&
+      current(in, timeout_s_);
+  };
   // Existing PID/PP require a pose and path in the same global frame. A local
   // lane path needs an agreed tracking-frame adapter, not a fabricated zero pose.
-  if (current(plan_, timeout_s_) && plan_->value->valid &&
+  if (current_input(plan_) && plan_->value->valid &&
       (plan_->value->header.frame_id != frame_ ||
        (!plan_->value->reference_path.header.frame_id.empty() &&
         plan_->value->reference_path.header.frame_id != frame_))) {
     stop("LOCAL_REFERENCE_PATH_NOT_SUPPORTED"); return;
   }
-  if (!current(pose_, timeout_s_) || !current(motion_, timeout_s_) || !current(plan_, timeout_s_) ||
+  if (!current_input(pose_) || !current_input(motion_) || !current_input(plan_) ||
       !pose_->value->valid || !motion_->value->speed_valid ||
       motion_->value->header.frame_id != base_frame_ || pose_->value->header.frame_id != frame_ || !plan_->value->valid ||
       plan_->value->header.frame_id != frame_ || !std::isfinite(plan_->value->target_speed_mps) ||
@@ -76,7 +81,8 @@ void MotionControlNode::update() {
     stop("INVALID_TRACKING_STATE"); return;
   }
   if (plan.stop_request || plan.target_speed_mps == 0.0) { stop("PLAN_STOP", true); return; }
-  if (!validPath(plan.reference_path, frame_) ||
+  if (!ingress::validStampFormat(plan.reference_path.header.stamp) ||
+      !validPath(plan.reference_path, frame_) ||
       !core::fresh(rclcpp::Time(plan.reference_path.header.stamp).nanoseconds(),
                    now().nanoseconds(), timeout_s_)) {
     stop("INVALID_OR_STALE_REFERENCE_PATH"); return;
@@ -92,7 +98,7 @@ void MotionControlNode::update() {
   // Observe arbitration status only for PID history, never own ControlMode/safety.
   // P-only preview during IDLE/MANUAL/FAULT permits existing startup/recovery flow
   // without accumulating windup or a circular FAULT -> invalid AUTO -> FAULT latch.
-  const bool accumulate_pid = current(control_status_, timeout_s_) &&
+  const bool accumulate_pid = current_input(control_status_) &&
     control_status_->value->header.frame_id == base_frame_ &&
     control_status_->value->mode == msg::ControlStatus::AUTO &&
     control_status_->value->fsm_state >= msg::ControlStatus::READY &&

@@ -438,6 +438,9 @@ preview AutoCommand도 실제로 선택할지는 control_selector/vehicle_interf
 
 GlobalPose/MotionState/MotionPlan은 source stamp와 수신 timeout을 검사하고, 주행 계산에서는 nested
 reference_path.header.stamp도 검사합니다. 잘못되거나 만료된 경로로 유효 steering을 만들지 않습니다.
+시각 변환 전에 sec >= 0, nanosec < 1,000,000,000 형식을 확인합니다. 잘못된 형식을 정규화하거나
+수신 시각으로 대체하지 않으며, 필수 입력 오류는 invalid 정지 후 정상 입력으로 복구합니다.
+ControlStatus도 같은 형식을 확인하며 불량 시 기존 정책대로 PID 이력을 지우고 P/heading P preview를 사용합니다.
 ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되며 upstream Global Path는 정적 snapshot입니다.
 
 ### Tracking parameters

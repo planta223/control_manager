@@ -24,12 +24,21 @@ def run():
     values = observe(node)
     pubs = {name: node.create_publisher(cls, '/control/' + name, 10) for name, cls in [
         ('global_pose', GlobalPose), ('motion_state', MotionState), ('motion_plan', MotionPlan), ('object_state', ObjectState),
-        ('manual_cmd', VehicleCommand), ('mode_request', UInt8)]}
+        ('manual_cmd', VehicleCommand), ('mode_request', UInt8), ('control_status_fixture', ControlStatus)]}
     legacy_request = node.create_publisher(UInt8, '/control/tracking_mode_request', 10)
     active = dict(state=True, motion=True, speed_valid=True, motion_age=0, motion_frame='base_link',
                   plan=True, state_age=0, plan_age=0, path_age=0,
                   localization=True, plan_valid=True, stop=False, path='normal', y=0.0,
-                  state_x=1.0, state_y=-1.0, target_speed=1.0, status_frame='map')
+                  state_x=1.0, state_y=-1.0, target_speed=1.0, status_frame='map',
+                  pose_stamp='good', motion_stamp='good', plan_stamp='good',
+                  path_stamp='good', control_stamp='good')
+
+    def corrupt_stamp(stamp, kind):
+        if kind == 'negative': stamp.sec = -1
+        if kind == 'noncanonical':
+            # Equivalent total time, malformed wire representation: must not normalize.
+            stamp.sec -= 1
+            stamp.nanosec += 1000000000
 
     def publish():
         stamp = node.get_clock().now().to_msg()
@@ -54,6 +63,9 @@ def run():
                           valid=active['plan_valid'], reason='TEST_ONLY')
         plan.header.stamp = copy.deepcopy(stamp); plan.header.frame_id = 'map'
         plan.header.stamp.sec -= active['plan_age']
+        for key, sample in [('pose_stamp',s), ('motion_stamp',m),
+                            ('plan_stamp',plan), ('path_stamp',plan.reference_path)]:
+            corrupt_stamp(sample.header.stamp, active[key])
         if active['state']:
             pubs['global_pose'].publish(s)
         if active['motion']: pubs['motion_state'].publish(m)
@@ -65,6 +77,10 @@ def run():
                                 target_brake=False, valid=True, reason='MANUAL_FIXTURE')
         manual.header.frame_id = 'base_link'; manual.header.stamp = stamp
         pubs['manual_cmd'].publish(manual)
+        if 'status' in values:
+            status = copy.deepcopy(values['status'])
+            corrupt_stamp(status.header.stamp, active['control_stamp'])
+            pubs['control_status_fixture'].publish(status)
 
     timer = node.create_timer(0.05, publish)
     default = Stack([command('motion_control_node')[0], '--ros-args',
@@ -84,6 +100,7 @@ def run():
     config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
     config['/control/motion_control']['ros__parameters']['pid']['enabled'] = True
     config['/control/motion_control']['ros__parameters'].update({
+        'topics.status': '/control/control_status_fixture',
         'vehicle.limits.min_steering_deg': -math.degrees(0.5),
         'vehicle.limits.max_steering_deg': math.degrees(0.5),
         'vehicle.limits.min_speed_kph': -7.2, 'vehicle.limits.max_speed_kph': 7.2})
@@ -210,6 +227,27 @@ def run():
             wait_for(node, invalid, 'invalid/stale input stops AUTO: '+key+'='+str(bad))
             active[key]=good
             wait_reset('input recovery resets PID history: '+key)
+        for mode in ('PID','PURE_PURSUIT'):
+            if mode == 'PURE_PURSUIT': restart_controller(mode)
+            for key in ('pose_stamp','motion_stamp','plan_stamp','path_stamp'):
+                for kind in ('negative','noncanonical'):
+                    active[key]=kind
+                    wait_for(node, invalid, mode+' malformed timestamp stops AUTO: '+key+'='+kind)
+                    assert controller.process.poll() is None
+                    active[key]='good'
+                    wait_for(node, lambda: values['auto_cmd'].valid and
+                             not values['auto_cmd'].target_brake and values['protected_cmd'].valid,
+                             mode+' timestamp recovery without node restart: '+key)
+        restart_controller('PID')
+        wait_reset('PID restart after malformed timestamp checks')
+        for kind in ('negative','noncanonical'):
+            active['control_stamp']=kind
+            wait_for(node, lambda: command_reason('PID_PREVIEW_STATE_RESET') and
+                     values['auto_cmd'].valid and abs(values['auto_cmd'].target_steer_rad-0.2)<1e-6,
+                     'malformed ControlStatus resets PID history without node exit: '+kind)
+            assert controller.process.poll() is None
+            active['control_stamp']='good'
+            wait_reset('ControlStatus timestamp recovery resets PID history')
         active['stop']=True
         wait_for(node, lambda: command_reason('PLAN_STOP') and values['auto_cmd'].valid and
                  values['auto_cmd'].target_brake and values['auto_cmd'].target_speed_mps==0.,
