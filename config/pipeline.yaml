@@ -1,0 +1,72 @@
+/**:
+  ros__parameters:
+    # Stable wiring / coordinate-frame contract. Runtime choices live in operation.yaml.
+    map_frame: map
+    base_frame: base_link
+    topics:
+      # 외부 토픽: 센서 노드 / 외부 Lane AI가 발행, Sensor Interface가 구독
+      gnss: /gnss/odom                # Existing GNSS default, SensorDataQoS
+      imu: /imu/data
+      rgb: /camera/image_raw
+      depth: /camera_dep/depth/image_raw
+      lidar: /lidar/points
+      external_lane: ""            # lane_enabled=true일 때 필수; 토픽·wire 계약 합의 필요.
+      # Adapter input type: control_manager/msg/LanePose; confirm external wire type with Lane team.
+      # Supplied values: lateral_error_m, heading_error_rad, confidence, header.stamp.
+      # 외부 Wheel Feedback: 실제 모터·조향 엔코더 발행, Sensor Interface 입력으로 예약
+      # topic/type/단위/보정/측정시각 계약과 adapter는 미구현; 해당 enable=true이면 시작 오류.
+      external_motor_feedback: ""    # 모터/구동륜 엔코더 원본 입력
+      external_steering_feedback: "" # 조향 엔코더 원본 입력
+
+      # 외부 토픽: map 제공자가 발행, Path Planning이 구독 (내부 map loader 미구현)
+      global_path: /control/global_path
+
+      # 외부 토픽: GUI/CLI/수동 명령 adapter가 발행 (이 패키지는 발행자를 기동하지 않음)
+      manual_cmd: /control/manual_cmd # VehicleCommand 필요; keyboard raw 명령의 변환 필요
+      mode_request: /control/mode_request                 # 구독: control_selector
+      guidance_mode_request: /control/guidance_mode_request # 구독: path_planning
+      tracking_mode_request: /control/tracking_mode_request # 구독: motion_control
+      estop: /control/estop                               # 구독: vehicle_interface
+
+      # Sensor Interface 발행 토픽 (/control/sensor_interface)
+      sensor_gnss: /control/sensors/gnss_odom
+      sensor_imu: /control/sensors/imu
+      sensor_rgb: /control/sensors/rgb
+      sensor_depth: /control/sensors/depth
+      sensor_lidar: /control/sensors/lidar
+      lane_observation: /control/lane_observation
+      vehicle_feedback: /control/vehicle_feedback # INTERNAL, invalid until hardware adapter exists
+
+      # Global State Estimator 발행 토픽 (/control/global_state_estimator)
+      global_pose: /control/global_pose
+      motion_state: /control/motion_state
+
+      # Lane State Estimator 발행 토픽 (/control/lane_state_estimator)
+      lane_pose: /control/lane_pose
+
+      # Object Manager 발행 토픽 (/control/object_manager)
+      object_state: /control/object_state
+
+      # Path Planning 발행 토픽 (/control/path_planning)
+      reference_path: /control/reference_path
+      guidance_status: /control/guidance_status
+
+      # Mission Based Limit 발행 토픽 (/control/mission_based_limit)
+      mission_limit: /control/mission_limit
+
+      # Motion Planning 발행 토픽 (/control/motion_planning)
+      motion_plan: /control/motion_plan
+
+      # Motion Control 발행 토픽 (/control/motion_control)
+      auto_cmd: /control/auto_cmd
+      tracking_status: /control/tracking_status
+
+      # Control Selector 발행 토픽 (/control/control_selector)
+      selected_cmd: /control/selected_cmd
+      status: /control/status
+
+      # Vehicle Interface 발행 토픽 (/control/vehicle_interface), 최종 보호 결과 진단
+      vehicle_interface_status: /control/vehicle_interface/status
+/control/path_planning:
+  ros__parameters:
+    map_file: ""                     # Loader TODO. Nonempty value is rejected.

@@ -130,7 +130,8 @@ def lane_admission():
     finally:
         stack.close(); node.destroy_timer(timer); node.destroy_node()
     result=subprocess.run(['ros2','run','control_manager','lane_state_estimator','--ros-args',
-                           '-r','__ns:=/control','-p','topics.lane_observation:=lane_pose'],
+                           '-r','__ns:=/control','-p','lane_enabled:=true',
+                           '-p','topics.lane_observation:=lane_pose'],
                           env=ENV,capture_output=True,text=True,timeout=10)
     assert result.returncode!=0 and 'different topics' in result.stdout+result.stderr
     print('PASS: lane observation/state remap loop rejected',flush=True)

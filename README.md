@@ -52,13 +52,13 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 
 | Executable | Subscribe | Publish / 책임 |
 |---|---|---|
-| sensor_interface_node | 원본 GNSS/IMU/RGB/LiDAR/Depth, 설정된 외부 Lane 입력 | sensors/*, lane_observation, vehicle_feedback; 단일 ingress |
+| sensor_interface_node | 활성화한 외부 센서/Lane 입력 | 대응 sensors/*·lane_observation, optional vehicle_feedback; 단일 ingress |
 | global_state_estimator | 선택한 모드가 요구하는 sensors/gnss_odom, sensors/imu, vehicle_feedback | global_pose + motion_state; 독립 validity |
-| lane_state_estimator | lane_observation | lane_pose; finite/confidence/freshness 검사·원본 보존 |
+| lane_state_estimator | lane_enabled=true일 때 lane_observation | 같은 조건으로 lane_pose; finite/confidence/freshness 검사·원본 보존 |
 | path_planning_node | global_pose, global_path, lane_pose, guidance_mode_request | reference_path, guidance_status; Guidance owner |
-| object_manager_node | sensors/rgb, sensors/lidar, optional sensors/depth | object_state; detection 없음, UNKNOWN/invalid |
-| mission_based_limit_node | object_state | mission_limit; opt-in speed cap/신호 정책 |
-| motion_planning_node | reference_path, motion_state, object_state, mission_limit | motion_plan; 경로와 제한 속도, obstacle stop |
+| object_manager_node | object_state_enabled=true일 때 활성 RGB/LiDAR/Depth만 | 같은 조건으로 object_state; detection 없음, UNKNOWN/invalid |
+| mission_based_limit_node | mission_limit_enabled=true, Object 활성일 때 object_state | mission 활성 시 mission_limit; opt-in speed cap/신호 정책 |
+| motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status, tracking_mode_request | auto_cmd, tracking_status; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
 | vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
@@ -73,17 +73,19 @@ GNSS localization, fusion, Lane filtering/path generation, yaw-rate/motion estim
 
 | 외부 입력 / 설정 | 내부 출력 | 상태 / QoS |
 |---|---|---|
-| topics.gnss = /gnss/odom | /control/sensors/gnss_odom | Odometry, SensorDataQoS 그대로 |
+| topics.gnss = /gnss/odom | /control/sensors/gnss_odom | Odometry, gnss_enabled=true일 때, SensorDataQoS 그대로 |
 | topics.imu = /imu/data | /control/sensors/imu | Imu, imu_enabled=true일 때만 |
-| topics.rgb = /camera/image_raw | /control/sensors/rgb | Image |
-| topics.lidar = /lidar/points | /control/sensors/lidar | PointCloud2 |
+| topics.rgb = /camera/image_raw | /control/sensors/rgb | Image, rgb_enabled=true일 때만 |
+| topics.lidar = /lidar/points | /control/sensors/lidar | PointCloud2, lidar_enabled=true일 때만 |
 | topics.depth = /camera_dep/depth/image_raw | /control/sensors/depth | Image, depth_enabled=true일 때만 |
-| topics.external_lane = "" (미합의) | /control/lane_observation | 외부 LanePose 수신은 설정 시 활성; 입력 SensorDataQoS, 출력 reliable depth 10 |
-| motor/wheel + actual steering: topic/type 미합의 | /control/vehicle_feedback | 외부 구독 없음; 현재 stamp=0, 두 validity=false만 발행 |
+| topics.external_lane = "" (미합의) | /control/lane_observation | lane_enabled=true + 비어 있지 않은 토픽 필요; 입력 SensorDataQoS, 출력 reliable depth 10 |
+| topics.external_motor_feedback = "" | /control/vehicle_feedback의 speed 필드 | adapter 미구현, motor_feedback_enabled=true이면 시작 오류 |
+| topics.external_steering_feedback = "" | /control/vehicle_feedback의 steering 필드 | adapter 미구현, steering_feedback_enabled=true이면 시작 오류 |
 
 Lane 외부 topic을 추측해 기본 연결하지 않았습니다. 현재 adapter는 **control_manager/msg/LanePose wire type**을
 명시적으로 선택하는 방식이며 타 팀의 실제 message type이 확정되었다는 뜻이 아닙니다.
-`topics.external_lane`을 합의된 별도 topic으로 지정합니다. 외부 타입이 다르면 ingress에 변환 callback이 필요합니다.
+`lane_enabled=true`와 함께 `topics.external_lane`을 합의된 별도 topic으로 지정합니다.
+외부 타입이 다르면 ingress에 변환 callback이 필요합니다.
 source/observation/final-state가 remap 후 겹치면 시작 오류로 relay loop를 차단합니다.
 기존처럼 외부 publisher가 내부 `/control/lane_pose`에 직접 publish하는 연결은 이행 대상입니다.
 이는 node/topic 소유 정책이며 DDS 접근 인증을 추가한 것은 아닙니다.
@@ -99,6 +101,16 @@ Lane의 finite lateral/heading/confidence, confidence [0,1], source timestamp를
 actual steering을 표현할 메시지로 재사용하지 않았습니다. 외부 계약을 합의하면 sensor_interface의
 `publishFeedback` 경계로 정규화된 측정값을 전달하도록 연결합니다. 현재 unavailable heartbeat timer는
 그때 실제 adapter lifecycle/timeout 처리로 교체해야 합니다.
+
+외부 실제 모터/구동륜 엔코더와 조향 엔코더는 각각 `topics.external_motor_feedback`,
+`topics.external_steering_feedback`으로 Sensor Interface에 들어오는 구조로 예약했습니다.
+외부 publisher가 내부 `/control/vehicle_feedback`으로 직접 연결되는 구조가 아닙니다.
+외부 메시지 타입, encoder count/RPM 등의 단위, 기어비·영점·부호·road-wheel 변환,
+측정 timestamp와 두 입력의 시간 정합을 합의한 뒤 이 node에서 내부 m/s·rad로 정규화합니다.
+실제 외부 구독·변환은 없으며 encoder enable=true를 거부합니다. 비활성 입력의 토픽 이름은
+미리 설정할 수 있고, 토픽 이름만으로 구독이 활성화되지는 않습니다.
+`vehicle_feedback_enabled=true`일 때만 stamp=0, 두 validity=false인 unavailable 상태를 발행하고,
+WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
 mode/guidance/tracking request는 각 owner node, ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
@@ -199,7 +211,8 @@ pose는 disabled이고 motion은 WHEEL 미구현으로 invalid입니다. GNSS ab
 횡오차와 heading 오차의 finite 여부, confidence [0,1], source freshness를 검사하고 Header와 세 숫자를 그대로 전달합니다.
 confidence가 낮지만 정상 범위이면 유지하며 planner의 lane_min_confidence가 사용 여부를 결정합니다.
 잘못된 관측은 drop, 입력 중단 시 반복 발행하지 않으므로 downstream timeout이 작동합니다.
-Lane filtering/curvature/polyline/geometry 추정은 하지 않습니다. heading 오차의 부호·단위 변환 없이 입력 rad 값을 보존합니다. 별도 disabled mode는 없습니다.
+Lane filtering/curvature/polyline/geometry 추정은 하지 않습니다. heading 오차의 부호·단위 변환 없이 입력 rad 값을 보존합니다.
+`lane_enabled=false`이면 observation 구독과 lane_pose 발행을 모두 생성하지 않습니다.
 
 ### Guidance required input
 
@@ -210,7 +223,9 @@ Lane filtering/curvature/polyline/geometry 추정은 하지 않습니다. headin
 | HYBRID | 필수 | 필수 | 필수 | 세 입력 검사 후 HYBRID_NOT_IMPLEMENTED, empty Path |
 
 GPS/HYBRID는 GlobalPose → GlobalPath 순으로 결손을 보고합니다. LANE은 이 두 조건을 검사하지 않습니다.
-LANE/HYBRID Lane 오류: `LANE_POSE_UNAVAILABLE`, `LANE_VALUES_INVALID`, `LANE_CONFIDENCE_LOW`.
+LANE/HYBRID 시작 설정은 lane_enabled=true를 요구합니다. 실행 중 비활성 Lane을 요청하면
+LANE_INPUT_DISABLED 등 invalid status와 empty Path로 닫습니다.
+활성 Lane 오류: `LANE_POSE_UNAVAILABLE`, `LANE_VALUES_INVALID`, `LANE_CONFIDENCE_LOW`.
 Lane이 정상이어도 현재 네 정보만으로 검증된 ReferencePath를 만들 수 없어 미구현 상태로 닫습니다.
 GPS로 silent fallback하거나 fake lane correction을 만들지 않습니다. HYBRID는 GPS+Lane이며 IMU fusion과 다릅니다.
 `guidance_mode_request`는 UInt8이며 잘못된 값은 보존/INVALID_GUIDANCE_MODE; 초기 잘못된 문자열은 시작 오류입니다.
@@ -218,7 +233,7 @@ Status 및 Path는 기본 20 Hz 생성 시각으로 발행합니다. GUI는 requ
 
 ### Downstream / safety / architecture blocker
 
-Motion planning은 **GlobalPose를 구독하지 않습니다**. ReferencePath + 유효 MotionState + MissionLimit + ObjectState로
+Motion planning은 **GlobalPose를 구독하지 않습니다**. ReferencePath + 유효 MotionState와 활성화된 MissionLimit/ObjectState로
 계획합니다. mission_based_limit는 정상 주행 속도/신호 정책이고, vehicle_interface는 선택 명령 이후 actuator-facing 보호를 담당합니다.
 Obstacle detected이면 motion planning은 회피 대신 정지합니다. speed PID는 없습니다.
 
@@ -335,7 +350,7 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 
 ### Tracking parameters
 
-모든 값은 `/control/motion_control`의 `config/control_manager.yaml`에 있습니다.
+모든 값은 `/control/motion_control`의 `config/operation.yaml`에 있습니다.
 
 | Parameter | 기본값 | 의미 / 단위 |
 |---|---:|---|
@@ -357,10 +372,50 @@ steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계�
 
 ## Configuration / 측정값
 
-새 stack의 local source of truth는 이 패키지의 `config/`입니다.
-`control_manager.yaml`에 topic/timing/control policy, `vehicle.yaml`에 geometry를 모았습니다.
-launch가 두 파일을 함께 로드합니다. node-specific parameter key는 `/control/<node name>`입니다.
-standalone `ros2 run`에 파일을 적용할 때도 `-r __ns:=/control`을 사용합니다.
+차량 수치는 `main/config/vehicle.jsonc`을 기준으로 이 패키지의 `vehicle.yaml`에 유지합니다.
+현재 설정은 다음 세 파일로 나눕니다. 파일 사이에 같은 node/parameter key를 중복 정의하지 않습니다.
+
+| 파일 | 책임 |
+|---|---|
+| `config/pipeline.yaml` | 토픽 연결, map/base frame, map 입력 파일 경로 |
+| `config/operation.yaml` | 시작 모드, 구현된 활성화 설정, 주기·timeout·품질 기준·제어 tuning·운용 한계 |
+| `config/vehicle.yaml` | 차량 치수와 센서 장착 수치 |
+
+launch는 각 노드에 vehicle → pipeline → operation 순서로 세 파일을 로드합니다.
+node-specific parameter key는 `/control/<node name>`입니다.
+기존 통합 설정은 `config/legacy/control_manager.yaml`의 legacy snapshot으로 보존하며,
+기본 launch와 현재 smoke fixture는 사용하지 않습니다. 앞으로의 설정 변경은 분리한 파일에 반영합니다.
+기존 `params_file:=...` 인자는 `operation_file`의 호환 alias로 유지합니다.
+두 인자를 모두 지정하면 명시적인 `operation_file`이 사용됩니다.
+
+```bash
+ros2 launch control_manager control_manager.xml \
+  pipeline_file:=/absolute/path/pipeline.yaml \
+  operation_file:=/absolute/path/operation.yaml
+
+ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
+  --params-file /absolute/path/vehicle.yaml \
+  --params-file /absolute/path/pipeline.yaml \
+  --params-file /absolute/path/operation.yaml
+```
+
+operation의 mode는 시작값입니다. 실행 중 Control/Guidance/Tracking 전환은 기존 request topic을
+사용하며, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
+활성화 key는 공통 영역에서 한 번 정의하고 ingress와 consumer가 함께 사용합니다.
+기본 operation은 GNSS만 활성입니다. RGB/LiDAR/IMU/Depth/Lane/encoder와 보조 feedback/Object/Mission은 비활성입니다.
+원시 센서·Lane relay는 입력과 대응 출력을 함께 끄며, vehicle_feedback은 별도 발행 스위치입니다.
+Lane/Object/Mission 비활성 node는 관측 구독·출력·timer를 만들지 않습니다.
+필수 입력 비활성화와 선택 모드가 모순되면 시작 오류이며, GNSS_IMU/WHEEL/encoder 미구현은 그대로입니다.
+외부 Lane 연결은 lane_enabled=true와 `pipeline.yaml`의 `topics.external_lane`을 함께 지정합니다.
+Motion Planning은 object_state_enabled/mission_limit_enabled가 true인 입력만 구독하고
+기존 validity/timeout/stop 정책을 적용합니다. false인 입력은 가짜 valid 관측 대신 해당 의존성을 제외하고
+MotionPlan.reason에 OBJECT_DISABLED/MISSION_DISABLED를 표시합니다. Mission 비활성 시 cruise_speed_mps를 사용합니다.
+기본 cruise_speed=0, PID disabled, IDLE, dry_run 및 최종 actuator 보호는 유지합니다.
+YAML은 연결 설정을 제공하며 실제 노드 기동은 launch, 구독·발행 생성은 C++가 담당합니다.
+
+`test/operation_smoke_test.py`는 구독·발행 graph, 필수 입력/모드 모순, Object/Mission 네 조합의
+실제 planning 결과·활성 입력 만료/정지, 비활성 Lane의 runtime 요청 거부를 검증합니다.
+기존 smoke와 같은 ROS_DOMAIN_ID=179 / localhost / dds_local.xml 환경에서 실행합니다.
 
 | 항목 | 값 (m) | 출처 |
 |---|---:|---|

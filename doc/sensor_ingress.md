@@ -43,8 +43,8 @@ External GNSS / IMU / Lane AI / future Motor-Steering feedback
 | rgb: /camera/image_raw | /control/sensors/rgb | sensor_msgs/Image |
 | lidar: /lidar/points | /control/sensors/lidar | sensor_msgs/PointCloud2 |
 | depth: /camera_dep/depth/image_raw | /control/sensors/depth | sensor_msgs/Image; depth_enabled |
-| external_lane: empty default | /control/lane_observation | configured LanePose adapter only |
-| motor/steering: NOT agreed, no subscription | /control/vehicle_feedback | VehicleFeedback; zero stamp/false flags only |
+| external_lane: empty default | /control/lane_observation | lane_enabled=true and configured LanePose topic required |
+| external_motor_feedback / external_steering_feedback: reserved inputs | /control/vehicle_feedback | Adapter not implemented; enabling either encoder is rejected |
 
 Raw relay는 SensorDataQoS를 유지합니다. Lane 입력도 SensorDataQoS로 reliable/best-effort source를
 받을 수 있고 내부 Lane/feedback 출력은 reliable depth 10입니다. source와 output이 remap 후 같으면
@@ -72,7 +72,14 @@ global_state_estimator의 motion_mode=GNSS도 같은 내부 GNSS topic을 사용
 ## 8. Motor/steering 흐름
 
 Future hardware callbacks → sensor_interface::publishFeedback → 내부 VehicleFeedback → global_state_estimator(motion_mode=WHEEL).
-외부 topic/type/scale는 미확정이라 구독 자체를 만들지 않았습니다. WHEEL에는 내부 구독만 연결했습니다.
+실제 모터/구동륜 엔코더와 조향 엔코더는 Sensor Interface의 외부 입력입니다.
+`pipeline.yaml`에 `topics.external_motor_feedback`과 `topics.external_steering_feedback`을 예약하고,
+standalone 실행에도 동일한 빈 기본값을 제공합니다. 내부 vehicle_feedback 발행자는 Sensor Interface입니다.
+외부 topic/type/scale·calibration·측정시각 정합은 미확정이라 구독 자체를 만들지 않았습니다.
+활성화는 operation.yaml의 motor_feedback_enabled/steering_feedback_enabled가 담당합니다.
+토픽 이름만 지정하고 비활성화할 수 있으며, enable=true는 adapter 미구현 시작 오류로 거부합니다.
+향후 raw 값을 내부 speed_mps/steering_angle_rad로 정규화한 뒤 publishFeedback에 전달합니다.
+vehicle_feedback_enabled=true일 때만 unavailable heartbeat를 발행하고 WHEEL NOT_IMPLEMENTED는 유지합니다.
 현재 ingress의 unavailable heartbeat는 source stamp=0 / 두 validity=false입니다. 가짜 측정이나
 목표 명령 기반 feedback을 만들지 않습니다. WHEEL output도 계속 NOT_IMPLEMENTED/invalid입니다.
 실제 adapter 구현 시 unavailable timer를 적절한 callback/timeout lifecycle로 교체해야 합니다.

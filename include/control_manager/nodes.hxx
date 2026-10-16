@@ -13,7 +13,8 @@ class SensorInterfaceNode : public NodeBase {
   rclcpp::Publisher<msg::VehicleFeedback>::SharedPtr feedback_publisher_;
   std::string base_frame_;
   double input_timeout_s_;
-  // TODO external hardware callbacks belong HERE, once motor/steering wire types,
+  // TODO topics.external_motor_feedback / topics.external_steering_feedback callbacks
+  // belong HERE, once motor/steering encoder wire types,
   // topics, units, calibration and acquisition-time alignment have been agreed.
   // They must normalize actual feedback and call publishFeedback, not estimate motion.
   template<class T> void relay(const std::string &source, const std::string &destination) {
@@ -88,6 +89,7 @@ class MotionPlanningNode : public NodeBase {
   std::shared_ptr<Input<msg::MissionLimit>> limit_;
   rclcpp::Publisher<msg::MotionPlan>::SharedPtr publisher_;
   double timeout_s_, cruise_speed_mps_;
+  bool objects_enabled_, mission_enabled_;
   std::string frame_, base_frame_;
 };
 class MotionControlNode : public NodeBase {

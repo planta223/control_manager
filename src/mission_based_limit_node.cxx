@@ -2,12 +2,15 @@
 #include <algorithm>
 namespace control_manager {
 MissionBasedLimitNode::MissionBasedLimitNode() : NodeBase("mission_based_limit") {
+  if (!enabled("mission_limit_enabled", true)) return;  // No input, output or timer.
   frame_ = param<std::string>("map_frame", "map");
   max_speed_mps_ = nonnegative("mission_max_speed_mps", 0.0);
   timeout_s_ = positive("object_timeout_s", 0.5);
   baseline_enabled_ = param<bool>("mission_baseline_enabled", false);
   traffic_light_applies_ = param<bool>("traffic_light_applies", false);
-  objects_ = input<msg::ObjectState>("object_state");
+  if (enabled("object_state_enabled", true)) objects_ = input<msg::ObjectState>("object_state");
+  if (traffic_light_applies_ && !objects_)
+    throw std::invalid_argument("traffic_light_applies requires object_state_enabled=true");
   publisher_ = output<msg::MissionLimit>("mission_limit");
   tick([this] { update(); });
 }

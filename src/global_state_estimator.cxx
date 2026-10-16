@@ -23,12 +23,21 @@ GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_es
 
   // Shared transport, independent output dependencies. All inputs are ingress-owned.
   if (pose_mode_ != core::PoseMode::NONE || motion_mode_ == core::MotionMode::GNSS ||
-      motion_mode_ == core::MotionMode::GNSS_IMU)
+      motion_mode_ == core::MotionMode::GNSS_IMU) {
+    if (!enabled("gnss_enabled", true))
+      throw std::invalid_argument("selected pose/motion mode requires gnss_enabled=true");
     gnss_ = input<nav_msgs::msg::Odometry>("sensor_gnss", rclcpp::SensorDataQoS());
-  if (pose_mode_ == core::PoseMode::GNSS_IMU || motion_mode_ == core::MotionMode::GNSS_IMU)
+  }
+  if (pose_mode_ == core::PoseMode::GNSS_IMU || motion_mode_ == core::MotionMode::GNSS_IMU) {
+    if (!enabled("imu_enabled", false))
+      throw std::invalid_argument("GNSS_IMU mode requires imu_enabled=true (algorithm still NOT_IMPLEMENTED)");
     imu_ = input<sensor_msgs::msg::Imu>("sensor_imu", rclcpp::SensorDataQoS());
-  if (motion_mode_ == core::MotionMode::WHEEL)
+  }
+  if (motion_mode_ == core::MotionMode::WHEEL) {
+    if (!enabled("vehicle_feedback_enabled", true))
+      throw std::invalid_argument("WHEEL mode requires vehicle_feedback_enabled=true (algorithm still NOT_IMPLEMENTED)");
     feedback_ = input<msg::VehicleFeedback>("vehicle_feedback");
+  }
   pose_publisher_ = output<msg::GlobalPose>("global_pose");
   motion_publisher_ = output<msg::MotionState>("motion_state");
   if (pose_mode_ == core::PoseMode::GNSS && !reference_verified_)

@@ -20,7 +20,9 @@ PathPlanningNode::PathPlanningNode() : NodeBase("path_planning") {
   // Static map snapshot is latched, no receipt-age expiry. Provider must validate datum.
   global_ = input<nav_msgs::msg::Path>("global_path", rclcpp::QoS(1).transient_local());
   pose_ = input<msg::GlobalPose>("global_pose");
-  lane_ = input<msg::LanePose>("lane_pose");  // Future algorithms only, never a validity shortcut.
+  if (enabled("lane_enabled", false)) lane_ = input<msg::LanePose>("lane_pose");
+  if (!lane_ && requested_guidance_ != msg::GuidanceStatus::GPS)
+    throw std::invalid_argument("LANE/HYBRID guidance requires lane_enabled=true");
   publisher_ = output<nav_msgs::msg::Path>("reference_path");
   guidance_publisher_ = output<msg::GuidanceStatus>("guidance_status");
   subscriptions_.push_back(create_subscription<std_msgs::msg::UInt8>(topic("guidance_mode_request"), 10,
@@ -38,7 +40,8 @@ void PathPlanningNode::update() {
   const bool global_path_available = datum_verified_ && global_->value &&
     validPath(*global_->value, frame_);
   std::string lane_error;
-  if (!current(lane_, timeout_s_)) lane_error = "LANE_POSE_UNAVAILABLE";
+  if (!lane_) lane_error = "LANE_INPUT_DISABLED";
+  else if (!current(lane_, timeout_s_)) lane_error = "LANE_POSE_UNAVAILABLE";
   else if (!std::isfinite(lane_->value->lateral_error_m) ||
            !std::isfinite(lane_->value->heading_error_rad) ||
            !std::isfinite(lane_->value->confidence) ||

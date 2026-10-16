@@ -73,7 +73,7 @@ def run():
                  'default PID with healthy fixtures fails closed until configured')
     finally:
         default.close()
-    config = yaml.safe_load((ROOT/'config/control_manager.yaml').read_text())
+    config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
     config['/control/motion_control']['ros__parameters']['pid'].update({
         'enabled': True, 'kp_lateral': 0.2, 'ki_lateral': 0.3, 'kd_lateral': 0.02,
         'kp_heading': 0.4, 'integral_limit_m_s': 0.5, 'max_steering_rad': 0.5})
@@ -88,7 +88,7 @@ def run():
             xml.getroot().remove(elem)
     launch = LOG/'tracking_fixture.xml'; xml.write(launch, encoding='unicode')
     values.clear()
-    stack = Stack(['ros2','launch',str(launch),'params_file:='+str(cfg)], 'tracking_integration')
+    stack = Stack(['ros2','launch',str(launch),'operation_file:='+str(cfg)], 'tracking_integration')
 
     def selected(mode, reason=None):
         return ('tracking_status' in values and values['tracking_status'].requested_mode == mode and

@@ -18,6 +18,12 @@ from smoke_test import ROOT, Stack, observe, wait_for
 def start(executable, label, *params):
     args = ['ros2', 'run', 'control_manager', executable if executable in {'global_state_estimator', 'lane_state_estimator'} else executable + '_node', '--ros-args',
             '-r', '__ns:=/control', '--params-file', str(ROOT/'config/vehicle.yaml')]
+    # These fixtures explicitly supply IMU/Lane observations when testing those paths.
+    if executable == 'global_state_estimator': args += ['-p', 'imu_enabled:=true']
+    if executable == 'lane_state_estimator' or any(
+            p.startswith('topics.external_lane:=') or p in {'guidance_mode:=LANE', 'guidance_mode:=HYBRID'}
+            for p in params):
+        args += ['-p', 'lane_enabled:=true']
     for param in params:
         args += ['-p', param]
     return Stack(args, label)

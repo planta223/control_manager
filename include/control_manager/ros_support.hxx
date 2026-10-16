@@ -38,6 +38,8 @@ inline const std::map<std::string, std::string> kTopics{
   {"sensor_rgb", "/control/sensors/rgb"}, {"sensor_depth", "/control/sensors/depth"},
   {"sensor_lidar", "/control/sensors/lidar"},
   {"external_lane", ""},  // No agreed external Lane topic; explicitly configure the adapter.
+  {"external_motor_feedback", ""},     // Reserved Sensor Interface encoder inputs.
+  {"external_steering_feedback", ""},  // Adapters/type/unit contracts are not implemented.
   {"lane_observation", "/control/lane_observation"},
   {"vehicle_feedback", "/control/vehicle_feedback"},
   {"global_pose", "/control/global_pose"}, {"motion_state", "/control/motion_state"}, {"lane_pose", "/control/lane_pose"},
@@ -69,6 +71,9 @@ class NodeBase : public rclcpp::Node {
     value = param<double>(key, value);
     if (!std::isfinite(value) || value <= 0.0) throw std::invalid_argument(key + " must be positive");
     return value;
+  }
+  bool enabled(const std::string &key, bool default_value) {
+    return has_parameter(key) ? get_parameter(key).as_bool() : param<bool>(key, default_value);
   }
   double nonnegative(const std::string &key, double value) {
     value = param<double>(key, value);

@@ -1,59 +1,50 @@
 /**:
   ros__parameters:
-    # Software policy / bench tuning, NOT measured vehicle limits.
+    # Startup choices / software policy / bench tuning, NOT measured vehicle limits.
+    # Parameters are read-only after startup; runtime mode requests use owner topics.
     rate_hz: 20.0
-    map_frame: map
-    base_frame: base_link
     state_timeout_s: 0.5
     command_timeout_s: 0.5
     input_timeout_s: 0.5
+
+    # Sensor Interface 구독토픽 활성화 (공통 key: 내부 소비 노드도 같은 값을 확인)
+    # false이면 해당 subscription과 대응 relay publisher를 생성하지 않음.
+    gnss_enabled: true
     imu_enabled: false
+    rgb_enabled: false
+    lidar_enabled: false
     depth_enabled: false
-    topics:
-      gnss: /gnss/odom                # Existing GNSS default, SensorDataQoS
-      imu: /imu/data
-      rgb: /camera/image_raw
-      depth: /camera_dep/depth/image_raw
-      lidar: /lidar/points
-      sensor_gnss: /control/sensors/gnss_odom
-      sensor_imu: /control/sensors/imu
-      sensor_rgb: /control/sensors/rgb
-      sensor_depth: /control/sensors/depth
-      sensor_lidar: /control/sensors/lidar
-      global_pose: /control/global_pose
-      motion_state: /control/motion_state
-      external_lane: ""            # Unagreed topic: disabled until explicitly configured.
-      # Adapter input type: control_manager/msg/LanePose; confirm external wire type with Lane team.
-      # Supplied values: lateral_error_m, heading_error_rad, confidence, header.stamp.
-      lane_observation: /control/lane_observation # INTERNAL publisher: sensor_interface
-      lane_pose: /control/lane_pose # INTERNAL publisher: lane_state_estimator
-      vehicle_feedback: /control/vehicle_feedback # INTERNAL, invalid until hardware adapter exists
-      object_state: /control/object_state
-      global_path: /control/global_path
-      reference_path: /control/reference_path
-      mission_limit: /control/mission_limit
-      motion_plan: /control/motion_plan
-      auto_cmd: /control/auto_cmd
-      manual_cmd: /control/manual_cmd
-      selected_cmd: /control/selected_cmd
-      vehicle_interface_status: /control/vehicle_interface/status
-      status: /control/status
-      mode_request: /control/mode_request
-      guidance_mode_request: /control/guidance_mode_request
-      guidance_status: /control/guidance_status
-      tracking_mode_request: /control/tracking_mode_request
-      tracking_status: /control/tracking_status
-      estop: /control/estop
+    lane_enabled: false             # 외부 Lane 입력 + lane_observation + lane_pose
+    motor_feedback_enabled: false   # true rejected: encoder adapter NOT_IMPLEMENTED
+    steering_feedback_enabled: false # true rejected: encoder adapter NOT_IMPLEMENTED
+
+    # Sensor Interface 발행토픽 활성화
+    # sensor_*와 lane_observation은 위 구독 활성화와 연동, 별도 중복 스위치 없음.
+    # 예를들어 gnss_enabled = true 이면 sensor_gnss_enabled = true 이다.
+    vehicle_feedback_enabled: false # true이면 현재는 stamp=0 / invalid heartbeat만 발행
+
+    # Object Manager 구독·발행토픽 활성화 (false = NONE, 센서 구독/출력/timer 없음)
+    object_state_enabled: false     # Motion Planning / Mission도 같은 key로 의존성 조절
+
+    # Mission Based Limit 구독·발행토픽 활성화 (false이면 입력/출력/timer 없음)
+    mission_limit_enabled: false    # Motion Planning도 같은 key로 의존성 조절
 /control/sensor_interface:
   ros__parameters:
+    # Sensor Interface 입력 검증 설정
     # input_timeout_s: common source-age admission policy. Lane confidence threshold
     # remains a planner policy; ingress only checks finite confidence in [0, 1].
-    # External motor/steering topic/type/unit contracts are TODO: no subscription yet.
+    # External motor/steering encoder inputs are reserved in pipeline.yaml.
+    # Adapters/type/unit contracts are TODO: keep encoder enable flags false.
     input_timeout_s: 0.5
 /control/global_state_estimator:
   ros__parameters:
+    # Global State Estimator 구독: 선택 모드가 요구하는 활성 입력만 구독, 모순이면 시작 오류.
+    # Global State Estimator 발행: global_pose / motion_state 항상 발행 (NONE은 invalid).
+    # Global Pose Mode 설정
     pose_mode: GNSS                 # GNSS / GNSS_IMU (TODO) / NONE
+    # Motion Mode 설정
     motion_mode: GNSS               # GNSS / GNSS_IMU (TODO) / WHEEL (TODO) / NONE
+    # Global State Estimator 기준점·품질 검증 설정
     localization_reference_verified: false # TODO NOT_VERIFIED: rear axle lever arm
     max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
     max_yaw_variance_rad2: 0.25       # TUNE
@@ -61,24 +52,38 @@
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
 /control/lane_state_estimator:
   ros__parameters:
+    # Lane State Estimator 구독·발행: 공통 lane_enabled에 연동, false이면 둘 다 생성하지 않음.
     state_timeout_s: 0.5            # Observation source freshness; no filtering/geometry
 /control/path_planning:
   ros__parameters:
+    # Path Planning 구독: global_pose / global_path / guidance_mode_request 유지.
+    # lane_pose 구독은 공통 lane_enabled에 연동. 비활성 Lane 요청은 정지 경로로 처리.
+    # Path Planning 발행: reference_path / guidance_status 항상 발행.
+    # Guidance Mode 설정 (LANE/HYBRID 시작 모드는 lane_enabled=true 필요)
     guidance_mode: GPS               # LANE / HYBRID validate inputs, then NOT_IMPLEMENTED
     lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
-    map_file: ""                     # Loader TODO. Nonempty value is rejected.
     map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
     lane_correction_enabled: false   # true rejected until correction is implemented
 /control/mission_based_limit:
   ros__parameters:
+    # Mission Based Limit 구독·발행: 공통 mission_limit_enabled에 연동.
+    # ObjectState 구독은 object_state_enabled에 연동, 신호 정책 활성 시 필수.
+    # Mission 정책 설정 (node 활성화와 별개, baseline 미설정이면 invalid/stop)
     mission_baseline_enabled: false  # Mission section policy not agreed
     mission_max_speed_mps: 0.0       # Disabled, NOT physical max speed
     traffic_light_applies: false     # Explicit baseline context, future map-section input
 /control/motion_planning:
   ros__parameters:
+    # Motion Planning 구독: reference_path / motion_state 필수.
+    # object_state / mission_limit은 공통 활성화 key가 true일 때만 구독·검증.
+    # 비활성 입력은 reason에 명시하며 가짜 valid ObjectState/MissionLimit을 만들지 않음.
+    # Motion Planning 발행: motion_plan 항상 발행. Mission 비활성 시 cruise speed 사용.
     cruise_speed_mps: 0.0            # Disabled target, NOT physical max speed
 /control/motion_control:
   ros__parameters:
+    # Motion Control 구독: global_pose / motion_state / motion_plan / status / tracking_mode_request.
+    # Motion Control 발행: auto_cmd / tracking_status 항상 발행.
+    # Tracking Mode 설정
     tracking_mode: PID              # Independent of Guidance and Vehicle Control
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
@@ -98,9 +103,15 @@
     goal_tolerance_m: 0.3            # TUNE
 /control/control_selector:
   ros__parameters:
+    # Control Selector 구독: auto_cmd / manual_cmd / mode_request / vehicle_interface_status.
+    # Control Selector 발행: selected_cmd / status 항상 발행.
+    # Vehicle Control Mode 설정
     mode: IDLE                      # Initial mode; mode_request changes runtime mode
 /control/vehicle_interface:
   ros__parameters:
+    # Vehicle Interface 구독: selected_cmd / estop 항상 유지 (보호 입력 비활성화 없음).
+    # Vehicle Interface 발행: vehicle_interface_status 항상 발행, actuator 송신 미구현.
+    # 최종 보호·운용 한계 설정
     dry_run: true                   # false rejected: no UDP backend implemented
     operating_limits_verified: false
     max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving

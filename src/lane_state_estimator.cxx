@@ -2,6 +2,7 @@
 #include "control_manager/ingress.hxx"
 namespace control_manager {
 LanePoseEstimatorNode::LanePoseEstimatorNode() : NodeBase("lane_state_estimator") {
+  if (!enabled("lane_enabled", false)) return;  // No observation subscription or pose publisher.
   timeout_s_ = positive("state_timeout_s", 0.5);
   publisher_ = output<msg::LanePose>("lane_pose");
   auto subscription = create_subscription<msg::LanePose>(topic("lane_observation"), 10,

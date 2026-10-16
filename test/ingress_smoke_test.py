@@ -20,13 +20,21 @@ def rejection_tests():
              (['-p','topics.external_lane:=lane_pose'], 'different topics'),
              (['-p','topics.external_lane:=/test/lane',
                '-r','/test/lane:=/control/lane_pose'], 'different topics'),
-             (['-p','topics.gnss:=/control/sensors/gnss_odom'], 'same topic')]
+             (['-p','topics.gnss:=/control/sensors/gnss_odom'], 'same topic'),
+             (['-p','topics.external_motor_feedback:=/test/motor_encoder'],
+              'encoder adapter not implemented'),
+             (['-p','topics.external_steering_feedback:=/test/steering_encoder'],
+              'encoder adapter not implemented')]
     for args, expected in cases:
+        args = list(args)
+        if any('topics.external_lane:=' in arg for arg in args): args += ['-p', 'lane_enabled:=true']
+        if any('topics.external_motor_feedback:=' in arg for arg in args): args += ['-p', 'motor_feedback_enabled:=true']
+        if any('topics.external_steering_feedback:=' in arg for arg in args): args += ['-p', 'steering_feedback_enabled:=true']
         result = subprocess.run(['ros2','run','control_manager','sensor_interface_node',
                                  '--ros-args','-r','__ns:=/control']+args,
                                 env=ENV, capture_output=True, text=True, timeout=10)
         assert result.returncode != 0 and expected in result.stdout+result.stderr, result
-        print('PASS: resolved topic loop rejected: '+str(args), flush=True)
+        print('PASS: invalid or unsupported ingress configuration rejected: '+str(args), flush=True)
 
 
 def run():

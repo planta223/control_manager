@@ -80,7 +80,7 @@ def default_stack():
     try:
         wait_for(node, lambda: len([n for n, ns in node.get_node_names_and_namespaces()
                                    if ns == '/control']) == 10, 'XML launches all ten nodes')
-        wait_for(node, lambda: 'protected_cmd' in values and 'object_state' in values and
+        wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
         wait_for(node, lambda: 'tracking_status' in values, 'TrackingStatus delivered')
         assert values['tracking_status'].requested_mode == TrackingStatus.PID
@@ -88,11 +88,13 @@ def default_stack():
         assert values['status'].mode == ControlStatus.IDLE
         assert not values['protected_cmd'].valid and values['protected_cmd'].target_brake
         assert values['protected_cmd'].target_speed_mps == 0.0
-        assert not values['object_state'].valid and not values['object_state'].obstacle_valid
+        assert 'object_state' not in values  # Explicitly disabled; no fabricated clear observation.
         assert not values['auto_cmd'].valid
-        print('PASS: default IDLE, unknown objects, final safe stop', flush=True)
-        required = {'/control/' + s for s in ['global_pose', 'motion_state', 'lane_observation', 'lane_pose', 'vehicle_feedback', 'object_state',
-                    'reference_path', 'mission_limit', 'motion_plan', 'auto_cmd', 'manual_cmd',
+        print('PASS: default GNSS-only ingress, disabled objects, IDLE and final safe stop', flush=True)
+        for topic in ('lane_observation', 'lane_pose', 'vehicle_feedback', 'object_state', 'mission_limit'):
+            assert not node.get_publishers_info_by_topic('/control/' + topic)
+        required = {'/control/' + s for s in ['global_pose', 'motion_state',
+                    'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
                     'selected_cmd', 'vehicle_interface/status', 'status', 'guidance_status', 'guidance_mode_request', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         print('PASS: required topic graph contracts', flush=True)
@@ -117,7 +119,9 @@ def startup_rejections():
 
 
 def integrated_fixtures():
-    config = yaml.safe_load((ROOT / 'config/control_manager.yaml').read_text())
+    config = yaml.safe_load((ROOT / 'config/operation.yaml').read_text())
+    config['/**']['ros__parameters'].update({
+        'lane_enabled': True, 'object_state_enabled': True, 'mission_limit_enabled': True})
     overrides = {
         'global_state_estimator': {'localization_reference_verified': True},
         'sensor_interface': {'topics.external_lane': '/test/external_lane'},
@@ -207,7 +211,7 @@ def integrated_fixtures():
             lane_pub.publish(lane)
 
     timer = node.create_timer(0.05, publish)
-    stack = Stack(['ros2', 'launch', str(fixture_launch), 'params_file:=' + str(fixture_config)],
+    stack = Stack(['ros2', 'launch', str(fixture_launch), 'operation_file:=' + str(fixture_config)],
                   'smoke_integration')
     try:
         wait_for(node, lambda: 'global_pose' in values and values['global_pose'].valid,
