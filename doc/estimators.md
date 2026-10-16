@@ -63,6 +63,9 @@ NONE은 정상 disabled configuration이며 오류 로그를 내지 않습니다
 stamp=0, validity=false, 명확한 reason으로 발행합니다. 미구현 출력도 유효한 관측을 주장하지 않습니다.
 잘못된 mode 문자열은 startup error입니다. 각 mode는 read-only parameter이며 변경에는 재시작이 필요합니다.
 Guidance GPS/LANE/HYBRID는 source mode와 독립입니다.
+Path Planning의 guidance_mode는 operation.yaml에서 시작 시 선택하며 변경 후 재시작합니다.
+GPS는 GlobalPose+GlobalPath, LANE은 LanePose, HYBRID는 세 입력만 구독합니다.
+별도 Guidance 모드 요청 토픽은 없으며 NONE은 actual_mode의 상태 표시로만 사용합니다.
 
 ## 5. 독립 validity와 기존 검증 보존
 

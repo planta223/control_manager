@@ -7,7 +7,7 @@ namespace control_manager::core {
 // Guidance is independent of ControlMode and both estimator modes.
 enum class GuidanceMode : std::uint8_t { GPS = 0, LANE = 1, HYBRID = 2 };
 struct GuidanceDecision {
-  std::uint8_t requested_mode{0};  // Preserve invalid wire requests for diagnostics.
+  std::uint8_t requested_mode{0};  // Configured mode; retain invalid values for diagnostics.
   std::optional<GuidanceMode> actual_mode;
   std::string active_source{"NONE"};
   bool valid{false};

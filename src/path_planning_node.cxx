@@ -9,27 +9,27 @@ PathPlanningNode::PathPlanningNode() : NodeBase("path_planning") {
   if (lane_min_confidence_ > 1.0) throw std::invalid_argument("lane_min_confidence must be <= 1");
   datum_verified_ = param<bool>("map_datum_verified", false);
   const auto mode = param<std::string>("guidance_mode", "GPS");
-  if (mode == "LANE") requested_guidance_ = msg::GuidanceStatus::LANE;
-  else if (mode == "HYBRID") requested_guidance_ = msg::GuidanceStatus::HYBRID;
+  if (mode == "LANE") guidance_mode_ = msg::GuidanceStatus::LANE;
+  else if (mode == "HYBRID") guidance_mode_ = msg::GuidanceStatus::HYBRID;
   else if (mode != "GPS")
     throw std::invalid_argument("guidance_mode must be GPS, LANE or HYBRID");
   if (param<bool>("lane_correction_enabled", false))
     throw std::invalid_argument("lane correction not implemented; keep lane_correction_enabled=false");
   if (!param<std::string>("map_file", "").empty())
     throw std::invalid_argument("map loader not implemented; publish a validated global_path instead");
-  // Static map snapshot is latched, no receipt-age expiry. Provider must validate datum.
-  global_ = input<nav_msgs::msg::Path>("global_path", rclcpp::QoS(1).transient_local());
-  pose_ = input<msg::GlobalPose>("global_pose");
-  if (enabled("lane_enabled", false)) lane_ = input<msg::LanePose>("lane_pose");
-  if (!lane_ && requested_guidance_ != msg::GuidanceStatus::GPS)
-    throw std::invalid_argument("LANE/HYBRID guidance requires lane_enabled=true");
+  // Subscribe only to the inputs required by the read-only startup mode.
+  if (guidance_mode_ != msg::GuidanceStatus::LANE) {
+    // Static map snapshot is latched, no receipt-age expiry. Provider validates datum.
+    global_ = input<nav_msgs::msg::Path>("global_path", rclcpp::QoS(1).transient_local());
+    pose_ = input<msg::GlobalPose>("global_pose");
+  }
+  if (guidance_mode_ != msg::GuidanceStatus::GPS) {
+    if (!enabled("lane_enabled", false))
+      throw std::invalid_argument("LANE/HYBRID guidance requires lane_enabled=true");
+    lane_ = input<msg::LanePose>("lane_pose");
+  }
   publisher_ = output<nav_msgs::msg::Path>("reference_path");
   guidance_publisher_ = output<msg::GuidanceStatus>("guidance_status");
-  subscriptions_.push_back(create_subscription<std_msgs::msg::UInt8>(topic("guidance_mode_request"), 10,
-    [this](std_msgs::msg::UInt8::ConstSharedPtr request) {
-      requested_guidance_ = request->data;
-      update();  // Publish empty path immediately for unsupported/invalid requests.
-    }));
   tick([this] { update(); });
 }
 void PathPlanningNode::update() {
@@ -37,7 +37,7 @@ void PathPlanningNode::update() {
     pose_->value->valid && pose_->value->header.frame_id == frame_ &&
     std::isfinite(pose_->value->x_m) && std::isfinite(pose_->value->y_m) &&
     std::isfinite(pose_->value->yaw_rad);
-  const bool global_path_available = datum_verified_ && global_->value &&
+  const bool global_path_available = datum_verified_ && global_ && global_->value &&
     validPath(*global_->value, frame_);
   std::string lane_error;
   if (!lane_) lane_error = "LANE_INPUT_DISABLED";
@@ -49,7 +49,7 @@ void PathPlanningNode::update() {
     lane_error = "LANE_VALUES_INVALID";
   else if (lane_->value->confidence < lane_min_confidence_) lane_error = "LANE_CONFIDENCE_LOW";
   // Header frame/error signs are not enough to infer lane geometry; no transform is assumed.
-  const auto decision = core::evaluateGuidance(requested_guidance_, localization_available,
+  const auto decision = core::evaluateGuidance(guidance_mode_, localization_available,
                                                global_path_available, lane_error);
   nav_msgs::msg::Path path;
   if (decision.valid) path = *global_->value;

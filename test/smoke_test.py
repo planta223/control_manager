@@ -95,8 +95,9 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'vehicle_interface/status', 'status', 'guidance_status', 'guidance_mode_request', 'tracking_status', 'tracking_mode_request']}
+                    'selected_cmd', 'vehicle_interface/status', 'status', 'guidance_status', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
+        assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         print('PASS: required topic graph contracts', flush=True)
     finally:
         stack.close()
@@ -148,7 +149,6 @@ def integrated_fixtures():
     object_pub = node.create_publisher(ObjectState, '/control/object_state', 10)
     manual_pub = node.create_publisher(VehicleCommand, '/control/manual_cmd', 10)
     mode_pub = node.create_publisher(UInt8, '/control/mode_request', 10)
-    guidance_pub = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
     lane_pub = node.create_publisher(LanePose, '/test/external_lane', 10)
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
@@ -247,47 +247,6 @@ def integrated_fixtures():
                 assert status.valid and not status.degraded and status.active_source == 'GLOBAL_PATH'
                 assert [(p.pose.position.x, p.pose.position.y) for p in values['reference_path'].poses] == [(0., 1.), (10., 1.), (20., 1.)]
             print('PASS: GPS ignores LanePose ' + lane_input, flush=True)
-
-        active['lane'] = 'valid'
-        for request, reason in [(GuidanceStatus.LANE, 'LANE_NOT_IMPLEMENTED'),
-                                (GuidanceStatus.HYBRID, 'HYBRID_NOT_IMPLEMENTED'),
-                                (255, 'INVALID_GUIDANCE_MODE')]:
-            guidance_pub.publish(UInt8(data=request))
-            wait_for(node, lambda: values['guidance_status'].requested_mode == request and
-                     values['guidance_status'].reason == reason and
-                     values['guidance_status'].actual_mode == GuidanceStatus.NONE and
-                     not values['guidance_status'].valid and not values['reference_path'].poses and
-                     not values['motion_plan'].valid and values['motion_plan'].stop_request and
-                     not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
-                     not values['protected_cmd'].valid and values['protected_cmd'].target_brake,
-                     'unsupported/invalid guidance closes AUTO: ' + reason)
-            assert values['status'].mode == ControlStatus.AUTO
-            assert not values['guidance_status'].degraded
-            assert values['guidance_status'].active_source == 'NONE'
-            # Even healthy lane input and absent GNSS cannot fake lane/hybrid support.
-            active['lane'], active['gnss'] = 'valid', False
-            wait_for(node, lambda: not values['global_pose'].valid,
-                     'unsupported guidance fixture: localization expires')
-            assert not values['guidance_status'].valid
-            expected = 'GLOBAL_POSE_UNAVAILABLE' if request == GuidanceStatus.HYBRID else reason
-            wait_for(node, lambda: values['guidance_status'].reason == expected,
-                     'mode-specific global dependency: ' + expected)
-            active['gnss'] = True
-            wait_for(node, lambda: values['global_pose'].valid, 'restore fixture GNSS')
-            mode_pub.publish(UInt8(data=ControlStatus.MANUAL))
-            wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
-                     values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps == 0.4,
-                     'Guidance request does not select or block MANUAL')
-            assert values['guidance_status'].requested_mode == request
-            mode_pub.publish(UInt8(data=ControlStatus.AUTO))
-            wait_for(node, lambda: values['status'].mode == ControlStatus.AUTO and
-                     not values['protected_cmd'].valid and values['protected_cmd'].target_brake,
-                     'AUTO cannot use manual command with invalid guidance')
-            guidance_pub.publish(UInt8(data=GuidanceStatus.GPS))
-            wait_for(node, lambda: values['guidance_status'].requested_mode == GuidanceStatus.GPS and
-                     values['guidance_status'].actual_mode == GuidanceStatus.GPS and
-                     values['guidance_status'].valid and values['protected_cmd'].valid and
-                     values['protected_cmd'].target_speed_mps == 1.0, 'explicit GPS recovery')
 
         for shape in ['empty', 'wrong_frame']:
             active['path'] = shape

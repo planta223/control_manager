@@ -24,7 +24,6 @@
       # 외부 토픽: GUI/CLI/수동 명령 adapter가 발행 (이 패키지는 발행자를 기동하지 않음)
       manual_cmd: /control/manual_cmd # VehicleCommand 필요; keyboard raw 명령의 변환 필요
       mode_request: /control/mode_request                 # 구독: control_selector
-      guidance_mode_request: /control/guidance_mode_request # 구독: path_planning
       tracking_mode_request: /control/tracking_mode_request # 구독: motion_control
       estop: /control/estop                               # 구독: vehicle_interface
 

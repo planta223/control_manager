@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # Startup choices / software policy / bench tuning, NOT measured vehicle limits.
-    # Parameters are read-only after startup; runtime mode requests use owner topics.
+    # Parameters are read-only after startup; Control/Tracking requests use owner topics.
     rate_hz: 20.0
     state_timeout_s: 0.5
     command_timeout_s: 0.5
@@ -59,11 +59,11 @@
 
 /control/path_planning:
   ros__parameters:
-    # Path Planning 구독: global_pose / global_path / guidance_mode_request 유지.
-    # lane_pose 구독은 공통 lane_enabled에 연동. 비활성 Lane 요청은 정지 경로로 처리.
+    # Path Planning 구독: GPS=global_pose+global_path, LANE=lane_pose, HYBRID=세 입력.
+    # LANE/HYBRID는 공통 lane_enabled=true 필요. 선택 모드의 입력만 구독.
     # Path Planning 발행: reference_path / guidance_status 항상 발행.
-    # Guidance Mode 설정 (LANE/HYBRID 시작 모드는 lane_enabled=true 필요)
-    guidance_mode: GPS               # LANE / HYBRID validate inputs, then NOT_IMPLEMENTED
+    # Guidance Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 모드 요청 토픽 없음)
+    guidance_mode: GPS               # GPS / LANE / HYBRID (LANE/HYBRID NOT_IMPLEMENTED)
     lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
     map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
     lane_correction_enabled: false   # true rejected until correction is implemented

@@ -53,7 +53,7 @@ flowchart TD
   FB[future motor / steering feedback contract TODO] -.-> SI
   SI --> VF[internal VehicleFeedback: unavailable]
   VF --> E
-  QG[guidance_mode_request] --> P
+  QG[operation.yaml: guidance_mode, 재시작 필요] -.-> P
   P --> GS[GuidanceStatus]
   P --> RP[ReferencePath]
   RP --> MP[motion_planning]
@@ -117,16 +117,16 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 
 ## AFTER RQT (권장안만; 미구현)
 
-미지원 HYBRID 요청 예시입니다. 수치 `--`는 가짜 feedback이 아닌 미수신 표시입니다.
+미지원 HYBRID 시작 설정 예시입니다. 수치 `--`는 가짜 feedback이 아닌 미수신 표시입니다.
 
 ```text
 ┌─ BAQU Control (설계안) ───────────────────────┐
 │ Vehicle Control: [IDLE] [MANUAL] [AUTO]       │
 │ Actual control / FSM: -- / --               │
 ├─────────────────────────────────────────────┤
-│ Guidance: [GPS] [LANE*] [HYBRID*]   │
-│ * NOT_IMPLEMENTED: 요청 시 AUTO stop        │
-│ Requested: HYBRID     Actual: NONE          │
+│ Guidance config: HYBRID (변경 후 재시작)    │
+│ * LANE/HYBRID NOT_IMPLEMENTED: AUTO stop    │
+│ Configured: HYBRID    Actual: NONE          │
 │ Source: NONE   Valid: NO   Degraded: NO      │
 │ Reason: HYBRID_NOT_IMPLEMENTED              │
 ├─────────────────────────────────────────────┤
@@ -146,7 +146,7 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 └─────────────────────────────────────────────┘
 ```
 
-GUI의 요청 선택 표시와 node가 보낸 actual 표시를 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
+GUI의 Control 요청/Guidance 설정 표시와 node가 보낸 actual 표시를 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
 Optional sensor runtime toggle은 없습니다. config 활성 여부와 수신 age를 표시하더라도
 그것이 fusion/detection의 성공이나 센서 물리 정상 여부를 뜻하지 않습니다.
 센서 health/실제 외부 actuator feedback 계약은 미확정입니다. 내부 VehicleFeedback은 현재 invalid입니다.
@@ -179,7 +179,7 @@ Web Dashboard는 control_manager의 Guidance 및 arbitration 요청 UI를 갖고
 ```mermaid
 flowchart LR
   UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_selector]
-  UI -->|guidance_mode_request UInt8| PP[path_planning]
+  CFG -->|guidance_mode: 시작 시 선택| PP[path_planning]
   PP -->|guidance_status GuidanceStatus| UI
   CM -->|status ControlStatus| UI
   GP[global_pose] --> UI
@@ -196,8 +196,8 @@ flowchart LR
 ```
 
 기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.
-Guidance 계약은 `/control/guidance_mode_request` (UInt8, reliable volatile)와
-`/control/guidance_status` (GuidanceStatus, reliable volatile)입니다. 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
-요청 값은 0/1/2이며 NONE=255는 actual status sentinel입니다.
+Guidance는 operation.yaml의 guidance_mode=GPS / LANE / HYBRID로 시작 시 선택하며 변경 후 재시작합니다.
+별도 요청 토픽은 없고 `/control/guidance_status` (GuidanceStatus, reliable volatile)로 상태를 표시합니다.
+requested_mode는 설정값 0/1/2이며 NONE=255는 actual status sentinel입니다. 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
 GUI는 단순 요청/표시 source이고 정지 판정 권한은 node/safety에 있습니다.
 GUI가 없어도 source freshness 검사와 AUTO invalid guidance stop 경로는 유지됩니다.

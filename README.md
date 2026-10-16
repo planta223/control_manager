@@ -55,7 +55,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | sensor_interface_node | 활성화한 외부 센서/Lane 입력 | 대응 sensors/*·lane_observation, optional vehicle_feedback; 단일 ingress |
 | global_state_estimator | 선택한 모드가 요구하는 sensors/gnss_odom, sensors/imu, vehicle_feedback | global_pose + motion_state; 독립 validity |
 | lane_state_estimator | lane_enabled=true일 때 lane_observation | 같은 조건으로 lane_pose; finite/confidence/freshness 검사·원본 보존 |
-| path_planning_node | global_pose, global_path, lane_pose, guidance_mode_request | reference_path, guidance_status; Guidance owner |
+| path_planning_node | GPS: global_pose + global_path; LANE: lane_pose; HYBRID: 세 입력 | reference_path, guidance_status; Guidance owner |
 | object_manager_node | object_state_enabled=true일 때 활성 RGB/LiDAR/Depth만 | 같은 조건으로 object_state; detection 없음, UNKNOWN/invalid |
 | mission_based_limit_node | mission_limit_enabled=true, Object 활성일 때 object_state | mission 활성 시 mission_limit; opt-in speed cap/신호 정책 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
@@ -113,7 +113,8 @@ actual steering을 표현할 메시지로 재사용하지 않았습니다. 외�
 WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
-mode/guidance/tracking request는 각 owner node, ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
+mode/tracking request는 각 owner node, ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
+Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 요청 토픽은 없습니다.
 어느 것도 ingress나 estimator를 경유하지 않습니다.
 
 ## Message / 시간 계약
@@ -225,13 +226,15 @@ Lane filtering/curvature/polyline/geometry 추정은 하지 않습니다. headin
 | HYBRID | 필수 | 필수 | 필수 | 세 입력 검사 후 HYBRID_NOT_IMPLEMENTED, empty Path |
 
 GPS/HYBRID는 GlobalPose → GlobalPath 순으로 결손을 보고합니다. LANE은 이 두 조건을 검사하지 않습니다.
-LANE/HYBRID 시작 설정은 lane_enabled=true를 요구합니다. 실행 중 비활성 Lane을 요청하면
-LANE_INPUT_DISABLED 등 invalid status와 empty Path로 닫습니다.
+LANE/HYBRID 시작 설정은 lane_enabled=true를 요구합니다. 모드에 필요한 입력만 구독하며,
+GPS에서는 lane_enabled=true여도 LanePose를 구독하지 않습니다. LANE은 GlobalPose/GlobalPath를 구독하지 않습니다.
 활성 Lane 오류: `LANE_POSE_UNAVAILABLE`, `LANE_VALUES_INVALID`, `LANE_CONFIDENCE_LOW`.
 Lane이 정상이어도 현재 네 정보만으로 검증된 ReferencePath를 만들 수 없어 미구현 상태로 닫습니다.
 GPS로 silent fallback하거나 fake lane correction을 만들지 않습니다. HYBRID는 GPS+Lane이며 IMU fusion과 다릅니다.
-`guidance_mode_request`는 UInt8이며 잘못된 값은 보존/INVALID_GUIDANCE_MODE; 초기 잘못된 문자열은 시작 오류입니다.
-Status 및 Path는 기본 20 Hz 생성 시각으로 발행합니다. GUI는 request source이며 safety authority가 아닙니다.
+`guidance_mode`는 GPS / LANE / HYBRID 세 값만 허용하는 read-only 시작 설정이며 변경 후 재시작합니다.
+NONE이나 잘못된 문자열은 시작 오류입니다. GuidanceStatus.requested_mode는 설정한 모드입니다.
+actual_mode의 NONE=255는 유효 경로가 없는 상태 표시이며 선택 가능한 모드가 아닙니다.
+Status 및 Path는 기본 20 Hz 생성 시각으로 발행합니다.
 
 ### Downstream / safety / architecture blocker
 
@@ -401,8 +404,8 @@ ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
   --params-file /absolute/path/operation.yaml
 ```
 
-operation의 mode는 시작값입니다. 실행 중 Control/Guidance/Tracking 전환은 기존 request topic을
-사용하며, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
+operation의 mode는 시작값입니다. 실행 중 Control/Tracking 전환은 기존 request topic을 사용합니다.
+Guidance, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
 활성화 key는 공통 영역에서 한 번 정의하고 ingress와 consumer가 함께 사용합니다.
 기본 operation은 GNSS만 활성입니다. RGB/LiDAR/IMU/Depth/Lane/encoder와 보조 feedback/Object/Mission은 비활성입니다.
 원시 센서·Lane relay는 입력과 대응 출력을 함께 끄며, vehicle_feedback은 별도 발행 스위치입니다.
@@ -416,7 +419,7 @@ MotionPlan.reason에 OBJECT_DISABLED/MISSION_DISABLED를 표시합니다. Missio
 YAML은 연결 설정을 제공하며 실제 노드 기동은 launch, 구독·발행 생성은 C++가 담당합니다.
 
 `test/operation_smoke_test.py`는 구독·발행 graph, 필수 입력/모드 모순, Object/Mission 네 조합의
-실제 planning 결과·활성 입력 만료/정지, 비활성 Lane의 runtime 요청 거부를 검증합니다.
+실제 planning 결과·활성 입력 만료/정지, Guidance 세 시작 모드의 구독 및 실행 중 변경 거부를 검증합니다.
 기존 smoke와 같은 ROS_DOMAIN_ID=179 / localhost / dds_local.xml 환경에서 실행합니다.
 
 | 항목 | 값 (m) | 출처 |

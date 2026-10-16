@@ -9,7 +9,6 @@ import rclpy
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import UInt8
 from control_manager.msg import (GlobalPose, MotionState, LanePose, GuidanceStatus,
                                  MissionLimit, ObjectState, VehicleCommand, MotionPlan)
 from smoke_test import ROOT, Stack, observe, wait_for
@@ -142,7 +141,7 @@ def guidance():
     node = rclpy.create_node('state_split_guidance_fixture')
     values = observe(node)
     pubs = {key: node.create_publisher(cls, '/test/external_lane' if key == 'lane_pose' else '/control/' + key, 10) for key, cls in [
-        ('lane_pose', LanePose), ('global_pose', GlobalPose), ('guidance_mode_request', UInt8)]}
+        ('lane_pose', LanePose), ('global_pose', GlobalPose)]}
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', durable)
@@ -187,7 +186,8 @@ def guidance():
             wait_for(node, lambda: reason(expected), 'Lane admission: ' + case)
             state['lane'] = 'good'
             wait_for(node, lambda: reason('LANE_NOT_IMPLEMENTED'), 'restore Lane after ' + case)
-        pubs['guidance_mode_request'].publish(UInt8(data=GuidanceStatus.HYBRID))
+        stack.close()
+        stack = start('path_planning', 'split_guidance_hybrid', 'guidance_mode:=HYBRID', 'map_datum_verified:=true')
         wait_for(node, lambda: reason('GLOBAL_POSE_UNAVAILABLE'), 'HYBRID requires GlobalPose')
         state['pose'] = True
         wait_for(node, lambda: reason('GLOBAL_PATH_UNAVAILABLE'), 'HYBRID requires GlobalPath')
@@ -197,9 +197,10 @@ def guidance():
         wait_for(node, lambda: reason('HYBRID_NOT_IMPLEMENTED'), 'HYBRID healthy inputs do not fake correction')
         assert not values['guidance_status'].valid and values['guidance_status'].actual_mode == GuidanceStatus.NONE
         state['lane'] = 'nan'
-        pubs['guidance_mode_request'].publish(UInt8(data=GuidanceStatus.GPS))
+        stack.close()
+        stack = start('path_planning', 'split_guidance_gps', 'guidance_mode:=GPS', 'map_datum_verified:=true')
         wait_for(node, lambda: values['guidance_status'].valid and len(values['reference_path'].poses)==2,
-                 'GPS pass-through ignores ingress-rejected Lane')
+                 'GPS startup mode ignores ingress-rejected Lane')
         state['pose'] = False
         wait_for(node, lambda: reason('GLOBAL_POSE_UNAVAILABLE'), 'GPS GlobalPose receipt timeout')
     finally:

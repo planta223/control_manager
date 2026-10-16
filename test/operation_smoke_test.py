@@ -5,7 +5,6 @@ Use the same installed package and isolated environment as smoke_test.py.
 import copy
 import itertools
 import subprocess
-import time
 
 import rclpy
 import yaml
@@ -13,6 +12,8 @@ from ament_index_python.packages import get_package_prefix
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path as PathMsg
 from std_msgs.msg import UInt8
+from rcl_interfaces.srv import SetParameters
+from rclpy.parameter import Parameter
 from control_manager.msg import MotionState, MotionPlan, ObjectState, MissionLimit, GuidanceStatus
 from smoke_test import ROOT, ENV, Stack, wait_for
 
@@ -100,6 +101,9 @@ def rejection_tests():
         ('sensor_interface_node', ('motor_feedback_enabled:=true',), 'encoder adapter not implemented'),
         ('sensor_interface_node', ('steering_feedback_enabled:=true',), 'encoder adapter not implemented'),
         ('path_planning_node', ('guidance_mode:=LANE',), 'requires lane_enabled'),
+        ('path_planning_node', ('guidance_mode:=HYBRID',), 'requires lane_enabled'),
+        ('path_planning_node', ('guidance_mode:=NONE',), 'guidance_mode must be'),
+        ('path_planning_node', ('guidance_mode:=INVALID',), 'guidance_mode must be'),
         ('object_manager_node', ('object_state_enabled:=true',), 'requires at least one'),
         ('mission_based_limit_node', ('mission_limit_enabled:=true', 'traffic_light_applies:=true'),
          'requires object_state_enabled')]
@@ -163,27 +167,43 @@ def planning_dependencies():
     print('PASS: all Object/Mission dependency combinations, ignored invalid inactive data, active stop/timeout', flush=True)
 
 
-def disabled_lane_request():
-    node = rclpy.create_node('operation_guidance_fixture'); values = []
-    node.create_subscription(GuidanceStatus, '/control/guidance_status', values.append, 10)
-    request = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
-    stack = Stack(command('path_planning_node'), 'operation_guidance')
-    try:
-        wait_for(node, lambda: bool(values), 'GPS status available without Lane input')
-        assert not owns(node, '/control/lane_pose', 'path_planning')
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and values[-1].reason != 'LANE_INPUT_DISABLED':
-            request.publish(UInt8(data=1)); rclpy.spin_once(node, timeout_sec=.05)
-        assert values[-1].reason == 'LANE_INPUT_DISABLED' and not values[-1].valid
-        assert values[-1].actual_mode == GuidanceStatus.NONE
-    finally:
-        stack.close(); node.destroy_node()
-    print('PASS: runtime disabled-Lane request fails closed without GPS fallback', flush=True)
+def guidance_startup_modes():
+    for mode, value, expected in [('GPS', GuidanceStatus.GPS, {'global_pose', 'global_path'}),
+                                  ('LANE', GuidanceStatus.LANE, {'lane_pose'}),
+                                  ('HYBRID', GuidanceStatus.HYBRID, {'global_pose', 'global_path', 'lane_pose'})]:
+        node = rclpy.create_node('operation_guidance_fixture'); values = []
+        node.create_subscription(GuidanceStatus, '/control/guidance_status', values.append, 10)
+        legacy_request = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
+        # Even with Lane enabled globally, GPS must subscribe only to global inputs.
+        stack = Stack(command('path_planning_node', 'guidance_mode:=' + mode,
+                              'lane_enabled:=true'), 'operation_guidance_' + mode)
+        client = node.create_client(SetParameters, '/control/path_planning/set_parameters')
+        try:
+            wait_for(node, lambda: bool(values) and values[-1].requested_mode == value,
+                     'configured Guidance mode: ' + mode)
+            wait_for(node, lambda: all(owns(node, '/control/' + topic, 'path_planning') ==
+                     (topic in expected) for topic in ('global_pose', 'global_path', 'lane_pose')),
+                     'only required Guidance inputs subscribed: ' + mode)
+            assert not owns(node, '/control/guidance_mode_request', 'path_planning')
+            assert client.wait_for_service(timeout_sec=3)
+            request = SetParameters.Request(parameters=[
+                Parameter('guidance_mode', value='GPS' if mode != 'GPS' else 'LANE').to_parameter_msg()])
+            future = client.call_async(request)
+            wait_for(node, future.done, 'runtime parameter change answered: ' + mode)
+            assert not future.result().results[0].successful
+            for _ in range(8):
+                legacy_request.publish(UInt8(data=255))
+                rclpy.spin_once(node, timeout_sec=.05)
+            assert values[-1].requested_mode == value
+            assert not values[-1].valid and values[-1].actual_mode == GuidanceStatus.NONE
+        finally:
+            stack.close(); node.destroy_client(client); node.destroy_node()
+    print('PASS: GPS/LANE/HYBRID startup modes, read-only selection and no request-topic subscription', flush=True)
 
 
 if __name__ == '__main__':
     rclpy.init()
     try:
-        rejection_tests(); activation_graph(); planning_dependencies(); disabled_lane_request()
+        rejection_tests(); activation_graph(); planning_dependencies(); guidance_startup_modes()
     finally:
         rclpy.shutdown()

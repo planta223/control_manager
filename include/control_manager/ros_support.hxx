@@ -49,7 +49,6 @@ inline const std::map<std::string, std::string> kTopics{
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
   {"vehicle_interface_status", "/control/vehicle_interface/status"}, {"status", "/control/status"},
   {"mode_request", "/control/mode_request"}, {"estop", "/control/estop"},
-  {"guidance_mode_request", "/control/guidance_mode_request"},
   {"guidance_status", "/control/guidance_status"},
   {"tracking_mode_request", "/control/tracking_mode_request"},
   {"tracking_status", "/control/tracking_status"}
