@@ -29,11 +29,11 @@ def run():
     active = dict(state=True, motion=True, speed_valid=True, motion_age=0, motion_frame='base_link',
                   plan=True, state_age=0, plan_age=0, path_age=0,
                   localization=True, plan_valid=True, stop=False, path='normal', y=0.0,
-                  state_y=-1.0, status_frame='map')
+                  state_x=1.0, state_y=-1.0, target_speed=1.0, status_frame='map')
 
     def publish():
         stamp = node.get_clock().now().to_msg()
-        s = GlobalPose(x_m=1., y_m=active['state_y'], yaw_rad=0., valid=active['localization'])
+        s = GlobalPose(x_m=active['state_x'], y_m=active['state_y'], yaw_rad=0., valid=active['localization'])
         m = MotionState(speed_mps=1., speed_valid=active['speed_valid'])
         m.header.frame_id = active['motion_frame']; m.header.stamp = copy.deepcopy(stamp)
         m.header.stamp.sec -= active['motion_age']
@@ -50,7 +50,7 @@ def run():
         if active['path'] == 'nan': path.poses[1].pose.position.y = float('nan')
         if active['path'] == 'inf': path.poses[1].pose.position.x = float('inf')
         if active['path'] == 'wrong_frame': path.header.frame_id = 'other'
-        plan = MotionPlan(reference_path=path, target_speed_mps=1., stop_request=active['stop'],
+        plan = MotionPlan(reference_path=path, target_speed_mps=active['target_speed'], stop_request=active['stop'],
                           valid=active['plan_valid'], reason='TEST_ONLY')
         plan.header.stamp = copy.deepcopy(stamp); plan.header.frame_id = 'map'
         plan.header.stamp.sec -= active['plan_age']
@@ -68,7 +68,7 @@ def run():
 
     timer = node.create_timer(0.05, publish)
     default = Stack([command('motion_control_node')[0], '--ros-args',
-                     '-r','__ns:=/control'], 'tracking_default')
+                     '-r','__ns:=/control', '--params-file', str(ROOT/'config/vehicle.yaml')], 'tracking_default')
     try:
         wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].reason == 'PID_NOT_CONFIGURED' and
                  not values['auto_cmd'].valid and values['auto_cmd'].target_brake,
@@ -83,15 +83,22 @@ def run():
     print('PASS: removed ADAPTIVE_PURE_PURSUIT and invalid startup modes rejected', flush=True)
     config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
     config['/control/motion_control']['ros__parameters']['pid']['enabled'] = True
+    config['/control/motion_control']['ros__parameters'].update({
+        'vehicle.limits.min_steering_deg': -math.degrees(0.5),
+        'vehicle.limits.max_steering_deg': math.degrees(0.5),
+        'vehicle.limits.min_speed_kph': -7.2, 'vehicle.limits.max_speed_kph': 7.2})
     control_config = yaml.safe_load((ROOT/'config/control.yaml').read_text())
     control_config['/control/motion_control']['ros__parameters']['pid'].update({
         'kp_lateral': 0.2, 'ki_lateral': 0.3, 'kd_lateral': 0.02,
-        'kp_heading': 0.4, 'integral_limit_m_s': 0.5, 'max_steering_rad': 0.5})
+        'kp_heading': 0.4, 'integral_limit_m_s': 0.5})
     control_cfg = LOG/'tracking_control_fixture.yaml'
     control_cfg.write_text(yaml.safe_dump(control_config))
     config['/control/vehicle_interface']['ros__parameters'].update({
-        'operating_limits_verified': True, 'max_steer_rad': 0.6,
-        'max_speed_mps': 2.0, 'command_timeout_s': 0.5})
+        'operating_limits_verified': True,
+        'vehicle.limits.min_steering_deg': -math.degrees(0.6),
+        'vehicle.limits.max_steering_deg': math.degrees(0.6),
+        'vehicle.limits.min_speed_kph': -7.2, 'vehicle.limits.max_speed_kph': 7.2,
+        'command_timeout_s': 0.5})
     cfg = LOG/'tracking_fixture.yaml'; cfg.write_text(yaml.safe_dump(config))
     xml = ET.parse(ROOT/'launch/control_manager.xml')
     for elem in list(xml.getroot()):
@@ -167,6 +174,19 @@ def run():
                  values['auto_cmd'].valid and abs(values['auto_cmd'].target_steer_rad-expected_pp)<1e-9,
                  'PURE_PURSUIT startup config produces expected steering')
         assert values['status'].mode == ControlStatus.AUTO
+        active.update(state_x=19.99, state_y=-1.0, target_speed=3.0)
+        for y, steering in [(-1.0,0.5),(1.0,-0.5)]:
+            active['state_y'] = y
+            wait_for(node, lambda: command_reason('PURE_PURSUIT_ACTIVE_LIMITED') and
+                     values['auto_cmd'].valid and abs(values['auto_cmd'].target_steer_rad-steering)<1e-12 and
+                     values['auto_cmd'].target_speed_mps==2.0,
+                     'Pure Pursuit steering and speed obey shared vehicle limits: y='+str(y))
+        active['target_speed'] = -0.1
+        wait_for(node, lambda: command_reason('INVALID_OR_STALE_STATE_OR_PLAN') and invalid(),
+                 'negative AUTO plan remains rejected despite signed vehicle range')
+        active.update(state_x=1.0, state_y=-1.0, target_speed=1.0)
+        wait_for(node, lambda: command_reason('PURE_PURSUIT_ACTIVE') and values['auto_cmd'].valid,
+                 'Pure Pursuit recovers after range test')
         restart_controller('PID')
         wait_reset('PID restart starts with zero accumulated history')
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad>0.28,

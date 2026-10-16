@@ -1,13 +1,14 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
+#include <utility>
 #include "control_manager/core/lateral_controller.hxx"
 namespace cm = control_manager::core;
 namespace {
 constexpr std::int64_t now_ns = 10000000000LL;
 cm::TrackingState state() { return {0, 0, 0, 1, 0, true, true, false, now_ns}; }
 cm::Command command() { return {0.1, 1.0, false, true, now_ns, "TEST_FIXTURE"}; }
-cm::ActuatorProtectionConfig config() { return {true, 0.4, 2.0, 0.5}; }
+cm::ActuatorProtectionConfig config() { return {true, {-0.4, 0.4, -2.0, 2.0}, 0.5}; }
 }
 TEST(Freshness, RejectZeroFutureAndExpired) {
   EXPECT_FALSE(cm::fresh(0, now_ns, 0.5));
@@ -39,9 +40,9 @@ TEST(ActuatorProtection, InvalidLimitsFailClosed) {
   EXPECT_EQ(cm::protectActuatorCommand(command(),false,now_ns,{}).reason,"OPERATING_LIMITS_NOT_VERIFIED");
   for (double bad : {0., -1., std::numeric_limits<double>::quiet_NaN(),
                      std::numeric_limits<double>::infinity()}) {
-    auto cfg=config(); cfg.max_speed_mps=bad;
+    auto cfg=config(); cfg.limits.max_speed_mps=bad;
     EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
-    cfg=config(); cfg.max_steer_rad=bad;
+    cfg=config(); cfg.limits.max_steer_rad=bad;
     EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
   }
 }
@@ -66,7 +67,7 @@ TEST(ActuatorProtection, FiniteRangeAndContradictoryBrake) {
     EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"INVALID_COMMAND_VALUES");
   }
   c=command(); c.target_speed_mps=-.1;
-  EXPECT_FALSE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
+  EXPECT_TRUE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
   c=command(); c.target_brake=true;
   EXPECT_FALSE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
   for (double steer : {-.41,.41}) {
@@ -75,12 +76,41 @@ TEST(ActuatorProtection, FiniteRangeAndContradictoryBrake) {
   }
   c=command(); c.target_speed_mps=2.01;
   EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
+  c=command(); c.target_speed_mps=-2.01;
+  EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
 }
 TEST(ActuatorProtection, BoundaryAcceptedAndSourceTimePreserved) {
   auto c=command(); c.target_speed_mps=2.; c.target_steer_rad=-.4; c.timestamp_ns-=100;
   const auto out=cm::protectActuatorCommand(c,false,now_ns,config());
   EXPECT_TRUE(out.valid); EXPECT_EQ(out.timestamp_ns,c.timestamp_ns);
   EXPECT_DOUBLE_EQ(out.target_speed_mps,2.); EXPECT_DOUBLE_EQ(out.target_steer_rad,-.4);
+}
+TEST(VehicleLimits, AutoSaturatesBothSteeringDirectionsAndForwardSpeed) {
+  const cm::VehicleLimits limits{-0.3, 0.5, -2.0, 3.0};
+  for (const auto &pair : {std::pair<double,double>{-1.0,-0.3}, {1.0,0.5}}) {
+    auto c=command(); c.target_steer_rad=pair.first; c.target_speed_mps=4.0;
+    const auto out=cm::limitAutomaticCommand(c,limits);
+    EXPECT_TRUE(out.valid); EXPECT_FALSE(out.target_brake);
+    EXPECT_DOUBLE_EQ(out.target_steer_rad,pair.second);
+    EXPECT_DOUBLE_EQ(out.target_speed_mps,3.0);
+    EXPECT_EQ(out.timestamp_ns,c.timestamp_ns); EXPECT_EQ(out.reason,"TEST_FIXTURE_LIMITED");
+  }
+  auto c=command();
+  EXPECT_EQ(cm::limitAutomaticCommand(c,limits).reason,c.reason);
+  c.target_speed_mps=-0.1;
+  EXPECT_FALSE(cm::limitAutomaticCommand(c,limits).valid);  // AUTO remains forward-only.
+  EXPECT_FALSE(cm::limitAutomaticCommand(command(),{}).valid);
+}
+TEST(VehicleLimits, SignedBoundaryAndInvalidLowerLimits) {
+  auto c=command(); c.target_speed_mps=-2.0; c.target_steer_rad=0.4;
+  EXPECT_TRUE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
+  for (double bad : {0.1, std::numeric_limits<double>::quiet_NaN(),
+                     -std::numeric_limits<double>::infinity()}) {
+    auto cfg=config(); cfg.limits.min_speed_mps=bad;
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+    cfg=config(); cfg.limits.min_steer_rad=bad;
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+  }
 }
 TEST(Fsm, ModeAndFsmAreSeparate) {
   EXPECT_EQ(cm::fsmState(false,false,{},cm::ControlMode::AUTO),cm::VehicleFsmState::INIT);

@@ -5,6 +5,10 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   frame_ = param<std::string>("map_frame", "map");
   base_frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("input_timeout_s", 0.5);
+  const auto mode = param<std::string>("tracking_mode", "PID");
+  if (mode != "PID" && mode != "PURE_PURSUIT")
+    throw std::invalid_argument("tracking_mode must be PID or PURE_PURSUIT");
+  limits_ = vehicleLimits();
   core::PurePursuitConfig config;
   config.wheelbase_m = positive("vehicle.wheelbase_m", 1.328);
   config.lookahead_min_m = positive("lookahead_min_m", 2.0);
@@ -18,14 +22,11 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   pid.kd_lateral = nonnegative("pid.kd_lateral", 0.0);
   pid.kp_heading = nonnegative("pid.kp_heading", 0.0);
   pid.integral_limit_m_s = nonnegative("pid.integral_limit_m_s", 0.0);
-  pid.max_steering_rad = nonnegative("pid.max_steering_rad", 0.0);
+  pid.max_steering_rad = std::max(-limits_.min_steer_rad, limits_.max_steer_rad);
   pid.max_dt_s = positive("pid.max_dt_s", 0.5);
   pid.goal_tolerance_m = config.goal_tolerance_m;
   tracking_ = std::make_unique<core::TrackingController>(pid, config);
-  const auto mode = param<std::string>("tracking_mode", "PID");
   if (mode == "PURE_PURSUIT") tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::PURE_PURSUIT));
-  else if (mode != "PID")
-    throw std::invalid_argument("tracking_mode must be PID or PURE_PURSUIT");
   pose_ = input<msg::GlobalPose>("global_pose");
   motion_ = input<msg::MotionState>("motion_state");
   plan_ = input<msg::MotionPlan>("motion_plan");
@@ -102,7 +103,8 @@ void MotionControlNode::update() {
   else if (result.valid)
     command = {result.steering_rad, plan.target_speed_mps, false, true,
                now().nanoseconds(), result.reason};
-  // Longitudinal policy remains MotionPlan target speed pass-through. No speed PID.
+  command = core::limitAutomaticCommand(command, limits_);
+  // MotionPlan target speed capped at the vehicle limit. No speed PID or reverse tracking.
   publisher_->publish(toRos(command, base_frame_));
 }
 }  // namespace control_manager

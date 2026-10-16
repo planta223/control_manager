@@ -8,7 +8,6 @@
       kd_lateral: 0.0              # rad*s/m; PLACEHOLDER
       kp_heading: 0.0              # rad/rad; PLACEHOLDER
       integral_limit_m_s: 0.0      # m*s; anti-windup bound, PLACEHOLDER
-      max_steering_rad: 0.0        # Controller software clamp, NOT measured physical limit
       max_dt_s: 0.5               # Software timing policy; excessive dt resets PID
 
     # Motion Control Pure Pursuit 계산 설정
@@ -20,5 +19,5 @@
     lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
 
     # Motion Control PID / Pure Pursuit 공통 도착 판정 설정
-    # 실측 wheelbase는 vehicle.yaml 사용; 중복 기입하지 않음.
+    # 실측 wheelbase와 조향각 / 속도 제한은 vehicle.yaml 사용; 중복 기입하지 않음.
     goal_tolerance_m: 0.3            # TUNE

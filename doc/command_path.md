@@ -32,7 +32,7 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 | mode 전환 | 캐시 초기화, MODE_CHANGED stop 후 새 source callback 필요 |
 | 선택 명령 수신/source timestamp timeout, frame | vehicle_interface: selector 중단에도 자체 timer로 stop |
 | E-STOP | vehicle_interface: true는 explicit false까지 유지, 모든 mode와 invalid command보다 우선 |
-| NaN/Inf, 음수 속도, brake+양의 속도 | vehicle_interface: INVALID_COMMAND_VALUES stop |
+| NaN/Inf, brake+0이 아닌 속도 | vehicle_interface: INVALID_COMMAND_VALUES stop |
 | 미검증/0 운용 한계 | vehicle_interface: OPERATING_LIMITS_NOT_VERIFIED stop |
 | steering/speed 물리 범위 초과 | vehicle_interface: COMMAND_OUT_OF_RANGE stop; 기존 정책대로 clamp하지 않음 |
 | GlobalPose validity/freshness | 기존 path_planning/motion_control에서 검사 |
@@ -42,7 +42,9 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 후단 두 node는 GlobalPose / MotionState / ObjectState를 구독하지 않습니다.
 MANUAL은 해당 state/object와 독립적인 명령 선택입니다. obstacle emergency distance의 후단 중복 검사는
 제거했습니다. 기존 motion_planning이 모든 detected obstacle에 정지하므로 추가 obstacle 알고리즘은 없습니다.
-Motion Planning / Motion Control / PID / Pure Pursuit / estimation 알고리즘은 변경하지 않았습니다.
+Motion Control은 vehicle.yaml의 조향 범위와 전진 속도 상한으로 AUTO 출력을 제한합니다.
+Vehicle Interface는 같은 범위를 사용하며, 범위 내 음수 속도 명령도 허용합니다.
+PID / Pure Pursuit 자동 경로 추종은 전진 전용입니다.
 
 ## 진단과 FSM
 
@@ -62,8 +64,8 @@ DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않�
 - `control_manager_node` executable/source/header → `control_selector_node`.
 - ROS node 및 YAML `/control/control_manager` → `/control/control_selector`.
 - `src/safety_limit_node.cxx`, `SafetyLimitNode` header 선언, executable `safety_limit_node`, launch 항목 제거.
-- `/control/safety_limit` YAML section 제거. `operating_limits_verified`, `max_steer_rad`,
-  `max_speed_mps`는 `/control/vehicle_interface`로 이동.
+- `/control/safety_limit` YAML section 제거. `operating_limits_verified`는 `/control/vehicle_interface`에서 설정.
+  조향각·속도 범위는 `vehicle.yaml`의 `vehicle.limits`에만 두며 Motion Control / Vehicle Interface가 공유.
 - `/control/final_cmd` 및 `topics.final_cmd` 제거. 외부 source 검색에서 compatibility 의존성 없음.
 - `require_obstacle_state`, `emergency_distance_m`, 후단 전용 `object_timeout_s` 설정 제거.
 - 기존 `SafetyConfig` / `applySafety`는 상태·장애물 입력 없는 `ActuatorProtectionConfig` / `protectActuatorCommand`로 교체.
@@ -73,14 +75,14 @@ DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않�
 유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/mode_request`, `/control/selected_cmd`,
 `/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
 추가: `/control/vehicle_interface/status` 진단 토픽과 `VehicleInterfaceStatus.msg`.
-현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain, 미검증 한계 0 유지.
+현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
 ## 검증
 
 `test/command_path_smoke_test.py`는 AUTO/MANUAL 선택·timeout·invalid source·IDLE,
 mode 독립 E-STOP/FSM·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
-GTest는 최종 보호의 NaN/Inf/음수/제동 모순/한계/timeout/E-STOP과 원본 timestamp 보존을 검증합니다.
+GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout/E-STOP과 원본 timestamp 보존을 검증합니다.
 기존 pipeline/state split/tracking/ingress/estimator smoke는 현재 연결로 갱신합니다.
 실행 방법은 README의 package-only build/test 환경을 사용하며 모든 fixture와 출력은 package 내부입니다.
 

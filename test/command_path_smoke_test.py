@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Localhost-only command fixtures; diagnostics are not hardware feedback."""
 import copy
+import math
 import rclpy
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import Bool, UInt8
@@ -39,7 +40,8 @@ def run():
             if kind=='inf_speed': c.target_speed_mps=float('inf')
             if kind=='speed_limit': c.target_speed_mps=2.1
             if kind=='steer_limit': c.target_steer_rad=-.6
-            if kind=='negative_speed': c.target_speed_mps=-.1
+            if kind=='reverse': c.target_speed_mps=-.1
+            if kind=='reverse_limit': c.target_speed_mps=-2.1
             if kind=='brake_with_speed': c.target_brake=True
             if kind=='stale': c.header.stamp.sec-=5
             if kind=='future': c.header.stamp.sec+=5
@@ -48,7 +50,9 @@ def run():
             pubs['selected_cmd'].publish(c)
     timer=node.create_timer(.05,publish)
     interface=start('vehicle_interface','command_interface','operating_limits_verified:=true',
-                    'max_steer_rad:=0.5','max_speed_mps:=2.0')
+                    'vehicle.limits.min_steering_deg:='+str(-math.degrees(0.5)),
+                    'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
+                    'vehicle.limits.min_speed_kph:=-7.2', 'vehicle.limits.max_speed_kph:=7.2')
     selector=start('control_selector','command_selector')
     def safe():
         c=values.get('protected_cmd')
@@ -98,9 +102,15 @@ def run():
         wait_for(node,safe,'selector shutdown expires at vehicle interface')
         active['direct']=True
         wait_for(node,lambda:values['protected_cmd'].valid,'isolated direct selected command fixture accepted')
+        active['kind']='reverse'
+        wait_for(node,lambda:values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==-0.1,
+                 'reverse command inside vehicle range accepted')
+        active['kind']='good'
+        wait_for(node,lambda:values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==0.6,
+                 'forward command recovers')
         for kind,reason in [('invalid','INVALID_OR_STALE_COMMAND'),
                             ('nan_steer','INVALID_COMMAND_VALUES'),('inf_speed','INVALID_COMMAND_VALUES'),
-                            ('negative_speed','INVALID_COMMAND_VALUES'),('brake_with_speed','INVALID_COMMAND_VALUES'),
+                            ('reverse_limit','COMMAND_OUT_OF_RANGE'),('brake_with_speed','INVALID_COMMAND_VALUES'),
                             ('speed_limit','COMMAND_OUT_OF_RANGE'),('steer_limit','COMMAND_OUT_OF_RANGE'),
                             ('stale','INVALID_OR_STALE_COMMAND'),('future','INVALID_OR_STALE_COMMAND'),
                             ('zero','INVALID_OR_STALE_COMMAND'),('wrong_frame','INVALID_OR_STALE_COMMAND')]:

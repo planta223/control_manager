@@ -76,6 +76,17 @@ class NodeBase : public rclcpp::Node {
     if (!std::isfinite(value) || value < 0.0) throw std::invalid_argument(key + " must be nonnegative");
     return value;
   }
+  core::VehicleLimits vehicleLimits() {
+    const double rad_per_deg = std::acos(-1.0) / 180.0;
+    core::VehicleLimits limits{
+      param<double>("vehicle.limits.min_steering_deg", 0.0) * rad_per_deg,
+      param<double>("vehicle.limits.max_steering_deg", 0.0) * rad_per_deg,
+      param<double>("vehicle.limits.min_speed_kph", 0.0) / 3.6,
+      param<double>("vehicle.limits.max_speed_kph", 0.0) / 3.6};
+    if (!core::validVehicleLimits(limits))
+      throw std::invalid_argument("vehicle.limits must be finite with min_steering_deg < 0 < max_steering_deg and min_speed_kph <= 0 < max_speed_kph; load vehicle.yaml");
+    return limits;
+  }
   std::string topic(const std::string &key) {
     const auto name = "topics." + key;
     return has_parameter(name) ? get_parameter(name).as_string() : param(name, kTopics.at(key));

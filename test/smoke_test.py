@@ -4,6 +4,7 @@ Run with this package installed, ROS_DOMAIN_ID=179 and localhost-only UDP transp
 All generated files/logs are confined to control_manager/log.
 """
 import copy
+import math
 import os
 from pathlib import Path
 import signal
@@ -83,7 +84,8 @@ def default_stack():
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
         assert values['status'].mode == ControlStatus.IDLE
-        assert not values['protected_cmd'].valid and values['protected_cmd'].target_brake
+        assert values['protected_cmd'].valid and values['protected_cmd'].target_brake
+        assert values['protected_cmd'].reason == 'IDLE'
         assert values['protected_cmd'].target_speed_mps == 0.0
         assert 'object_state' not in values  # Explicitly disabled; no fabricated clear observation.
         assert not values['auto_cmd'].valid
@@ -134,8 +136,11 @@ def integrated_fixtures():
         'path_planning': {'map_datum_verified': True},
         'motion_planning': {'cruise_speed_mps': 1.0},
         'motion_control': {'tracking_mode': 'PURE_PURSUIT'},  # Preserve legacy regression fixture.
-        'vehicle_interface': {'operating_limits_verified': True, 'max_steer_rad': 0.7,
-                         'max_speed_mps': 2.0, 'command_timeout_s': 0.5},
+        'vehicle_interface': {'operating_limits_verified': True,
+                         'vehicle.limits.min_steering_deg': -math.degrees(0.7),
+                         'vehicle.limits.max_steering_deg': math.degrees(0.7),
+                         'vehicle.limits.min_speed_kph': -7.2, 'vehicle.limits.max_speed_kph': 7.2,
+                         'command_timeout_s': 0.5},
     }
     for name, params in overrides.items():
         config['/control/' + name]['ros__parameters'].update(params)

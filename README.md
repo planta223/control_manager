@@ -418,7 +418,9 @@ steer = clamp(kp_lateral*e_y + ki_lateral*I
 경로 진행 방향의 **왼쪽에 차량이 있으면 e_y<0 → 우조향**, 오른쪽이면 e_y>0 → 좌조향입니다.
 전륜 road-wheel steering은 기존처럼 rad, 좌회전이 양수입니다. 예: 동쪽 직선에서 차량 y=+1 m이면
 오차 -1 m입니다. 차량 heading이 경로보다 CCW로 틀어졌으면 heading correction은 음수입니다.
-PID는 조향만 반환하며 속도는 MotionPlan 값을 전달하고, brake는 node/plan/safety가 결정합니다.
+PID는 조향만 반환하며 속도는 MotionPlan 목표를 차량 상한으로 제한합니다. brake는 node/plan/safety가 결정합니다.
+PID 내부 max_steering_rad는 vehicle.yaml 조향 범위의 최대 절댓값에서 구하며 별도 설정하지 않습니다.
+Motion Control은 PID / Pure Pursuit 계산 후 차량의 실제 최소·최대 조향 범위로 다시 제한합니다.
 
 `dt`는 node timer 사이의 steady-clock 실제 경과 시간입니다. 첫 sample/reset 직후에는 I=D=0이며
 그 다음부터 누적합니다. integral clamp가 최소 anti-windup입니다. NaN/Inf, 계산 overflow, dt<=0 또는
@@ -452,14 +454,13 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 | pid.kd_lateral | 0.0 | rad*s/m |
 | pid.kp_heading | 0.0 | rad/rad |
 | pid.integral_limit_m_s | 0.0 | 적분 상한, m*s |
-| pid.max_steering_rad | 0.0 | controller 출력 clamp; 실제 차량 최대 조향각이 아님 |
 | pid.max_dt_s | 0.5 | software timeout, s |
 | lookahead_min_m | 2.0 | 속도 적응형 lookahead 최소값, m |
 | lookahead_max_m | 6.0 | 속도 적응형 lookahead 최대값, m |
 | lookahead_gain_s | 1.0 | Ld = clamp(min + gain * 실제 속도, min, max), s |
 | goal_tolerance_m | 0.3 | PID / Pure Pursuit 공통 종점 도착 허용 거리, m |
 
-PID가 disabled, max_steering_rad=0, 또는 모든 gain=0이면 PID_NOT_CONFIGURED로 닫습니다.
+PID가 disabled 또는 모든 gain=0이면 PID_NOT_CONFIGURED로 닫습니다.
 양의 test fixture gain은 실차 추천값이 아닙니다. 기존 최종 safety의 operating_limits_verified와
 steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계나 actuator calibration을 추정하지 않았습니다.
 기존 `lookahead_min_m/max_m/gain_s`, `goal_tolerance_m`, measured wheelbase 설정은 유지합니다.
@@ -472,10 +473,10 @@ steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계�
 | 파일 | 책임 |
 |---|---|
 | `config/pipeline.yaml` | 토픽 연결, map/base frame, map 입력 파일 경로 |
-| `config/operation.yaml` | 시작 모드, Mission 외 활성화 설정, 주기·입력 timeout·품질 기준·최종 운용 한계 |
-| `config/control.yaml` | PID 게인·적분 상한·조향 제한·dt 기준, Pure Pursuit lookahead, 공통 도착 허용 거리 |
+| `config/operation.yaml` | 시작 모드, Mission 외 활성화 설정, 주기·입력 timeout·품질 기준·최종 보호 허용 설정 |
+| `config/control.yaml` | PID 게인·적분 상한·dt 기준, Pure Pursuit lookahead, 공통 도착 허용 거리 |
 | `config/mission.yaml` | Mission 노드·구간 정책 활성화, 공통 운용속도, 구간별 제한·마진·정지·불확실성 상수 |
-| `config/vehicle.yaml` | 차량 치수와 센서 장착 수치 |
+| `config/vehicle.yaml` | 차량 치수와 센서 장착 수치, 조향각·속도 명령 범위 |
 
 launch는 각 노드에 vehicle → pipeline → mission → operation 순서로 설정을 로드합니다.
 Motion Control에는 mission 다음에 control.yaml을 추가로 로드합니다.
@@ -533,9 +534,16 @@ YAML은 연결 설정을 제공하며 실제 노드 기동은 launch, 구독·�
 현재 계산에 쓰는 geometry는 wheelbase뿐입니다. 나머지는 향후 footprint/extrinsic의 문서화된
 config이며 TF나 perception 보정에 사용하지 않습니다.
 
-**미확정**: actual max steering angle, wheel-angle/actuator calibration, physical max operating speed,
+차량 명령 범위는 `vehicle.limits` 한 곳에 둡니다. 사용자 지정 범위는 조향 -30~+30 deg,
+속도 -20~+20 km/h이며 내부에서는 rad / m/s로 변환합니다. 음수 속도는 후진 명령입니다.
+Motion Control은 AUTO 조향각과 목표 속도를 차량 범위로 제한하고, 공통 후처리에서 제한 시 reason에 `_LIMITED`를 붙입니다.
+PID / Pure Pursuit 자동 추종은 전진 전용이므로 음수 MotionPlan 목표는 계속 거부합니다.
+Vehicle Interface는 AUTO / MANUAL 공통으로 양·음수 범위를 검사하며, 범위 밖 명령은 clamp하지 않고 정지합니다.
+`operating_limits_verified=true`는 지정한 차량 범위 사용을 허용하며 false이면 최종 명령을 차단합니다.
+차량 범위가 없거나 유한하지 않거나 0을 포함하지 않는 범위이면 노드는 시작 오류입니다.
+
+**미확정**: wheel-angle/actuator calibration,
 GNSS/IMU xyz/RPY, camera/LiDAR rotation, motor raw↔m/s, brake physical model.
-따라서 max_steer/max_speed는 0과 `operating_limits_verified=false`로 비활성화했습니다.
 lookahead, timeout, covariance quality gate는 소프트웨어 초기 tuning이며 실측 사실이 아닙니다.
 
 ## Build / launch / test

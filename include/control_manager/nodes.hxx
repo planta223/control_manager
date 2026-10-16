@@ -107,6 +107,7 @@ class MotionControlNode : public NodeBase {
  private:
   void update();
   std::unique_ptr<core::TrackingController> tracking_;
+  core::VehicleLimits limits_;
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
   std::shared_ptr<Input<msg::GlobalPose>> pose_;

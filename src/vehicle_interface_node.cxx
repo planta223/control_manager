@@ -7,8 +7,7 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   frame_ = param<std::string>("base_frame", "base_link");
   config_.command_timeout_s = positive("command_timeout_s", 0.5);
   config_.operating_limits_verified = param<bool>("operating_limits_verified", false);
-  config_.max_steer_rad = nonnegative("max_steer_rad", 0.0);
-  config_.max_speed_mps = nonnegative("max_speed_mps", 0.0);
+  config_.limits = vehicleLimits();
   selected_ = input<msg::VehicleCommand>("selected_cmd");
   status_publisher_ = output<msg::VehicleInterfaceStatus>("vehicle_interface_status");
   subscriptions_.push_back(create_subscription<std_msgs::msg::Bool>(topic("estop"),

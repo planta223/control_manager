@@ -116,8 +116,6 @@
     # Vehicle Interface 발행: vehicle_interface_status 항상 발행, actuator 송신 미구현.
     # 최종 보호·운용 한계 설정
     dry_run: true                   # false rejected: no UDP backend implemented
-    operating_limits_verified: false
-    max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving
-    max_speed_mps: 0.0               # TODO NOT_VERIFIED; zero disables driving
-    # Out-of-range commands STOP, preserving the existing policy (no saturation).
+    operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.
+    # Motion Control은 vehicle.limits로 제한, 여기서는 범위 밖 명령을 STOP 처리.
     # Steering road-wheel calibration, motor raw/mps and brake model are NOT_VERIFIED.

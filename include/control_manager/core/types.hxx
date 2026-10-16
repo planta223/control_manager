@@ -37,9 +37,15 @@ struct Command {
   std::int64_t timestamp_ns{0};
   std::string reason;
 };
+struct VehicleLimits {
+  double min_steer_rad{0.0}, max_steer_rad{0.0};
+  double min_speed_mps{0.0}, max_speed_mps{0.0};
+};
+bool validVehicleLimits(const VehicleLimits &limits);
+Command limitAutomaticCommand(const Command &command, const VehicleLimits &limits);
 struct ActuatorProtectionConfig {
   bool operating_limits_verified{false};
-  double max_steer_rad{0.0}, max_speed_mps{0.0};
+  VehicleLimits limits;
   double command_timeout_s{0.5};
 };
 bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);

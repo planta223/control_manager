@@ -229,7 +229,9 @@ def downstream():
     stacks = [start('motion_planning', 'split_motion_planning', 'cruise_speed_mps:=0.5'),
               start('motion_control', 'split_local_path_blocker', 'tracking_mode:=PURE_PURSUIT'),
               start('vehicle_interface', 'split_safety', 'operating_limits_verified:=true',
-                    'max_steer_rad:=0.5', 'max_speed_mps:=1.0')]
+                    'vehicle.limits.min_steering_deg:='+str(-math.degrees(0.5)),
+                    'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
+                    'vehicle.limits.min_speed_kph:=-3.6', 'vehicle.limits.max_speed_kph:=3.6')]
     try:
         wait_for(node, lambda: 'motion_plan' in values and values['motion_plan'].valid and
                  values['motion_plan'].header.frame_id == 'base_link',
