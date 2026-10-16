@@ -76,6 +76,8 @@ GNSS부에서 antenna offset x=0.559 m / y=0.0 m를 보정한 후륜축 중심 b
 GNSS motion의 twist.linear.x 추출 및 speed covariance/frame/source/receipt freshness/finite 검사도 보존했습니다.
 pose covariance/quaternion 오류는 speed를 무효화하지 않고 speed variance/NaN 오류는 pose를 무효화하지 않습니다.
 source stamp는 heartbeat로 갱신하지 않습니다. 서로 다른 source 사이 시간 동기화/보간은 새로 구현하지 않았습니다.
+GNSS stamp의 sec<0 또는 nanosec>=1e9는 시간 변환 전에 거부합니다.
+해당 출력은 INVALID_GNSS_TIMESTAMP, validity=false, stamp=0이며 정상 입력이 오면 복구합니다.
 
 ## 6. No-GNSS LANE configuration
 

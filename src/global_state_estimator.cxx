@@ -1,4 +1,5 @@
 #include "control_manager/nodes.hxx"
+#include "control_manager/ingress.hxx"
 namespace control_manager {
 GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_estimator") {
   const auto pose_mode = param<std::string>("pose_mode", "GNSS");
@@ -64,6 +65,10 @@ msg::GlobalPose GlobalStateEstimatorNode::estimatePose() {
   out.reason = "GNSS_UNAVAILABLE";
   if (gnss_->value) {
     const auto &odom = *gnss_->value;
+    if (!ingress::validStampFormat(odom.header.stamp)) {
+      out.reason = "INVALID_GNSS_TIMESTAMP";
+      return out;  // Invalid with stamp=0; never propagate an unrepresentable time.
+    }
     out.header = odom.header;
     out.x_m = odom.pose.pose.position.x; out.y_m = odom.pose.pose.position.y;
     const auto &q = odom.pose.pose.orientation;
@@ -113,6 +118,10 @@ msg::MotionState GlobalStateEstimatorNode::estimateMotion() {
   out.reason = "GNSS_VELOCITY_UNAVAILABLE";
   if (gnss_->value) {
     const auto &odom = *gnss_->value;
+    if (!ingress::validStampFormat(odom.header.stamp)) {
+      out.reason = "INVALID_GNSS_TIMESTAMP";
+      return out;  // Invalid with stamp=0; never normalize a malformed wire stamp.
+    }
     out.header.stamp = odom.header.stamp;  // Twist is in child_frame, measured at source time.
     out.speed_mps = odom.twist.twist.linear.x;
     const double variance = odom.twist.covariance[0];

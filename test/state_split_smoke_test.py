@@ -56,6 +56,11 @@ def estimators():
         if case == 'stale': o.header.stamp.sec -= 10
         if case == 'future': o.header.stamp.sec += 10
         if case == 'zero': o.header.stamp.sec = o.header.stamp.nanosec = 0
+        if case == 'negative_time': o.header.stamp.sec = -1
+        if case == 'nanosecond_boundary': o.header.stamp.nanosec = 1000000000
+        if case == 'noncanonical_time':
+            # This would normalize to the current time without a wire-format check.
+            o.header.stamp.sec -= 1; o.header.stamp.nanosec += 1000000000
         if case == 'map_frame': o.header.frame_id = 'wrong'
         if case == 'child_frame': o.child_frame_id = 'wrong'
         if case == 'position_cov': o.pose.covariance[0] = 2.
@@ -86,7 +91,8 @@ def estimators():
         assert p.header.frame_id == 'map' and m.header.frame_id == 'base_link'
         assert m.speed_mps == 1.2 and not m.yaw_rate_valid
         print('PASS: pose uncertainty, speed, frames and unsupported yaw rate', flush=True)
-        shared = ['stale', 'future', 'zero', 'map_frame', 'child_frame']
+        malformed_stamps = ['negative_time', 'nanosecond_boundary', 'noncanonical_time']
+        shared = ['stale', 'future', 'zero', 'map_frame', 'child_frame'] + malformed_stamps
         pose_only = ['position_cov', 'sum_cov', 'negative_cov', 'nan_cov', 'yaw_cov',
                      'quaternion', 'nan_quaternion', 'nan_position']
         motion_only = ['speed_cov', 'negative_speed_cov', 'nan_speed_cov', 'nan_speed']
@@ -98,6 +104,11 @@ def estimators():
                      values['motion_state'].speed_valid == want_motion,
                      'split validation: ' + case)
             assert not values['motion_state'].yaw_rate_valid
+            if case in malformed_stamps:
+                assert stacks[0].process.poll() is None
+                for key in ('global_pose', 'motion_state'):
+                    assert values[key].reason == 'INVALID_GNSS_TIMESTAMP'
+                    assert values[key].header.stamp.sec == values[key].header.stamp.nanosec == 0
             state['case'] = 'good'
             wait_for(node, good, 'restore measured input after ' + case)
         state['send'] = False

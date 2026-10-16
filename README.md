@@ -199,6 +199,7 @@ finite XY, position variance 각각 및 합, yaw variance 검사를 유지합니
 GNSS odom의 base_link는 후륜축 중심 계약이며, GNSS부가 antenna offset x=0.559 m / y=0.0 m를 보정합니다.
 수동 기준점 확인 스위치는 사용하지 않으며, 여기서 lever arm을 중복 보정하지 않습니다.
 GNSS motion은 기존 twist.linear.x와 speed variance/frame/freshness/finite를 검사합니다.
+GNSS stamp의 sec<0 또는 nanosec>=1e9이면 시간 변환 전에 INVALID_GNSS_TIMESTAMP / invalid / stamp=0을 발행합니다.
 IMU/VehicleFeedback이 없어도 GNSS 모드의 두 출력은 유효할 수 있습니다.
 
 GNSS_IMU motion의 의도는 GNSS speed + IMU gyro yaw rate입니다. 현재 IMU-to-body rotation,

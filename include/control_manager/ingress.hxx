@@ -7,11 +7,14 @@
 #include "control_manager/msg/vehicle_feedback.hpp"
 
 namespace control_manager::ingress {
+inline bool validStampFormat(const builtin_interfaces::msg::Time &stamp) {
+  return stamp.sec >= 0 && stamp.nanosec < 1000000000U;
+}
 // Check wire timestamps without constructing rclcpp::Time from malformed input.
 // No clock conversion or replacement with receipt time is performed here.
 inline bool freshStamp(const builtin_interfaces::msg::Time &stamp, std::int64_t now_ns,
                        double timeout_s) {
-  return stamp.sec >= 0 && stamp.nanosec < 1000000000U &&
+  return validStampFormat(stamp) &&
     core::fresh(static_cast<std::int64_t>(stamp.sec)*1000000000LL + stamp.nanosec,
                 now_ns, timeout_s);
 }
