@@ -97,23 +97,11 @@
     # Motion Control 구독: global_pose / motion_state / motion_plan / status.
     # Motion Control 발행: auto_cmd만 발행.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
-    tracking_mode: PID              # PID / PURE_PURSUIT / ADAPTIVE_PURE_PURSUIT (TODO)
+    tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
-      kp_lateral: 0.0              # rad/m; PLACEHOLDER, NOT field tuned
-      ki_lateral: 0.0              # rad/(m*s); PLACEHOLDER
-      kd_lateral: 0.0              # rad*s/m; PLACEHOLDER
-      kp_heading: 0.0              # rad/rad; PLACEHOLDER
-      integral_limit_m_s: 0.0      # m*s; anti-windup bound, PLACEHOLDER
-      max_steering_rad: 0.0        # Controller software clamp, NOT measured physical limit
-      max_dt_s: 0.5               # Software timing policy; excessive dt resets PID
-    # PURE_PURSUIT uses the unchanged legacy speed-adaptive implementation below.
-    # ADAPTIVE_PURE_PURSUIT (additional error adaptation) is NOT_IMPLEMENTED;
-    # no unimplemented gain parameters or silent PURE_PURSUIT fallback.
-    lookahead_min_m: 2.0             # TUNE / NOT field validated
-    lookahead_max_m: 6.0             # TUNE
-    lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
-    goal_tolerance_m: 0.3            # TUNE
+    # PID 게인 / Pure Pursuit lookahead / 공통 도착 허용 거리는 control.yaml에서 설정.
+    # PURE_PURSUIT은 속도에 따라 lookahead가 변하는 속도 적응형.
 
 /control/control_selector:
   ros__parameters:

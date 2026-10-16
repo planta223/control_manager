@@ -24,10 +24,8 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   tracking_ = std::make_unique<core::TrackingController>(pid, config);
   const auto mode = param<std::string>("tracking_mode", "PID");
   if (mode == "PURE_PURSUIT") tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::PURE_PURSUIT));
-  else if (mode == "ADAPTIVE_PURE_PURSUIT")
-    tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::ADAPTIVE_PURE_PURSUIT));
   else if (mode != "PID")
-    throw std::invalid_argument("tracking_mode must be PID, PURE_PURSUIT or ADAPTIVE_PURE_PURSUIT");
+    throw std::invalid_argument("tracking_mode must be PID or PURE_PURSUIT");
   pose_ = input<msg::GlobalPose>("global_pose");
   motion_ = input<msg::MotionState>("motion_state");
   plan_ = input<msg::MotionPlan>("motion_plan");

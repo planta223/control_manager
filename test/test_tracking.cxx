@@ -118,18 +118,12 @@ TEST(Tracking, DefaultPidAndEveryInvalidEnum) {
   cm::TrackingController tracker(config(),{});
   EXPECT_EQ(tracker.requested(),0);
   ASSERT_TRUE(tracker.compute(state(),straight,0.1).valid);
-  for (int value=3;value<=255;++value) {
+  for (int value=2;value<=255;++value) {
     tracker.request(value);
     EXPECT_EQ(tracker.requested(),value);
     auto out = tracker.compute(state(),straight,0.1);
     EXPECT_FALSE(out.valid); EXPECT_EQ(out.reason,"INVALID_TRACKING_MODE");
   }
-}
-TEST(Tracking, AdditionalAdaptiveIsExplicitlyUnsupported) {
-  cm::TrackingController tracker(config(),{}); tracker.request(2);
-  auto out = tracker.compute(state(),straight,0.1);
-  EXPECT_FALSE(out.valid); EXPECT_EQ(out.reason,"ADAPTIVE_PURE_PURSUIT_NOT_IMPLEMENTED");
-  EXPECT_EQ(tracker.requested(),2);
 }
 TEST(Tracking, ModeSwitchAndInactiveAutoResetPid) {
   auto c = config(); c.kp_lateral = c.kp_heading = 0; c.ki_lateral = 1;

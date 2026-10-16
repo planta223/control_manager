@@ -4,7 +4,7 @@
 
 namespace control_manager::core {
 enum class TrackingMode : std::uint8_t {
-  PID = 0, PURE_PURSUIT = 1, ADAPTIVE_PURE_PURSUIT = 2, NONE = 255
+  PID = 0, PURE_PURSUIT = 1, NONE = 255
 };
 struct TrackingResult {
   double steering_rad{0.0};

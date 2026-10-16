@@ -170,7 +170,7 @@ GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS Vehicl
 | Guidance | GPS / LANE / HYBRID | path_planning |
 | GlobalPose source (pose_mode) | GNSS / GNSS_IMU / NONE | global_state_estimator |
 | Motion source (motion_mode) | GNSS / GNSS_IMU / WHEEL / NONE | global_state_estimator |
-| Tracking | PID / PURE_PURSUIT / ADAPTIVE_PURE_PURSUIT | motion_control |
+| Tracking | PID / PURE_PURSUIT | motion_control |
 
 ### Estimator 동작 / 독립 모드
 
@@ -301,7 +301,7 @@ Mission 비활성 상태에서도 Motion Planning은 이 등속 목표를 사용
 
 기본값은 둘 다 false입니다. 구간 정책만 켜기 위해 운용 모드나 센서 선택을 바꾸지 않습니다.
 MissionLimit의 소비자는 기존 Motion Planning 하나이며 Ld나 sensor/Guidance mode를 바꾸지 않습니다.
-Pure Pursuit Ld는 실제 MotionState 속도로 계산하며 기본 PID는 Ld를 사용하지 않습니다.
+Pure Pursuit Ld는 실제 MotionState 속도로 계산하며 PID는 Ld를 사용하지 않습니다.
 
 구간 정책 활성 시 파일 제공자가 `/control/mission_map`에 `MissionMap`을 reliable/transient-local/depth 1로 발행합니다.
 이 메시지는 GNSS에 맞춘 전체 경로, 원본 s_m 배열, task_sections 이름·시작·끝을 한 snapshot에 담습니다.
@@ -387,14 +387,16 @@ Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분
 
 | Tracking 시작 설정 | 구현 / 실제 동작 |
 |---|---|
-| PID (0, 기본) | GNSS 경로 lateral PID + heading P. 기본 tuning은 비활성 placeholder |
-| PURE_PURSUIT (1) | 기존 speed-adaptive Pure Pursuit를 그대로 호출 |
-| ADAPTIVE_PURE_PURSUIT (2) | 추가 lateral/heading-error 적응형은 NOT_IMPLEMENTED; invalid stop |
+| PID (0) | GNSS 경로 lateral PID + heading P. 기본 tuning은 비활성 placeholder |
+| PURE_PURSUIT (1, 테스트 선택) | 후륜축 기준 최근접 선분 투영 + 속도 적응형 lookahead |
 | 나머지 문자열 / NONE | 시작 오류; fallback 없음 |
+
+현재 PURE_PURSUIT도 속도에 따라 lookahead가 변하는 Adaptive Pure Pursuit에 해당합니다.
+Pure Pursuit 계열은 PURE_PURSUIT 옵션 하나로 선택합니다.
 
 Motion Control은 `auto_cmd` 하나만 발행합니다. 조향·목표 속도·제동·유효성·계산 사유는
 VehicleCommand에 포함됩니다. PLAN_STOP은 유효한 speed=0/brake=true 정지 명령이고,
-목표 도달도 유효한 GOAL_REACHED 정지 명령입니다. 입력 불량이나 미구현 알고리즘은 invalid/정지입니다.
+목표 도달도 유효한 GOAL_REACHED 정지 명령입니다. 입력 불량은 invalid/정지입니다.
 TrackingStatus 토픽과 메시지 생성은 제외했으며 msg/TrackingStatus.msg는 과거 정의로 보관합니다.
 tracking_mode는 read-only 시작 설정이며 변경 후 노드를 재시작합니다.
 명령은 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
@@ -438,11 +440,12 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 
 ### Tracking parameters
 
-모든 값은 `/control/motion_control`의 `config/operation.yaml`에 있습니다.
+모드와 PID 활성화는 `config/operation.yaml`, 계산 파라미터는 `config/control.yaml`의
+`/control/motion_control`에 있습니다. 휠베이스는 `config/vehicle.yaml`을 사용합니다.
 
 | Parameter | 기본값 | 의미 / 단위 |
 |---|---:|---|
-| tracking_mode | PID | 시작 시 고정, config 변경 후 재시작 |
+| tracking_mode | PURE_PURSUIT | 테스트 시작 설정, config 변경 후 재시작 |
 | pid.enabled | false | tuning 후 명시적으로 활성화 |
 | pid.kp_lateral | 0.0 | rad/m |
 | pid.ki_lateral | 0.0 | rad/(m*s) |
@@ -451,26 +454,31 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 | pid.integral_limit_m_s | 0.0 | 적분 상한, m*s |
 | pid.max_steering_rad | 0.0 | controller 출력 clamp; 실제 차량 최대 조향각이 아님 |
 | pid.max_dt_s | 0.5 | software timeout, s |
+| lookahead_min_m | 2.0 | 속도 적응형 lookahead 최소값, m |
+| lookahead_max_m | 6.0 | 속도 적응형 lookahead 최대값, m |
+| lookahead_gain_s | 1.0 | Ld = clamp(min + gain * 실제 속도, min, max), s |
+| goal_tolerance_m | 0.3 | PID / Pure Pursuit 공통 종점 도착 허용 거리, m |
 
 PID가 disabled, max_steering_rad=0, 또는 모든 gain=0이면 PID_NOT_CONFIGURED로 닫습니다.
 양의 test fixture gain은 실차 추천값이 아닙니다. 기존 최종 safety의 operating_limits_verified와
 steering/speed 범위 검사는 별도로 유지합니다. 실측 운용 한계나 actuator calibration을 추정하지 않았습니다.
 기존 `lookahead_min_m/max_m/gain_s`, `goal_tolerance_m`, measured wheelbase 설정은 유지합니다.
-추가 Adaptive PP는 현재 mode/interface/거부 테스트만 있으며 가짜 오차 적응 gain이나 PP fallback은 없습니다.
 
 ## Configuration / 측정값
 
 차량 수치는 `main/config/vehicle.jsonc`을 기준으로 이 패키지의 `vehicle.yaml`에 유지합니다.
-현재 설정은 다음 네 파일로 나눕니다. Mission 상수와 구간별 정책은 mission.yaml에서 관리합니다.
+현재 설정은 다음 다섯 파일로 나눕니다. Mission 상수와 구간별 정책은 mission.yaml에서 관리합니다.
 
 | 파일 | 책임 |
 |---|---|
 | `config/pipeline.yaml` | 토픽 연결, map/base frame, map 입력 파일 경로 |
-| `config/operation.yaml` | 시작 모드, Mission 외 활성화 설정, 주기·timeout·품질 기준·제어 tuning·운용 한계 |
+| `config/operation.yaml` | 시작 모드, Mission 외 활성화 설정, 주기·입력 timeout·품질 기준·최종 운용 한계 |
+| `config/control.yaml` | PID 게인·적분 상한·조향 제한·dt 기준, Pure Pursuit lookahead, 공통 도착 허용 거리 |
 | `config/mission.yaml` | Mission 노드·구간 정책 활성화, 공통 운용속도, 구간별 제한·마진·정지·불확실성 상수 |
 | `config/vehicle.yaml` | 차량 치수와 센서 장착 수치 |
 
-launch는 각 노드에 vehicle → pipeline → mission → operation 순서로 네 파일을 로드합니다.
+launch는 각 노드에 vehicle → pipeline → mission → operation 순서로 설정을 로드합니다.
+Motion Control에는 mission 다음에 control.yaml을 추가로 로드합니다.
 node-specific parameter key는 `/control/<node name>`입니다.
 기존 통합 설정은 `config/legacy/control_manager.yaml`의 legacy snapshot으로 보존하며,
 기본 launch와 현재 smoke fixture는 사용하지 않습니다. 앞으로의 설정 변경은 분리한 파일에 반영합니다.
@@ -481,6 +489,7 @@ node-specific parameter key는 `/control/<node name>`입니다.
 ros2 launch control_manager control_manager.xml \
   pipeline_file:=/absolute/path/pipeline.yaml \
   mission_file:=/absolute/path/mission.yaml \
+  control_file:=/absolute/path/control.yaml \
   operation_file:=/absolute/path/operation.yaml
 
 ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
@@ -489,6 +498,9 @@ ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
   --params-file /absolute/path/mission.yaml \
   --params-file /absolute/path/operation.yaml
 ```
+
+Motion Control을 직접 실행할 때는 `--params-file /absolute/path/control.yaml`도 지정합니다.
+제어 계산값을 바꾼 뒤에는 Motion Control을 재시작합니다.
 
 Vehicle Control mode는 시작값이며 실행 중 전환은 기존 mode_request topic을 사용합니다.
 Guidance/Tracking, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
@@ -579,7 +591,7 @@ GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/
 
 ## 미구현 목록
 
-추가 error-adaptive PP, 실차 lateral PID tuning, LANE guidance, HYBRID lane correction 및 fallback,
+실차 lateral PID tuning, LANE guidance, HYBRID lane correction 및 fallback,
 차량 제어 RQT UI, 센서 health 통합 status,
 실제 traffic light/sign recognition, LiDAR detection/clustering, RGB lane extraction/correction,
 Depth 보조, GNSS+IMU fusion/EKF, 복합 mission 진행/재출발 규칙, obstacle avoidance,

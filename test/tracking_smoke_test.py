@@ -76,14 +76,19 @@ def run():
         assert not node.get_publishers_info_by_topic('/control/tracking_status')
     finally:
         default.close()
-    for mode in ('NONE', 'INVALID'):
+    for mode in ('NONE', 'INVALID', 'ADAPTIVE_PURE_PURSUIT'):
         result = subprocess.run(command('motion_control_node', 'tracking_mode:=' + mode),
                                 capture_output=True, text=True, timeout=8)
         assert result.returncode != 0 and 'tracking_mode must be' in result.stdout + result.stderr
+    print('PASS: removed ADAPTIVE_PURE_PURSUIT and invalid startup modes rejected', flush=True)
     config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
-    config['/control/motion_control']['ros__parameters']['pid'].update({
-        'enabled': True, 'kp_lateral': 0.2, 'ki_lateral': 0.3, 'kd_lateral': 0.02,
+    config['/control/motion_control']['ros__parameters']['pid']['enabled'] = True
+    control_config = yaml.safe_load((ROOT/'config/control.yaml').read_text())
+    control_config['/control/motion_control']['ros__parameters']['pid'].update({
+        'kp_lateral': 0.2, 'ki_lateral': 0.3, 'kd_lateral': 0.02,
         'kp_heading': 0.4, 'integral_limit_m_s': 0.5, 'max_steering_rad': 0.5})
+    control_cfg = LOG/'tracking_control_fixture.yaml'
+    control_cfg.write_text(yaml.safe_dump(control_config))
     config['/control/vehicle_interface']['ros__parameters'].update({
         'operating_limits_verified': True, 'max_steer_rad': 0.6,
         'max_speed_mps': 2.0, 'command_timeout_s': 0.5})
@@ -100,7 +105,8 @@ def run():
         config['/control/motion_control']['ros__parameters']['tracking_mode'] = mode
         filename = LOG / ('tracking_startup_' + mode + '.yaml')
         filename.write_text(yaml.safe_dump(config))
-        return Stack(command('motion_control_node') + ['--params-file', str(filename)],
+        return Stack(command('motion_control_node') + ['--params-file', str(control_cfg),
+                                                     '--params-file', str(filename)],
                      'tracking_controller_' + mode)
     controller = start_controller('PID')
     def restart_controller(mode):
@@ -163,21 +169,6 @@ def run():
         assert values['status'].mode == ControlStatus.AUTO
         restart_controller('PID')
         wait_reset('PID restart starts with zero accumulated history')
-        restart_controller('ADAPTIVE_PURE_PURSUIT')
-        reason = 'ADAPTIVE_PURE_PURSUIT_NOT_IMPLEMENTED'
-        wait_for(node, lambda: command_reason(reason) and invalid(),
-                 'unsupported startup tracking fails closed')
-        assert values['status'].mode == ControlStatus.AUTO
-        pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
-        wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
-                 values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==0.4,
-                 'unsupported tracking does not select or replace MANUAL')
-        assert command_reason(reason)
-        pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
-        wait_for(node, lambda: values['status'].mode == ControlStatus.AUTO and invalid(),
-                 'AUTO cannot fall back to manual with unsupported tracking')
-        restart_controller('PID')
-        wait_reset('PID startup recovery starts with zero history')
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad>0.28,
                  'accumulate before MANUAL reset')
         pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))

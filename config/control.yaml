@@ -1,0 +1,24 @@
+/control/motion_control:
+  ros__parameters:
+    # Motion Control PID 계산 설정
+    # PID 활성화와 Tracking Mode는 operation.yaml에서 설정.
+    pid:
+      kp_lateral: 0.0              # rad/m; PLACEHOLDER, NOT field tuned
+      ki_lateral: 0.0              # rad/(m*s); PLACEHOLDER
+      kd_lateral: 0.0              # rad*s/m; PLACEHOLDER
+      kp_heading: 0.0              # rad/rad; PLACEHOLDER
+      integral_limit_m_s: 0.0      # m*s; anti-windup bound, PLACEHOLDER
+      max_steering_rad: 0.0        # Controller software clamp, NOT measured physical limit
+      max_dt_s: 0.5               # Software timing policy; excessive dt resets PID
+
+    # Motion Control Pure Pursuit 계산 설정
+    # PURE_PURSUIT uses rear-axle segment projection and speed-adaptive lookahead.
+    # 속도에 따라 Ld가 변하므로 현재 구현도 속도 적응형 Pure Pursuit에 해당함.
+    # gnss_tools와 진행 위치 추적 / 목표점 선택 / 곡률 분모가 다르므로 동일 구현으로 간주하지 않음.
+    lookahead_min_m: 2.0             # TUNE / NOT field validated
+    lookahead_max_m: 6.0             # TUNE
+    lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
+
+    # Motion Control PID / Pure Pursuit 공통 도착 판정 설정
+    # 실측 wheelbase는 vehicle.yaml 사용; 중복 기입하지 않음.
+    goal_tolerance_m: 0.3            # TUNE

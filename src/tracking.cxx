@@ -8,8 +8,6 @@ void TrackingController::request(std::uint8_t mode) {
 }
 void TrackingController::reset() { pid_.reset(); }
 std::string TrackingController::selectionError() const {
-  if (requested_ == static_cast<std::uint8_t>(TrackingMode::ADAPTIVE_PURE_PURSUIT))
-    return "ADAPTIVE_PURE_PURSUIT_NOT_IMPLEMENTED";
   if (requested_ != static_cast<std::uint8_t>(TrackingMode::PID) &&
       requested_ != static_cast<std::uint8_t>(TrackingMode::PURE_PURSUIT))
     return "INVALID_TRACKING_MODE";
