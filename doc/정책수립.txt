@@ -3,6 +3,9 @@
 2. GPS main mode (no Lane)
 3. HYBRID mode
 각각의 모드에서 imu, depth, lidar는 옵션
+
+main/config/vehicle.jsonc 을 신뢰할 것.
+
 =================================================================
 제어에 필요한 정보 4가지:
 
