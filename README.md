@@ -367,7 +367,8 @@ SelectedCommand는 기존 VehicleCommand 의미와 `/control/selected_cmd` 토�
 - 두 state 생성 노드를 `global_state_estimator`로 통합했습니다. pose_mode/motion_mode를 별도로 설정합니다.
   구 개별 executable/YAML/estimation_mode alias는 제공하지 않습니다. 제거 목록은 [Estimator 보고서](doc/estimators.md)에 있습니다.
 - `lane_state_estimator`를 추가했습니다. ingress 출력은 lane_observation, 최종 lane_pose의 publisher는 lane estimator입니다.
-- GlobalPose/MotionState의 wire fields와 topic은 유지합니다. VehicleState로 되돌리지 않습니다.
+- GlobalPose/MotionState topic과 기존 필드는 유지합니다. GlobalPose에는 최초 heading 확보를 위한
+  `position_valid`, `initial_heading_unavailable`을 추가했습니다. 메시지 사용 패키지 재빌드와 전체 노드 재시작이 필요합니다.
 - Lane 계약은 `LanePose`로 변경했습니다. 외부 adapter와 `/control/lane_observation`은 `control_manager/msg/LanePose`를 사용하며,
   최종 출력은 `/control/lane_pose`입니다. 종오차 필드는 제거하고 `heading_error_rad`를 사용합니다.
   이전 Lane 타입/최종 topic의 호환 alias는 없습니다. 외부 publisher는 새 타입에 맞게 별도로 이행해야 합니다.
@@ -443,6 +444,34 @@ reference_path.header.stamp도 검사합니다. 잘못되거나 만료된 경로
 ControlStatus도 같은 형식을 확인하며 불량 시 기존 정책대로 PID 이력을 지우고 P/heading P preview를 사용합니다.
 ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되며 upstream Global Path는 정적 snapshot입니다.
 
+### GPS 초기 heading 확보 / 경로 이탈 검사
+
+GNSS 위치 표준편차 상한은 `operation.yaml`의 `max_position_std_m=3.0`이며
+`sqrt(cov[0]+cov[7])` 기준입니다. yaw 품질 기준은 기존 값을 사용합니다.
+GlobalPose의 `position_valid`는 위치·좌표계·시각 검증 결과, `initial_heading_unavailable`은
+GNSS가 한 번도 관측 heading을 제공하지 않았고 현재 yaw를 미관측 covariance로 표시한 상태입니다.
+`valid`는 계속 위치와 yaw 모두 유효하다는 뜻이며, 미확보 yaw를 유효한 0으로 만들지 않습니다.
+Path Planning은 최초 heading 미확보 시에도 위치와 전역 경로가 유효하면 ReferencePath를 제공합니다.
+
+`operation.yaml`의 `heading_bootstrap_enabled=true`일 때, Motion Control은 AUTO에서만
+최초 heading 확보용 직진을 허용합니다. 유효 위치·속도·MotionPlan·경로와 정지 요구 없음,
+경로 이탈 검사 통과가 모두 필요합니다. 조향은 0, 목표 속도는 MotionPlan을 차량 상한으로 제한합니다.
+`control.yaml`의 `heading_bootstrap_timeout_s=3.0`은 최초 AUTO 직진 시작부터 steady-clock으로 셉니다.
+IDLE에서 기다리는 시간은 포함하지 않으며, 시작 후 입력 오류나 모드 전환으로 시간을 다시 주지 않습니다.
+시간 초과는 정지하고, heading을 얻으면 정상 PID / Pure Pursuit로 전환합니다.
+heading을 한 번 얻은 뒤 잃었거나 yaw 품질이 나쁜 경우에는 직진 유예를 주지 않습니다.
+PID를 선택했으면 PID 활성화와 유효 게인 설정도 필요합니다.
+
+`control.yaml`의 `max_cross_track_m=3.0`은 현재 위치에서 경로 선분까지의 최소 거리입니다.
+3 m 초과 시 PID / Pure Pursuit와 초기 직진 모두 `PATH_DEVIATION_EXCEEDED`로 정지합니다.
+미션 활성화와 독립적이며 MANUAL 명령에는 적용하지 않습니다.
+GNSS는 최초 heading 전에는 레버암 회전 보정을 할 수 없어 초기 odom 위치가 안테나 위치입니다.
+초기 직진의 거리 검사는 그 입력 위치를 사용하며, heading 확보 후 GNSS의 후륜축 보정 위치를 사용합니다.
+진행 위치 기억과 종점 정지 유지 기능은 아직 추가하지 않았습니다.
+
+`test/heading_bootstrap_smoke_test.py`는 외부 GNSS/하드웨어 없이 실제 Sensor Interface부터
+최종 보호까지 연결하여 초기 직진·시간 초과·heading 전환/소실·위치 품질·경로 이탈 경계를 검증합니다.
+
 ### Tracking parameters
 
 모드와 PID 활성화는 `config/operation.yaml`, 계산 파라미터는 `config/control.yaml`의
@@ -462,6 +491,8 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 | lookahead_max_m | 6.0 | 속도 적응형 lookahead 최대값, m |
 | lookahead_gain_s | 1.0 | Ld = clamp(min + gain * 실제 속도, min, max), s |
 | goal_tolerance_m | 0.3 | PID / Pure Pursuit 공통 종점 도착 허용 거리, m |
+| max_cross_track_m | 3.0 | 경로 이탈 정지 기준, m |
+| heading_bootstrap_timeout_s | 3.0 | 최초 heading 확보용 AUTO 직진 제한 시간, s |
 
 PID가 disabled 또는 모든 gain=0이면 PID_NOT_CONFIGURED로 닫습니다.
 양의 test fixture gain은 실차 추천값이 아닙니다. 기존 최종 safety의 operating_limits_verified와

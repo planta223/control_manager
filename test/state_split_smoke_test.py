@@ -62,8 +62,8 @@ def estimators():
             o.header.stamp.sec -= 1; o.header.stamp.nanosec += 1000000000
         if case == 'map_frame': o.header.frame_id = 'wrong'
         if case == 'child_frame': o.child_frame_id = 'wrong'
-        if case == 'position_cov': o.pose.covariance[0] = 2.
-        if case == 'sum_cov': o.pose.covariance[0] = o.pose.covariance[7] = .6
+        if case == 'position_cov': o.pose.covariance[0] = 10.
+        if case == 'sum_cov': o.pose.covariance[0] = o.pose.covariance[7] = 4.6
         if case == 'negative_cov': o.pose.covariance[7] = -.1
         if case == 'nan_cov': o.pose.covariance[0] = float('nan')
         if case == 'yaw_cov': o.pose.covariance[35] = 2.

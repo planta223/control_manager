@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include "control_manager/ros_support.hxx"
 #include "control_manager/core/lateral_controller.hxx"
 #include "control_manager/core/tracking.hxx"
@@ -43,6 +44,7 @@ class GlobalStateEstimatorNode : public NodeBase {
   core::MotionMode motion_mode_;
   std::string map_frame_, base_frame_;
   double timeout_s_, max_position_std_m_, max_yaw_variance_, max_speed_variance_, wheelbase_m_;
+  bool have_valid_heading_{false};
 };
 class LanePoseEstimatorNode : public NodeBase {
  public: LanePoseEstimatorNode();
@@ -110,6 +112,9 @@ class MotionControlNode : public NodeBase {
   core::VehicleLimits limits_;
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
+  std::optional<std::chrono::steady_clock::time_point> heading_bootstrap_start_;
+  bool heading_bootstrap_enabled_, have_valid_heading_{false};
+  double heading_bootstrap_timeout_s_, max_cross_track_m_;
   std::shared_ptr<Input<msg::GlobalPose>> pose_;
   std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<msg::MotionPlan>> plan_;

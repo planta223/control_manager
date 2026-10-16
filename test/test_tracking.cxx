@@ -157,3 +157,12 @@ TEST(Tracking, PurePursuitRegressionUsesUnchangedLegacyAlgorithm) {
   EXPECT_NEAR(tracker.compute(state(0,0),{{0,1},{1,1}},0.1).steering_rad,
               std::atan2(2*1.328,2.0),1e-12);
 }
+TEST(PathDistance, IndependentOfHeadingAndUsesClampedSegments) {
+  EXPECT_DOUBLE_EQ(cm::distanceToPath(5,3,straight),3.0);
+  EXPECT_DOUBLE_EQ(cm::distanceToPath(5,-3,straight),3.0);
+  EXPECT_DOUBLE_EQ(cm::distanceToPath(-3,4,straight),5.0);
+  EXPECT_DOUBLE_EQ(cm::distanceToPath(3,5,{{0,0},{0,0},{0,20}}),3.0);
+  EXPECT_FALSE(std::isfinite(cm::distanceToPath(0,0,{})));
+  EXPECT_FALSE(std::isfinite(cm::distanceToPath(0,0,{{0,0},{0,0}})));
+  EXPECT_FALSE(std::isfinite(cm::distanceToPath(0,0,{{0,0},{1,std::numeric_limits<double>::quiet_NaN()}})));
+}

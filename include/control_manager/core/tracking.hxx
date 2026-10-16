@@ -27,6 +27,8 @@ struct PathError {
 // Signed correction: path to the left of the vehicle => positive e_y.
 // Tangent comes from the nearest non-degenerate segment in path order.
 PathError pathError(const TrackingState &, const std::vector<Point> &);
+// Position-only distance to the path; infinity means invalid/degenerate geometry.
+double distanceToPath(double x_m, double y_m, const std::vector<Point> &path);
 class PidLateralController {
  public:
   explicit PidLateralController(PidConfig config);

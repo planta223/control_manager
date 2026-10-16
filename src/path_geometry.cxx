@@ -4,6 +4,23 @@
 #include <limits>
 
 namespace control_manager::core {
+double distanceToPath(double x, double y, const std::vector<Point> &path) {
+  double best = std::numeric_limits<double>::infinity();
+  if (!std::isfinite(x) || !std::isfinite(y) || path.size() < 2) return best;
+  for (const auto &p : path)
+    if (!std::isfinite(p.x_m) || !std::isfinite(p.y_m)) return best;
+  for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+    const double dx = path[i+1].x_m - path[i].x_m, dy = path[i+1].y_m - path[i].y_m;
+    const double length2 = dx*dx + dy*dy;
+    if (!std::isfinite(length2)) return std::numeric_limits<double>::infinity();
+    if (length2 <= std::numeric_limits<double>::epsilon()) continue;
+    const double dot = (x - path[i].x_m)*dx + (y - path[i].y_m)*dy;
+    if (!std::isfinite(dot)) return std::numeric_limits<double>::infinity();
+    const double t = std::clamp(dot / length2, 0.0, 1.0);
+    best = std::min(best, std::hypot(path[i].x_m + t*dx - x, path[i].y_m + t*dy - y));
+  }
+  return best;
+}
 PathError pathError(const TrackingState &s, const std::vector<Point> &path) {
   if (!s.localization_valid || !s.speed_valid || path.size() < 2 ||
       !std::isfinite(s.x_m) || !std::isfinite(s.y_m) || !std::isfinite(s.yaw_rad) ||

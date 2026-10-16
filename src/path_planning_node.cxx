@@ -1,6 +1,7 @@
 #include "control_manager/nodes.hxx"
 #include "control_manager/core/guidance.hxx"
 #include "control_manager/core/planning_interfaces.hxx"
+#include "control_manager/ingress.hxx"
 namespace control_manager {
 PathPlanningNode::PathPlanningNode() : NodeBase("path_planning") {
   frame_ = param<std::string>("map_frame", "map");
@@ -30,8 +31,10 @@ PathPlanningNode::PathPlanningNode() : NodeBase("path_planning") {
   tick([this] { update(); });
 }
 void PathPlanningNode::update() {
-  const bool localization_available = current(pose_, timeout_s_) &&
-    pose_->value->valid && pose_->value->header.frame_id == frame_ &&
+  const bool localization_available = pose_ && pose_->value &&
+    ingress::validStampFormat(pose_->value->header.stamp) && current(pose_, timeout_s_) &&
+    (pose_->value->valid || (pose_->value->position_valid && pose_->value->initial_heading_unavailable)) &&
+    pose_->value->header.frame_id == frame_ &&
     std::isfinite(pose_->value->x_m) && std::isfinite(pose_->value->y_m) &&
     std::isfinite(pose_->value->yaw_rad);
   const bool global_path_available = datum_verified_ && global_ && global_->value &&
@@ -49,6 +52,8 @@ void PathPlanningNode::update() {
   const auto decision = core::evaluateGuidance(static_cast<std::uint8_t>(guidance_mode_), localization_available,
                                                global_path_available, lane_error);
   nav_msgs::msg::Path path;
+  // Keep the GPS path available for the bounded initial straight-drive procedure.
+  // Motion Control still requires valid yaw for all path-tracking steering.
   if (decision.valid) path = *global_->value;
   path.header = header(frame_);  // Planning generation time, not sensor measurement time.
   publisher_->publish(path);  // Empty path -> invalid MotionPlan -> AUTO stop.

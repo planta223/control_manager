@@ -21,3 +21,7 @@
     # Motion Control PID / Pure Pursuit 공통 도착 판정 설정
     # 실측 wheelbase와 조향각 / 속도 제한은 vehicle.yaml 사용; 중복 기입하지 않음.
     goal_tolerance_m: 0.3            # TUNE
+
+    # Motion Control GPS 주행 검사 / 최초 heading 확보 설정 (PID / Pure Pursuit 공통)
+    max_cross_track_m: 3.0           # USER_REQUESTED: 경로까지 거리 > 3 m이면 정지.
+    heading_bootstrap_timeout_s: 3.0 # GNSS legacy와 동일; AUTO 직진 시작 후 최대 시간.

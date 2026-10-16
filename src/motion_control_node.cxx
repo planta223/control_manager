@@ -26,6 +26,11 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   pid.max_steering_rad = std::max(-limits_.min_steer_rad, limits_.max_steer_rad);
   pid.max_dt_s = positive("pid.max_dt_s", 0.5);
   pid.goal_tolerance_m = config.goal_tolerance_m;
+  max_cross_track_m_ = positive("max_cross_track_m", 3.0);
+  heading_bootstrap_timeout_s_ = positive("heading_bootstrap_timeout_s", 3.0);
+  heading_bootstrap_enabled_ = param<bool>("heading_bootstrap_enabled", false) &&
+    (mode == "PURE_PURSUIT" || (pid.enabled &&
+     (pid.kp_lateral > 0.0 || pid.ki_lateral > 0.0 || pid.kd_lateral > 0.0 || pid.kp_heading > 0.0)));
   tracking_ = std::make_unique<core::TrackingController>(pid, config);
   if (mode == "PURE_PURSUIT") tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::PURE_PURSUIT));
   pose_ = input<msg::GlobalPose>("global_pose");
@@ -58,6 +63,9 @@ void MotionControlNode::update() {
     return in && in->value && ingress::validStampFormat(in->value->header.stamp) &&
       current(in, timeout_s_);
   };
+  // Once acquired, a lost/poor heading never starts a new straight-drive grace period.
+  if (current_input(pose_) && pose_->value->header.frame_id == frame_ &&
+      pose_->value->valid && std::isfinite(pose_->value->yaw_rad)) have_valid_heading_ = true;
   // Existing PID/PP require a pose and path in the same global frame. A local
   // lane path needs an agreed tracking-frame adapter, not a fabricated zero pose.
   if (current_input(plan_) && plan_->value->valid &&
@@ -67,7 +75,8 @@ void MotionControlNode::update() {
     stop("LOCAL_REFERENCE_PATH_NOT_SUPPORTED"); return;
   }
   if (!current_input(pose_) || !current_input(motion_) || !current_input(plan_) ||
-      !pose_->value->valid || !motion_->value->speed_valid ||
+      (!pose_->value->valid && !(pose_->value->position_valid && pose_->value->initial_heading_unavailable)) ||
+      !motion_->value->speed_valid ||
       motion_->value->header.frame_id != base_frame_ || pose_->value->header.frame_id != frame_ || !plan_->value->valid ||
       plan_->value->header.frame_id != frame_ || !std::isfinite(plan_->value->target_speed_mps) ||
       plan_->value->target_speed_mps < 0.0) {
@@ -90,6 +99,27 @@ void MotionControlNode::update() {
   std::vector<core::Point> path;
   path.reserve(plan.reference_path.poses.size());
   for (const auto &p : plan.reference_path.poses) path.push_back({p.pose.position.x, p.pose.position.y});
+  const double path_distance = core::distanceToPath(state.x_m, state.y_m, path);
+  if (!std::isfinite(path_distance)) { stop("INVALID_TRACKING_GEOMETRY"); return; }
+  if (path_distance > max_cross_track_m_) { stop("PATH_DEVIATION_EXCEEDED"); return; }
+  if (!pose_->value->valid) {
+    if (have_valid_heading_) { stop("HEADING_UNAVAILABLE_AFTER_ACQUISITION"); return; }
+    if (!heading_bootstrap_enabled_) { stop("HEADING_BOOTSTRAP_DISABLED"); return; }
+    if (!current_input(control_status_) || control_status_->value->header.frame_id != base_frame_) {
+      stop("HEADING_BOOTSTRAP_CONTROL_STATUS_UNAVAILABLE"); return;
+    }
+    if (control_status_->value->mode != msg::ControlStatus::AUTO) {
+      stop("HEADING_BOOTSTRAP_WAITING_FOR_AUTO", true); return;
+    }
+    if (!heading_bootstrap_start_) heading_bootstrap_start_ = tick_time;
+    if (std::chrono::duration<double>(tick_time - *heading_bootstrap_start_).count() >=
+        heading_bootstrap_timeout_s_) { stop("HEADING_BOOTSTRAP_TIMEOUT"); return; }
+    tracking_->reset(); previous_path_.clear();
+    const core::Command straight{0.0, plan.target_speed_mps, false, true,
+                                now().nanoseconds(), "HEADING_BOOTSTRAP_ACTIVE"};
+    publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
+    return;  // Never run PID / Pure Pursuit using an unavailable yaw.
+  }
   const bool same_path = path.size() == previous_path_.size() &&
     std::equal(path.begin(), path.end(), previous_path_.begin(),
       [](const core::Point &a, const core::Point &b) { return a.x_m == b.x_m && a.y_m == b.y_m; });

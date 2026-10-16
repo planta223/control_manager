@@ -54,7 +54,7 @@
     # Motion Mode 설정
     motion_mode: GNSS               # GNSS / GNSS_IMU (TODO) / WHEEL (TODO) / NONE
     # Global State Estimator 품질 검증 설정
-    max_position_std_m: 1.0           # TUNE: covariance quality policy, not measured
+    max_position_std_m: 3.0           # USER_REQUESTED: sqrt(cov_x + cov_y), m
     max_yaw_variance_rad2: 0.25       # TUNE
     # vehicle.wheelbase_m comes from vehicle.yaml, used only by future WHEEL estimator.
     max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
@@ -98,6 +98,7 @@
     # Motion Control 발행: auto_cmd만 발행.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
+    heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
     # PID 게인 / Pure Pursuit lookahead / 공통 도착 허용 거리는 control.yaml에서 설정.

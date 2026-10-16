@@ -9,6 +9,8 @@ C++ class만 GlobalStateEstimatorNode / LanePoseEstimatorNode 표기를 사용�
 기존 두 state 생성 노드를 하나로 통합했으며 GlobalPose와 MotionState 메시지는 합치지 않았습니다.
 
 - GlobalPose: global/map-relative 위치·방향·uncertainty·validity·source Header.
+  `position_valid`는 위치 단독 검증, `initial_heading_unavailable`은 GNSS 최초 heading 미확보를 구분합니다.
+  `valid`는 위치와 yaw 모두 유효할 때만 true입니다. 위치 표준편차 상한은 현재 3 m입니다.
 - MotionState: vehicle dynamic state, speed/yaw-rate 및 각각 validity·source Header.
 - LanePose: lane-relative lateral error(m)·heading error(rad)·confidence·source Header.
 
@@ -141,7 +143,8 @@ Ingress는 외부 타입 경계·기초 검증, lane_state_estimator는 내부 �
 - 기존 ingress 45개, state validation 78개, 전체 pipeline 68개, Tracking 59개 확인 항목 통과.
 - 원래 GNSS pose/speed 검증 함수 몸체를 이전 source와 문자열 비교로 보존 확인했습니다.
   Covariance/quaternion/source time/frame 오류가 두 output을 독립적으로 무효화하는 기존 tests도 통과했습니다.
-- GlobalPose/MotionState/VehicleFeedback wire fields 변경 없음.
+- 당시 GlobalPose/MotionState/VehicleFeedback wire fields 변경 없음.
+  현재 GlobalPose에는 위의 최초 heading 확보용 필드 두 개를 추가했습니다.
 - Lane 계약은 LanePose로 통일: lateral_error_m, heading_error_rad, confidence, header.stamp.
   외부 adapter와 내부 observation에도 같은 타입을 사용하고 최종 topic은 /control/lane_pose입니다.
   종오차 필드는 제거했습니다. 기존 외부 publisher에는 타입/topic 이행이 필요합니다.

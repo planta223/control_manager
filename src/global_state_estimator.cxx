@@ -16,7 +16,7 @@ GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_es
   map_frame_ = param<std::string>("map_frame", "map");
   base_frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("state_timeout_s", 0.5);
-  max_position_std_m_ = positive("max_position_std_m", 1.0);
+  max_position_std_m_ = positive("max_position_std_m", 3.0);
   max_yaw_variance_ = positive("max_yaw_variance_rad2", 0.25);
   max_speed_variance_ = positive("max_speed_variance_m2ps2", 1.0);
   wheelbase_m_ = nonnegative("vehicle.wheelbase_m", 0.0);  // vehicle.yaml; 0 means unavailable.
@@ -85,9 +85,14 @@ msg::GlobalPose GlobalStateEstimatorNode::estimatePose() {
       cov[0] + cov[7] <= max_position_std_m_*max_position_std_m_;
     const bool frames_ok = odom.header.frame_id == map_frame_ && odom.child_frame_id == base_frame_;
     // GNSS owns the antenna-to-rear-axle correction; preserve its base_link pose.
-    out.valid = current(gnss_, timeout_s_) && frames_ok &&
-      position_ok && variance_ok(cov[35], max_yaw_variance_) && orientation_valid &&
+    out.position_valid = current(gnss_, timeout_s_) && frames_ok && position_ok &&
       std::isfinite(out.x_m) && std::isfinite(out.y_m);
+    // GNSS contract: unobserved yaw is 1e12; legacy uses 1e11 as its boundary.
+    if (current(gnss_, timeout_s_) && frames_ok && orientation_valid &&
+        std::isfinite(cov[35]) && cov[35] >= 0.0 && cov[35] < 1e11) have_valid_heading_ = true;
+    out.initial_heading_unavailable = !have_valid_heading_ && orientation_valid &&
+      std::isfinite(cov[35]) && cov[35] >= 1e11;
+    out.valid = out.position_valid && variance_ok(cov[35], max_yaw_variance_) && orientation_valid;
     out.position_variance_x_m2 = cov[0];
     out.position_variance_y_m2 = cov[7];
     out.yaw_variance_rad2 = cov[35];

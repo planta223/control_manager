@@ -180,17 +180,24 @@ def run():
         assert values['auto_cmd'].reason in ('PID_ACTIVE', 'PID_PREVIEW_STATE_RESET')
         node.destroy_client(client)
         print('PASS: no tracking request subscription and startup mode is read-only', flush=True)
-        # Controller-only output bound; final safety limits remain a separate gate.
+        # Path deviation gate precedes steering saturation.
         active['state_y'] = -5.
-        wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad == 0.5,
-                 'PID output clamps at configured software bound')
+        wait_for(node, lambda: command_reason('PATH_DEVIATION_EXCEEDED') and invalid(),
+                 'PID path deviation over 3 m stops AUTO')
         active['state_y'] = -1.
+        wait_reset('PID recovers inside path deviation limit')
         restart_controller('PURE_PURSUIT')
         expected_pp = math.atan2(2*1.328, 3.*3.+1.)
         wait_for(node, lambda: command_reason('PURE_PURSUIT_ACTIVE') and
                  values['auto_cmd'].valid and abs(values['auto_cmd'].target_steer_rad-expected_pp)<1e-9,
                  'PURE_PURSUIT startup config produces expected steering')
         assert values['status'].mode == ControlStatus.AUTO
+        active['state_y'] = 3.01
+        wait_for(node, lambda: command_reason('PATH_DEVIATION_EXCEEDED') and invalid(),
+                 'Pure Pursuit path deviation over 3 m stops AUTO')
+        active['state_y'] = 3.0
+        wait_for(node, lambda: values['auto_cmd'].valid and command_reason('PURE_PURSUIT_ACTIVE'),
+                 'Pure Pursuit accepts the 3 m deviation boundary')
         active.update(state_x=19.99, state_y=-1.0, target_speed=3.0)
         for y, steering in [(-1.0,0.5),(1.0,-0.5)]:
             active['state_y'] = y
