@@ -123,22 +123,31 @@ def planning_dependencies():
         pubs = {key: node.create_publisher(cls, '/control/' + key, 10) for key, cls in [
             ('motion_state', MotionState), ('reference_path', PathMsg),
             ('object_state', ObjectState), ('mission_limit', MissionLimit)]}
-        state = {'objects': not objects, 'mission': not mission, 'obstacle': False, 'mission_valid': True}
+        state = {'objects': not objects, 'mission': not mission, 'obstacle': False,
+                 'mission_valid': True, 'bad_input': '', 'bad_stamp': ''}
         def publish():
             stamp = node.get_clock().now().to_msg()
+            def input_stamp(key):
+                value = copy.deepcopy(stamp)
+                if state['bad_input'] == key:
+                    if state['bad_stamp'] == 'negative': value.sec = -1
+                    elif state['bad_stamp'] == 'overflow':
+                        # Normalizes to a fresh time unless wire format is checked first.
+                        value.sec -= 1; value.nanosec += 1_000_000_000
+                return value
             motion = MotionState(speed_mps=.7, speed_valid=True)
-            motion.header.stamp = stamp; motion.header.frame_id = 'base_link'
-            path = PathMsg(); path.header.stamp = stamp; path.header.frame_id = 'map'
+            motion.header.stamp = input_stamp('motion_state'); motion.header.frame_id = 'base_link'
+            path = PathMsg(); path.header.stamp = input_stamp('reference_path'); path.header.frame_id = 'map'
             for x in (0., 20.):
                 p = PoseStamped(); p.header = copy.deepcopy(path.header); p.pose.position.x = x; p.pose.orientation.w = 1.
                 path.poses.append(p)
             pubs['motion_state'].publish(motion); pubs['reference_path'].publish(path)
             if state['objects']:
                 obj = ObjectState(valid=objects, obstacle_valid=objects, obstacle_detected=state['obstacle'])
-                obj.header.stamp = stamp; obj.header.frame_id = 'base_link'; pubs['object_state'].publish(obj)
+                obj.header.stamp = input_stamp('object_state'); obj.header.frame_id = 'base_link'; pubs['object_state'].publish(obj)
             if state['mission']:
                 limit = MissionLimit(valid=mission and state['mission_valid'], max_speed_mps=.4)
-                limit.header.stamp = stamp; limit.header.frame_id = 'map'; pubs['mission_limit'].publish(limit)
+                limit.header.stamp = input_stamp('mission_limit'); limit.header.frame_id = 'map'; pubs['mission_limit'].publish(limit)
         timer = node.create_timer(.05, publish)
         stack = Stack(command('motion_planning_node', 'cruise_speed_mps:=1.0',
                       'object_state_enabled:=' + str(objects).lower(),
@@ -154,6 +163,21 @@ def planning_dependencies():
             assert owns(node, '/control/mission_limit', 'motion_planning') == mission
             assert (':OBJECT_DISABLED' in values[-1].reason) == (not objects)
             assert (':MISSION_DISABLED' in values[-1].reason) == (not mission)
+            for key in pubs:
+                required = key in ('motion_state', 'reference_path') or (
+                    key == 'object_state' and objects) or (key == 'mission_limit' and mission)
+                for bad_stamp in ('negative', 'overflow'):
+                    count = len(values)
+                    state.update(bad_input=key, bad_stamp=bad_stamp)
+                    def checked():
+                        return len(values) >= count + 2 and (
+                            (not values[-1].valid and values[-1].stop_request and values[-1].target_speed_mps == 0.)
+                            if required else (values[-1].valid and values[-1].target_speed_mps == speed))
+                    wait_for(node, checked, key + ' ' + bad_stamp + (' rejected' if required else ' inactive/ignored'))
+                    assert stack.process.poll() is None
+                    state['bad_stamp'] = ''
+                    wait_for(node, lambda: values[-1].valid and values[-1].target_speed_mps == speed,
+                             key + ' valid timestamp recovers')
             if objects:
                 state['obstacle'] = True
                 wait_for(node, lambda: values[-1].valid and values[-1].stop_request and values[-1].target_speed_mps == 0., 'active obstacle stops')

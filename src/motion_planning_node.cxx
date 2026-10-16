@@ -1,4 +1,5 @@
 #include "control_manager/nodes.hxx"
+#include "control_manager/ingress.hxx"
 #include <algorithm>
 namespace control_manager {
 MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
@@ -20,14 +21,18 @@ void MotionPlanningNode::update() {
   plan.header = header(frame_);
   plan.stop_request = true;
   plan.reason = "MISSING_INVALID_OR_STALE_INPUT";
-  if (current(motion_, timeout_s_) && motion_->value->speed_valid &&
+  const auto current_input = [this](const auto &in) {
+    return in && in->value && ingress::validStampFormat(in->value->header.stamp) &&
+      current(in, timeout_s_);
+  };
+  if (current_input(motion_) && motion_->value->speed_valid &&
       std::isfinite(motion_->value->speed_mps) && motion_->value->speed_mps >= 0.0 &&
-      motion_->value->header.frame_id == base_frame_ && current(path_, timeout_s_) &&
+      motion_->value->header.frame_id == base_frame_ && current_input(path_) &&
       (validPath(*path_->value, frame_) || validPath(*path_->value, base_frame_)) &&
-      (!mission_enabled_ || (current(limit_, timeout_s_) && limit_->value->valid &&
+      (!mission_enabled_ || (current_input(limit_) && limit_->value->valid &&
       limit_->value->header.frame_id == frame_ && std::isfinite(limit_->value->max_speed_mps) &&
       limit_->value->max_speed_mps >= 0.0)) &&
-      (!objects_enabled_ || (current(objects_, timeout_s_) &&
+      (!objects_enabled_ || (current_input(objects_) &&
       objects_->value->valid && objects_->value->obstacle_valid))) {
     plan.header.frame_id = path_->value->header.frame_id;
     plan.reference_path = *path_->value;
