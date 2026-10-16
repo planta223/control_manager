@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose, TrackingStatus, VehicleInterfaceStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose, VehicleInterfaceStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -64,7 +64,7 @@ def observe(node):
                        ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
                        ('object_state', ObjectState),
-                       ('reference_path', PathMsg), ('tracking_status', TrackingStatus)]:
+                       ('reference_path', PathMsg)]:
         node.create_subscription(cls, '/control/' + topic,
                                  lambda msg, key=topic: values.__setitem__(key, msg), 10)
     node.create_subscription(VehicleInterfaceStatus, '/control/vehicle_interface/status',
@@ -82,9 +82,6 @@ def default_stack():
                                    if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
-        wait_for(node, lambda: 'tracking_status' in values, 'TrackingStatus delivered')
-        assert values['tracking_status'].requested_mode == TrackingStatus.PID
-        assert not values['tracking_status'].valid and values['tracking_status'].actual_mode == TrackingStatus.NONE
         assert values['status'].mode == ControlStatus.IDLE
         assert not values['protected_cmd'].valid and values['protected_cmd'].target_brake
         assert values['protected_cmd'].target_speed_mps == 0.0
@@ -95,11 +92,12 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'vehicle_interface/status', 'status', 'tracking_status']}
+                    'selected_cmd', 'vehicle_interface/status', 'status']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
         assert not node.get_publishers_info_by_topic('/control/guidance_status')
+        assert not node.get_publishers_info_by_topic('/control/tracking_status')
         print('PASS: required topic graph contracts', flush=True)
     finally:
         stack.close()

@@ -73,7 +73,7 @@ DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않�
 유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/mode_request`, `/control/selected_cmd`,
 `/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
 추가: `/control/vehicle_interface/status` 진단 토픽과 `VehicleInterfaceStatus.msg`.
-현재 executable 11개 / custom message 12개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain, 미검증 한계 0 유지.
+현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain, 미검증 한계 0 유지.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
 ## 검증

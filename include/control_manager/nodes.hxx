@@ -106,7 +106,6 @@ class MotionControlNode : public NodeBase {
  public: MotionControlNode();
  private:
   void update();
-  void publish(const core::Command &command, const core::TrackingResult &result);
   std::unique_ptr<core::TrackingController> tracking_;
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
@@ -115,7 +114,6 @@ class MotionControlNode : public NodeBase {
   std::shared_ptr<Input<msg::MotionPlan>> plan_;
   std::shared_ptr<Input<msg::ControlStatus>> control_status_;
   rclcpp::Publisher<msg::VehicleCommand>::SharedPtr publisher_;
-  rclcpp::Publisher<msg::TrackingStatus>::SharedPtr tracking_publisher_;
   std::string frame_, base_frame_;
   double timeout_s_;
 };

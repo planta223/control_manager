@@ -23,8 +23,9 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   pid.goal_tolerance_m = config.goal_tolerance_m;
   tracking_ = std::make_unique<core::TrackingController>(pid, config);
   const auto mode = param<std::string>("tracking_mode", "PID");
-  if (mode == "PURE_PURSUIT") tracking_->request(msg::TrackingStatus::PURE_PURSUIT);
-  else if (mode == "ADAPTIVE_PURE_PURSUIT") tracking_->request(msg::TrackingStatus::ADAPTIVE_PURE_PURSUIT);
+  if (mode == "PURE_PURSUIT") tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::PURE_PURSUIT));
+  else if (mode == "ADAPTIVE_PURE_PURSUIT")
+    tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::ADAPTIVE_PURE_PURSUIT));
   else if (mode != "PID")
     throw std::invalid_argument("tracking_mode must be PID, PURE_PURSUIT or ADAPTIVE_PURE_PURSUIT");
   pose_ = input<msg::GlobalPose>("global_pose");
@@ -40,29 +41,16 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
       control_status_->received = std::chrono::steady_clock::now();
     }));
   publisher_ = output<msg::VehicleCommand>("auto_cmd");
-  tracking_publisher_ = output<msg::TrackingStatus>("tracking_status");
   previous_tick_ = std::chrono::steady_clock::now();
   tick([this] { update(); });
-}
-void MotionControlNode::publish(const core::Command &command, const core::TrackingResult &result) {
-  publisher_->publish(toRos(command, base_frame_));
-  msg::TrackingStatus status;
-  status.header = header(base_frame_);
-  status.requested_mode = tracking_->requested();
-  status.actual_mode = result.valid ? tracking_->requested() : msg::TrackingStatus::NONE;
-  status.valid = result.valid;
-  status.reason = result.reason;
-  tracking_publisher_->publish(status);
 }
 void MotionControlNode::update() {
   const auto tick_time = std::chrono::steady_clock::now();
   const double dt_s = std::chrono::duration<double>(tick_time - previous_tick_).count();
   previous_tick_ = tick_time;
-  core::TrackingResult result;
-  auto stop = [this, &result](const std::string &reason, bool valid = false) {
+  auto stop = [this](const std::string &reason, bool valid = false) {
     tracking_->reset(); previous_path_.clear();
-    result.reason = reason;
-    publish(core::stop(now().nanoseconds(), reason, valid), result);
+    publisher_->publish(toRos(core::stop(now().nanoseconds(), reason, valid), base_frame_));
   };
   const auto selection_error = tracking_->selectionError();
   if (!selection_error.empty()) { stop(selection_error); return; }
@@ -110,13 +98,13 @@ void MotionControlNode::update() {
     control_status_->value->mode == msg::ControlStatus::AUTO &&
     control_status_->value->fsm_state >= msg::ControlStatus::READY &&
     control_status_->value->fsm_state <= msg::ControlStatus::STOPPED;
-  result = tracking_->compute(state, path, dt_s, accumulate_pid);
+  const auto result = tracking_->compute(state, path, dt_s, accumulate_pid);
   auto command = core::stop(now().nanoseconds(), result.reason);
   if (result.valid && result.goal_reached) command = core::stop(now().nanoseconds(), "GOAL_REACHED", true);
   else if (result.valid)
     command = {result.steering_rad, plan.target_speed_mps, false, true,
                now().nanoseconds(), result.reason};
   // Longitudinal policy remains MotionPlan target speed pass-through. No speed PID.
-  publish(command, result);
+  publisher_->publish(toRos(command, base_frame_));
 }
 }  // namespace control_manager

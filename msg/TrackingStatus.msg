@@ -1,4 +1,5 @@
-# Selection: operation.yaml tracking_mode at startup. Independent of Guidance/ControlMode.
+# Retired definition: not generated, installed or used by current nodes.
+# Kept as a historical file; Motion Control publishes auto_cmd only.
 uint8 PID=0
 uint8 PURE_PURSUIT=1
 uint8 ADAPTIVE_PURE_PURSUIT=2

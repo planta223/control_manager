@@ -95,7 +95,7 @@
 /control/motion_control:
   ros__parameters:
     # Motion Control 구독: global_pose / motion_state / motion_plan / status.
-    # Motion Control 발행: auto_cmd / tracking_status 항상 발행.
+    # Motion Control 발행: auto_cmd만 발행.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PID              # PID / PURE_PURSUIT / ADAPTIVE_PURE_PURSUIT (TODO)
     pid:

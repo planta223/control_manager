@@ -14,7 +14,7 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
-from control_manager.msg import GlobalPose, MotionState, VehicleCommand, MotionPlan, ObjectState, ControlStatus, TrackingStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, MotionPlan, ObjectState, ControlStatus
 from smoke_test import ROOT, LOG, Stack, observe, wait_for
 from operation_smoke_test import command
 
@@ -70,12 +70,10 @@ def run():
     default = Stack([command('motion_control_node')[0], '--ros-args',
                      '-r','__ns:=/control'], 'tracking_default')
     try:
-        wait_for(node, lambda: 'tracking_status' in values and
-                 values['tracking_status'].requested_mode == TrackingStatus.PID and
-                 values['tracking_status'].actual_mode == TrackingStatus.NONE and
-                 values['tracking_status'].reason == 'PID_NOT_CONFIGURED' and
-                 'auto_cmd' in values and not values['auto_cmd'].valid and values['auto_cmd'].target_brake,
+        wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].reason == 'PID_NOT_CONFIGURED' and
+                 not values['auto_cmd'].valid and values['auto_cmd'].target_brake,
                  'default PID with healthy fixtures fails closed until configured')
+        assert not node.get_publishers_info_by_topic('/control/tracking_status')
     finally:
         default.close()
     for mode in ('NONE', 'INVALID'):
@@ -110,45 +108,46 @@ def run():
         controller.close()
         wait_for(node, lambda: ('motion_control', '/control') not in node.get_node_names_and_namespaces(),
                  'previous Motion Control stopped')
-        values.pop('tracking_status', None); values.pop('auto_cmd', None)
+        values.pop('auto_cmd', None)
         controller = start_controller(mode)
 
-    def selected(mode, reason=None):
-        return ('tracking_status' in values and values['tracking_status'].requested_mode == mode and
-                (reason is None or values['tracking_status'].reason == reason))
+    def command_reason(reason):
+        return 'auto_cmd' in values and values['auto_cmd'].reason == reason
 
     def auto_pid():
-        return (selected(TrackingStatus.PID) and values['tracking_status'].valid and
-                values['tracking_status'].actual_mode == TrackingStatus.PID and
+        return ('auto_cmd' in values and values['auto_cmd'].valid and
+                values['auto_cmd'].reason in ('PID_ACTIVE', 'PID_PREVIEW_STATE_RESET') and
                 'protected_cmd' in values and values['protected_cmd'].valid and
                 values['protected_cmd'].target_speed_mps == 1.)
 
     def invalid():
         return ('auto_cmd' in values and not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
-                not values['tracking_status'].valid and values['tracking_status'].actual_mode == TrackingStatus.NONE and
                 'protected_cmd' in values and not values['protected_cmd'].valid and values['protected_cmd'].target_brake)
 
     def wait_reset(label, expected=0.2):
         wait_for(node, lambda: auto_pid() and abs(values['auto_cmd'].target_steer_rad-expected)<1e-6, label)
 
     try:
-        wait_for(node, lambda: selected(TrackingStatus.PID, 'PID_PREVIEW_STATE_RESET'),
+        wait_for(node, lambda: command_reason('PID_PREVIEW_STATE_RESET'),
                  'IDLE PID preview uses no integral history')
         assert abs(values['auto_cmd'].target_steer_rad-0.2)<1e-6
+        wait_for(node, lambda: pubs['mode_request'].get_subscription_count() > 0 and 'status' in values,
+                 'Control Selector discovered before one-shot mode request')
         pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
         wait_for(node, auto_pid, 'configured default PID produces AUTO command')
         assert values['auto_cmd'].target_speed_mps == 1. and not values['auto_cmd'].target_brake
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad > 0.28,
                  'PID integral accumulates while AUTO is healthy')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
-        legacy_request.publish(UInt8(data=TrackingStatus.PURE_PURSUIT))
+        assert not node.get_publishers_info_by_topic('/control/tracking_status')
+        legacy_request.publish(UInt8(data=1))
         client = node.create_client(SetParameters, '/control/motion_control/set_parameters')
         wait_for(node, client.service_is_ready, 'tracking parameter service available')
         future = client.call_async(SetParameters.Request(parameters=[
             Parameter('tracking_mode', value='PURE_PURSUIT').to_parameter_msg()]))
         wait_for(node, future.done, 'tracking startup parameter change answered')
         assert not future.result().results[0].successful
-        assert selected(TrackingStatus.PID)
+        assert values['auto_cmd'].reason in ('PID_ACTIVE', 'PID_PREVIEW_STATE_RESET')
         node.destroy_client(client)
         print('PASS: no tracking request subscription and startup mode is read-only', flush=True)
         # Controller-only output bound; final safety limits remain a separate gate.
@@ -158,23 +157,22 @@ def run():
         active['state_y'] = -1.
         restart_controller('PURE_PURSUIT')
         expected_pp = math.atan2(2*1.328, 3.*3.+1.)
-        wait_for(node, lambda: selected(TrackingStatus.PURE_PURSUIT, 'PURE_PURSUIT_ACTIVE') and
-                 values['tracking_status'].actual_mode == TrackingStatus.PURE_PURSUIT and
+        wait_for(node, lambda: command_reason('PURE_PURSUIT_ACTIVE') and
                  values['auto_cmd'].valid and abs(values['auto_cmd'].target_steer_rad-expected_pp)<1e-9,
-                 'PURE_PURSUIT startup config preserves known legacy steering')
+                 'PURE_PURSUIT startup config produces expected steering')
         assert values['status'].mode == ControlStatus.AUTO
         restart_controller('PID')
         wait_reset('PID restart starts with zero accumulated history')
         restart_controller('ADAPTIVE_PURE_PURSUIT')
         reason = 'ADAPTIVE_PURE_PURSUIT_NOT_IMPLEMENTED'
-        wait_for(node, lambda: selected(TrackingStatus.ADAPTIVE_PURE_PURSUIT, reason) and invalid(),
+        wait_for(node, lambda: command_reason(reason) and invalid(),
                  'unsupported startup tracking fails closed')
         assert values['status'].mode == ControlStatus.AUTO
         pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
         wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
                  values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==0.4,
                  'unsupported tracking does not select or replace MANUAL')
-        assert selected(TrackingStatus.ADAPTIVE_PURE_PURSUIT, reason)
+        assert command_reason(reason)
         pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
         wait_for(node, lambda: values['status'].mode == ControlStatus.AUTO and invalid(),
                  'AUTO cannot fall back to manual with unsupported tracking')
@@ -184,7 +182,7 @@ def run():
                  'accumulate before MANUAL reset')
         pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
         wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
-                 selected(TrackingStatus.PID,'PID_PREVIEW_STATE_RESET') and
+                 command_reason('PID_PREVIEW_STATE_RESET') and
                  abs(values['auto_cmd'].target_steer_rad-0.2)<1e-6,
                  'MANUAL resets PID state while arbitration stays independent')
         pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
@@ -202,12 +200,11 @@ def run():
             active[key]=good
             wait_reset('input recovery resets PID history: '+key)
         active['stop']=True
-        wait_for(node, lambda: selected(TrackingStatus.PID,'PLAN_STOP') and
-                 not values['tracking_status'].valid and values['auto_cmd'].valid and
+        wait_for(node, lambda: command_reason('PLAN_STOP') and values['auto_cmd'].valid and
                  values['auto_cmd'].target_brake and values['auto_cmd'].target_speed_mps==0.,
                  'MotionPlan stop keeps brake/speed policy and resets tracking')
         active['path']='empty'
-        wait_for(node, lambda: selected(TrackingStatus.PID,'PLAN_STOP') and values['auto_cmd'].valid,
+        wait_for(node, lambda: command_reason('PLAN_STOP') and values['auto_cmd'].valid,
                  'stop-only plan needs no nested path geometry')
         active['path']='normal'
         active['stop']=False

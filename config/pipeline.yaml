@@ -60,7 +60,6 @@
 
       # Motion Control 발행 토픽 (/control/motion_control)
       auto_cmd: /control/auto_cmd
-      tracking_status: /control/tracking_status
 
       # Control Selector 발행 토픽 (/control/control_selector)
       selected_cmd: /control/selected_cmd

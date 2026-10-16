@@ -61,7 +61,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | object_manager_node | object_state_enabled=true일 때 활성 RGB/LiDAR/Depth만 | 같은 조건으로 object_state; detection 없음, UNKNOWN/invalid |
 | mission_based_limit_node | mission 활성 시 optional object_state; 구간 정책 활성 시 global_pose + mission_map | mission_limit; 구간 속도 상한·마진·정지·불확실성 판단 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
-| motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd, tracking_status; PID/PP, speed pass-through |
+| motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd만 발행; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
 | vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
 
@@ -151,7 +151,7 @@ Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 �
   내부 물리 단위이며 motor raw/normalized joystick/실제 feedback과 다릅니다.
 - **VehicleInterfaceStatus**: Header, dry_run, protected_command. 최종 보호 결과의 진단 전용이며
   실제 feedback이나 actuator 입력이 아닙니다. protected_command는 VehicleCommand 타입을 재사용합니다.
-- **ControlStatus / TrackingStatus**: 차량 제어 모드/FSM과 Tracking 설정·실제 계산 상태.
+- **ControlStatus**: 차량 제어 모드/FSM. Motion Control의 PID 이력 관리에 사용합니다.
 
 GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS VehicleState/msg/topic은 제거했습니다.
 `TrackingState`는 기존 PID/PP 호출 직전에만 만드는 **알고리즘 인자**입니다. estimator output이나
@@ -392,14 +392,12 @@ Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분
 | ADAPTIVE_PURE_PURSUIT (2) | 추가 lateral/heading-error 적응형은 NOT_IMPLEMENTED; invalid stop |
 | 나머지 문자열 / NONE | 시작 오류; fallback 없음 |
 
-`TrackingStatus`는 `requested_mode`, `actual_mode`, `valid`, `reason`을 사용합니다.
-requested_mode는 operation.yaml에서 선택한 시작 모드입니다. 외부 요청 토픽은 없습니다.
-NONE=255이며 actual은 **이번 steering 계산에 성공한 controller**입니다.
-단순 PLAN_STOP은 controller를 계산하지 않으므로 actual=NONE/valid=false/PLAN_STOP이지만
-AutoCommand는 기존 정책대로 유효한 speed=0/brake=true 정지 명령입니다. goal 판정에 성공한 경우에는
-Tracking valid=true/GOAL_REACHED입니다. 상태 유효성은 실제 조향 feedback이나 운행 허가를 의미하지 않습니다.
+Motion Control은 `auto_cmd` 하나만 발행합니다. 조향·목표 속도·제동·유효성·계산 사유는
+VehicleCommand에 포함됩니다. PLAN_STOP은 유효한 speed=0/brake=true 정지 명령이고,
+목표 도달도 유효한 GOAL_REACHED 정지 명령입니다. 입력 불량이나 미구현 알고리즘은 invalid/정지입니다.
+TrackingStatus 토픽과 메시지 생성은 제외했으며 msg/TrackingStatus.msg는 과거 정의로 보관합니다.
 tracking_mode는 read-only 시작 설정이며 변경 후 노드를 재시작합니다.
-상태는 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
+명령은 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
 
 ### PID 수식 / 부호 / 시간
 
