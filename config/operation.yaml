@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # Startup choices / software policy / bench tuning, NOT measured vehicle limits.
-    # Parameters are read-only after startup; Control/Tracking requests use owner topics.
+    # Parameters are read-only after startup; Vehicle Control requests use the owner topic.
     rate_hz: 20.0
     state_timeout_s: 0.5
     command_timeout_s: 0.5
@@ -94,10 +94,10 @@
 
 /control/motion_control:
   ros__parameters:
-    # Motion Control 구독: global_pose / motion_state / motion_plan / status / tracking_mode_request.
+    # Motion Control 구독: global_pose / motion_state / motion_plan / status.
     # Motion Control 발행: auto_cmd / tracking_status 항상 발행.
-    # Tracking Mode 설정
-    tracking_mode: PID              # Independent of Guidance and Vehicle Control
+    # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
+    tracking_mode: PID              # PID / PURE_PURSUIT / ADAPTIVE_PURE_PURSUIT (TODO)
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
       kp_lateral: 0.0              # rad/m; PLACEHOLDER, NOT field tuned

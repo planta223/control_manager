@@ -61,7 +61,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | object_manager_node | object_state_enabled=true일 때 활성 RGB/LiDAR/Depth만 | 같은 조건으로 object_state; detection 없음, UNKNOWN/invalid |
 | mission_based_limit_node | mission 활성 시 optional object_state; 구간 정책 활성 시 global_pose + mission_map | mission_limit; 구간 속도 상한·마진·정지·불확실성 판단 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
-| motion_control_node | global_pose, motion_state, motion_plan, status, tracking_mode_request | auto_cmd, tracking_status; PID/PP, speed pass-through |
+| motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd, tracking_status; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
 | vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
 
@@ -115,7 +115,8 @@ actual steering을 표현할 메시지로 재사용하지 않았습니다. 외�
 WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
-mode/tracking request는 각 owner node, ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
+Vehicle Control mode_request는 control_selector, ManualCommand도 control_selector,
+E-STOP은 vehicle_interface로 직접 전달합니다. Guidance/Tracking은 operation.yaml의 시작 설정입니다.
 Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 요청 토픽은 없습니다.
 어느 것도 ingress나 estimator를 경유하지 않습니다.
 
@@ -150,7 +151,7 @@ Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 �
   내부 물리 단위이며 motor raw/normalized joystick/실제 feedback과 다릅니다.
 - **VehicleInterfaceStatus**: Header, dry_run, protected_command. 최종 보호 결과의 진단 전용이며
   실제 feedback이나 actuator 입력이 아닙니다. protected_command는 VehicleCommand 타입을 재사용합니다.
-- **ControlStatus / TrackingStatus**: 기존 모드/FSM과 Tracking 요청·실제 상태 계약 유지.
+- **ControlStatus / TrackingStatus**: 차량 제어 모드/FSM과 Tracking 설정·실제 계산 상태.
 
 GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS VehicleState/msg/topic은 제거했습니다.
 `TrackingState`는 기존 PID/PP 호출 직전에만 만드는 **알고리즘 인자**입니다. estimator output이나
@@ -377,28 +378,28 @@ SelectedCommand는 기존 VehicleCommand 의미와 `/control/selected_cmd` 토�
 
 ## Tracking Controller (2026-10-15)
 
-10-node 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
+현재 구조에서 `motion_control_node`만 Tracking 선택과 ROS I/O를 소유합니다.
 Guidance(GPS/LANE/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
 `GlobalPose.x_m/y_m/yaw_rad`, `MotionState.speed_mps` 및 각각의 stamp/validity와
 `MotionPlan.reference_path`의 `poses[].pose.position.x/y`, frame/stamp를 그대로 사용합니다.
 Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분의 tangent를 계산합니다.
 `MotionPlan.valid/stop_request/target_speed_mps`와 AutoCommand의 VehicleCommand 계약은 유지합니다.
 
-| Tracking request | 구현 / 실제 동작 |
+| Tracking 시작 설정 | 구현 / 실제 동작 |
 |---|---|
 | PID (0, 기본) | GNSS 경로 lateral PID + heading P. 기본 tuning은 비활성 placeholder |
 | PURE_PURSUIT (1) | 기존 speed-adaptive Pure Pursuit를 그대로 호출 |
 | ADAPTIVE_PURE_PURSUIT (2) | 추가 lateral/heading-error 적응형은 NOT_IMPLEMENTED; invalid stop |
-| 나머지 값 | 요청 값 보존, actual=NONE, INVALID_TRACKING_MODE; fallback 없음 |
+| 나머지 문자열 / NONE | 시작 오류; fallback 없음 |
 
 `TrackingStatus`는 `requested_mode`, `actual_mode`, `valid`, `reason`을 사용합니다.
+requested_mode는 operation.yaml에서 선택한 시작 모드입니다. 외부 요청 토픽은 없습니다.
 NONE=255이며 actual은 **이번 steering 계산에 성공한 controller**입니다.
 단순 PLAN_STOP은 controller를 계산하지 않으므로 actual=NONE/valid=false/PLAN_STOP이지만
 AutoCommand는 기존 정책대로 유효한 speed=0/brake=true 정지 명령입니다. goal 판정에 성공한 경우에는
 Tracking valid=true/GOAL_REACHED입니다. 상태 유효성은 실제 조향 feedback이나 운행 허가를 의미하지 않습니다.
-mode 요청은 reliable volatile UInt8이며 상태는 기존 rate_hz(20 Hz)로 발행합니다.
-잘못된 초기 tracking_mode 문자열은 시작 오류입니다. runtime 요청 변경 시 먼저 invalid stop을 발행하고
-다음 tick에 새 controller를 계산합니다. 같은 mode 반복 요청은 적분을 지우지 않습니다.
+tracking_mode는 read-only 시작 설정이며 변경 후 노드를 재시작합니다.
+상태는 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
 
 ### PID 수식 / 부호 / 시간
 
@@ -424,7 +425,7 @@ PID는 조향만 반환하며 속도는 MotionPlan 값을 전달하고, brake는
 max_dt_s 초과는 invalid와 reset입니다. forward-only baseline으로 끝점 뒤나 반대 방향 경로는 거부하고,
 끝점 도달은 기존 goal_tolerance_m를 사용합니다. loop/교차점 progress 판정은 구현하지 않았습니다.
 
-다음 경우 PID 이력을 reset합니다: Tracking mode 변경, 입력 invalid/stale, stop plan, goal,
+다음 경우 PID 이력을 reset합니다: 노드 재시작, 입력 invalid/stale, stop plan, goal,
 경로 점 좌표 변경, 긴 dt. 같은 경로의 stamp 갱신만으로는 reset하지 않습니다.
 `/control/status`를 추가 구독하여 IDLE/MANUAL/FAULT/INIT 및 stale/missing status에서는
 PID 이력을 지우고 **P + heading P preview만** 계산합니다. 이때 reason=PID_PREVIEW_STATE_RESET입니다.
@@ -443,7 +444,7 @@ ReferencePath를 주기적으로 생성하는 기존 planner 계약은 유지되
 
 | Parameter | 기본값 | 의미 / 단위 |
 |---|---:|---|
-| tracking_mode | PID | 초기 선택, runtime 전환은 request topic |
+| tracking_mode | PID | 시작 시 고정, config 변경 후 재시작 |
 | pid.enabled | false | tuning 후 명시적으로 활성화 |
 | pid.kp_lateral | 0.0 | rad/m |
 | pid.ki_lateral | 0.0 | rad/(m*s) |
@@ -491,8 +492,8 @@ ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
   --params-file /absolute/path/operation.yaml
 ```
 
-operation의 mode는 시작값입니다. 실행 중 Control/Tracking 전환은 기존 request topic을 사용합니다.
-Guidance, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
+Vehicle Control mode는 시작값이며 실행 중 전환은 기존 mode_request topic을 사용합니다.
+Guidance/Tracking, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
 활성화 key는 각 파일의 공통 영역에서 한 번 정의하고 consumer가 함께 사용합니다.
 Mission 활성화는 mission.yaml, 다른 센서/Object 활성화는 operation.yaml에서 설정합니다.
 기본 operation은 GNSS만 활성입니다. RGB/LiDAR/IMU/Depth/Lane/encoder와 보조 feedback/Object/Mission은 비활성입니다.

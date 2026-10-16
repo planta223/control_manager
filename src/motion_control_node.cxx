@@ -41,16 +41,6 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
     }));
   publisher_ = output<msg::VehicleCommand>("auto_cmd");
   tracking_publisher_ = output<msg::TrackingStatus>("tracking_status");
-  subscriptions_.push_back(create_subscription<std_msgs::msg::UInt8>(topic("tracking_mode_request"), 10,
-    [this](std_msgs::msg::UInt8::ConstSharedPtr request) {
-      if (request->data == tracking_->requested()) return;  // Repeated request is idempotent.
-      tracking_->request(request->data);
-      previous_path_.clear();
-      core::TrackingResult result;
-      result.reason = tracking_->selectionError();
-      if (result.reason.empty()) result.reason = "TRACKING_MODE_CHANGED";
-      publish(core::stop(now().nanoseconds(), result.reason), result);
-    }));
   previous_tick_ = std::chrono::steady_clock::now();
   tick([this] { update(); });
 }

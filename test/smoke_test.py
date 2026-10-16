@@ -95,9 +95,10 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'vehicle_interface/status', 'status', 'tracking_status', 'tracking_mode_request']}
+                    'selected_cmd', 'vehicle_interface/status', 'status', 'tracking_status']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
+        assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
         assert not node.get_publishers_info_by_topic('/control/guidance_status')
         print('PASS: required topic graph contracts', flush=True)
     finally:

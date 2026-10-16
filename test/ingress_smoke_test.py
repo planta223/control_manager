@@ -173,7 +173,7 @@ def run():
         assert {'global_state_estimator'}<=subscribers('/control/sensors/gnss_odom')
         assert subscribers('/imu/data')=={'sensor_interface'}
         for topic in ['/control/global_path','/control/mode_request',
-                      '/control/tracking_mode_request','/control/manual_cmd','/control/estop']:
+                      '/control/manual_cmd','/control/estop']:
             assert 'sensor_interface' not in subscribers(topic)
             assert 'sensor_interface' not in publishers(topic)
         assert 'path_planning' not in subscribers('/control/global_path')  # LANE startup mode.

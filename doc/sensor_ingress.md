@@ -87,7 +87,8 @@ vehicle_feedback_enabled=true일 때만 unavailable heartbeat를 발행하고 WH
 ## 9. 제외 입력과 이유
 
 - Global Map/Path: reference/planning data → planner.
-- Control/Guidance/Tracking request: operator command → 각 owner node.
+- Vehicle Control request: operator command → control_selector.
+- Guidance/Tracking mode: operation.yaml의 시작 설정이며 변경 후 재시작.
 - ManualCommand: command path → control_selector.
 - E-STOP: safety event → vehicle_interface.
 
