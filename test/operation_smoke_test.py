@@ -14,7 +14,7 @@ from nav_msgs.msg import Path as PathMsg
 from std_msgs.msg import UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
-from control_manager.msg import MotionState, MotionPlan, ObjectState, MissionLimit, GuidanceStatus
+from control_manager.msg import MotionState, MotionPlan, ObjectState, MissionLimit
 from smoke_test import ROOT, ENV, Stack, wait_for
 
 OVERRIDES = itertools.count()
@@ -104,6 +104,8 @@ def rejection_tests():
         ('path_planning_node', ('guidance_mode:=HYBRID',), 'requires lane_enabled'),
         ('path_planning_node', ('guidance_mode:=NONE',), 'guidance_mode must be'),
         ('path_planning_node', ('guidance_mode:=INVALID',), 'guidance_mode must be'),
+        ('global_path_provider', ('guidance_mode:=INVALID',), 'guidance_mode must be'),
+        ('global_path_provider', ('map_file:=missing_map_file.json',), 'No such file'),
         ('object_manager_node', ('object_state_enabled:=true',), 'requires at least one'),
         ('mission_based_limit_node', ('mission_limit_enabled:=true', 'traffic_light_applies:=true'),
          'requires object_state_enabled')]
@@ -168,23 +170,23 @@ def planning_dependencies():
 
 
 def guidance_startup_modes():
-    for mode, value, expected in [('GPS', GuidanceStatus.GPS, {'global_pose', 'global_path'}),
-                                  ('LANE', GuidanceStatus.LANE, {'lane_pose'}),
-                                  ('HYBRID', GuidanceStatus.HYBRID, {'global_pose', 'global_path', 'lane_pose'})]:
+    for mode, expected in [('GPS', {'global_pose', 'global_path'}),
+                           ('LANE', {'lane_pose'}),
+                           ('HYBRID', {'global_pose', 'global_path', 'lane_pose'})]:
         node = rclpy.create_node('operation_guidance_fixture'); values = []
-        node.create_subscription(GuidanceStatus, '/control/guidance_status', values.append, 10)
+        node.create_subscription(PathMsg, '/control/reference_path', values.append, 10)
         legacy_request = node.create_publisher(UInt8, '/control/guidance_mode_request', 10)
         # Even with Lane enabled globally, GPS must subscribe only to global inputs.
         stack = Stack(command('path_planning_node', 'guidance_mode:=' + mode,
                               'lane_enabled:=true'), 'operation_guidance_' + mode)
         client = node.create_client(SetParameters, '/control/path_planning/set_parameters')
         try:
-            wait_for(node, lambda: bool(values) and values[-1].requested_mode == value,
-                     'configured Guidance mode: ' + mode)
+            wait_for(node, lambda: bool(values), 'ReferencePath received: ' + mode)
             wait_for(node, lambda: all(owns(node, '/control/' + topic, 'path_planning') ==
                      (topic in expected) for topic in ('global_pose', 'global_path', 'lane_pose')),
                      'only required Guidance inputs subscribed: ' + mode)
             assert not owns(node, '/control/guidance_mode_request', 'path_planning')
+            assert not owns(node, '/control/guidance_status', 'path_planning', True)
             assert client.wait_for_service(timeout_sec=3)
             request = SetParameters.Request(parameters=[
                 Parameter('guidance_mode', value='GPS' if mode != 'GPS' else 'LANE').to_parameter_msg()])
@@ -194,8 +196,9 @@ def guidance_startup_modes():
             for _ in range(8):
                 legacy_request.publish(UInt8(data=255))
                 rclpy.spin_once(node, timeout_sec=.05)
-            assert values[-1].requested_mode == value
-            assert not values[-1].valid and values[-1].actual_mode == GuidanceStatus.NONE
+            assert not values[-1].poses  # Missing inputs or unsupported algorithm.
+            assert all(owns(node, '/control/' + topic, 'path_planning') == (topic in expected)
+                       for topic in ('global_pose', 'global_path', 'lane_pose'))
         finally:
             stack.close(); node.destroy_client(client); node.destroy_node()
     print('PASS: GPS/LANE/HYBRID startup modes, read-only selection and no request-topic subscription', flush=True)

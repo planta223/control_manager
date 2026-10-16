@@ -9,7 +9,7 @@ import rclpy
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
-from control_manager.msg import (GlobalPose, MotionState, LanePose, GuidanceStatus,
+from control_manager.msg import (GlobalPose, MotionState, LanePose,
                                  MissionLimit, ObjectState, VehicleCommand, MotionPlan)
 from smoke_test import ROOT, Stack, observe, wait_for
 
@@ -173,36 +173,31 @@ def guidance():
     ingress = start('sensor_interface', 'split_ingress', 'topics.external_lane:=/test/external_lane')
     lane_estimator = start('lane_state_estimator', 'split_lane')
     stack = start('path_planning', 'split_guidance', 'guidance_mode:=LANE', 'map_datum_verified:=true')
-    def reason(expected):
-        return ('guidance_status' in values and values['guidance_status'].reason == expected and
-                'reference_path' in values and not values['reference_path'].poses)
     try:
-        wait_for(node, lambda: reason('LANE_NOT_IMPLEMENTED'), 'LANE with NO GNSS/GlobalPose/map reaches algorithm boundary')
-        for case, expected in [('stale','LANE_POSE_UNAVAILABLE'), ('future','LANE_POSE_UNAVAILABLE'),
-                               ('zero','LANE_POSE_UNAVAILABLE'), ('low','LANE_CONFIDENCE_LOW'),
-                               ('nan','LANE_POSE_UNAVAILABLE'), ('confidence_nan','LANE_POSE_UNAVAILABLE'),
-                               ('range','LANE_POSE_UNAVAILABLE'), ('absent','LANE_POSE_UNAVAILABLE')]:
-            state['lane'] = case
-            wait_for(node, lambda: reason(expected), 'Lane admission: ' + case)
-            state['lane'] = 'good'
-            wait_for(node, lambda: reason('LANE_NOT_IMPLEMENTED'), 'restore Lane after ' + case)
+        wait_for(node, lambda: 'reference_path' in values and not values['reference_path'].poses,
+                 'LANE without global inputs publishes an empty path')
+        state.update(pose=True, path=True)
+        settle(node)
+        assert not values['reference_path'].poses
+        print('PASS: LANE never falls back to healthy global inputs', flush=True)
         stack.close()
+        values.pop('reference_path', None)
         stack = start('path_planning', 'split_guidance_hybrid', 'guidance_mode:=HYBRID', 'map_datum_verified:=true')
-        wait_for(node, lambda: reason('GLOBAL_POSE_UNAVAILABLE'), 'HYBRID requires GlobalPose')
-        state['pose'] = True
-        wait_for(node, lambda: reason('GLOBAL_PATH_UNAVAILABLE'), 'HYBRID requires GlobalPath')
-        state['path'] = True; state['lane'] = 'low'
-        wait_for(node, lambda: reason('LANE_CONFIDENCE_LOW'), 'HYBRID requires trustworthy Lane')
-        state['lane'] = 'good'
-        wait_for(node, lambda: reason('HYBRID_NOT_IMPLEMENTED'), 'HYBRID healthy inputs do not fake correction')
-        assert not values['guidance_status'].valid and values['guidance_status'].actual_mode == GuidanceStatus.NONE
+        wait_for(node, lambda: 'reference_path' in values and not values['reference_path'].poses,
+                 'HYBRID healthy inputs still publish an empty path until implemented')
+        settle(node)
+        assert stack.process.poll() is None and not values['reference_path'].poses
         state['lane'] = 'nan'
         stack.close()
+        values.pop('reference_path', None)
         stack = start('path_planning', 'split_guidance_gps', 'guidance_mode:=GPS', 'map_datum_verified:=true')
-        wait_for(node, lambda: values['guidance_status'].valid and len(values['reference_path'].poses)==2,
+        wait_for(node, lambda: 'reference_path' in values and len(values['reference_path'].poses)==2,
                  'GPS startup mode ignores ingress-rejected Lane')
         state['pose'] = False
-        wait_for(node, lambda: reason('GLOBAL_POSE_UNAVAILABLE'), 'GPS GlobalPose receipt timeout')
+        wait_for(node, lambda: not values['reference_path'].poses, 'GPS GlobalPose receipt timeout')
+        state['pose'] = True
+        wait_for(node, lambda: len(values['reference_path'].poses)==2, 'GPS recovers with fresh pose')
+        assert not node.get_publishers_info_by_topic('/control/guidance_status')
     finally:
         stack.close(); lane_estimator.close(); ingress.close(); node.destroy_timer(timer); node.destroy_node()
 
@@ -211,19 +206,16 @@ def downstream():
     node = rclpy.create_node('state_split_downstream_fixture')
     values = observe(node)
     pubs = {key: node.create_publisher(cls, '/control/' + key, 10) for key, cls in [
-        ('motion_state', MotionState), ('guidance_status', GuidanceStatus),
+        ('motion_state', MotionState),
         ('selected_cmd', VehicleCommand), ('object_state', ObjectState),
         ('mission_limit', MissionLimit), ('reference_path', PathMsg)]}
-    state = {'motion': True, 'speed_valid': True, 'guidance': True, 'mode': GuidanceStatus.LANE}
+    state = {'motion': True, 'speed_valid': True}
     def publish():
         stamp = node.get_clock().now().to_msg()
         def send(key, msg, frame):
             msg.header.stamp = stamp; msg.header.frame_id = frame; pubs[key].publish(msg)
         if state['motion']:
             send('motion_state', MotionState(speed_mps=1., speed_valid=state['speed_valid']), 'base_link')
-        if state['guidance']:
-            send('guidance_status', GuidanceStatus(requested_mode=state['mode'], actual_mode=GuidanceStatus.NONE,
-                 valid=False, reason='TEST_ONLY_LANE_NOT_IMPLEMENTED'), 'map')
         send('selected_cmd', VehicleCommand(target_speed_mps=.5, target_brake=False, valid=True,
                                            reason='TEST_ONLY_SELECTED_COMMAND'), 'base_link')
         send('object_state', ObjectState(valid=True, obstacle_valid=True), 'base_link')

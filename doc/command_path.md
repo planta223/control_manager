@@ -39,7 +39,7 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 | MotionState validity/freshness | 기존 motion_planning/motion_control에서 검사 |
 | ObjectState freshness/validity/obstacle | 기존 motion_planning에서 AUTO 정지 판단 |
 
-후단 두 node는 GlobalPose / MotionState / GuidanceStatus / ObjectState를 구독하지 않습니다.
+후단 두 node는 GlobalPose / MotionState / ObjectState를 구독하지 않습니다.
 MANUAL은 해당 state/object와 독립적인 명령 선택입니다. obstacle emergency distance의 후단 중복 검사는
 제거했습니다. 기존 motion_planning이 모든 detected obstacle에 정지하므로 추가 obstacle 알고리즘은 없습니다.
 Motion Planning / Motion Control / PID / Pure Pursuit / estimation 알고리즘은 변경하지 않았습니다.
@@ -73,7 +73,7 @@ DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않�
 유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/mode_request`, `/control/selected_cmd`,
 `/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
 추가: `/control/vehicle_interface/status` 진단 토픽과 `VehicleInterfaceStatus.msg`.
-현재 executable 10개 / custom message 12개. `dry_run=true`, PID 비활성/0 gain, 미검증 한계 0 유지.
+현재 executable 11개 / custom message 12개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain, 미검증 한계 0 유지.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
 ## 검증

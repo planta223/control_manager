@@ -29,6 +29,14 @@
     # Mission Based Limit 구독·발행토픽 활성화 (false이면 입력/출력/timer 없음)
     mission_limit_enabled: false    # Motion Planning도 같은 key로 의존성 조절
 
+    # Path Planning / Global Path Provider 공통 Guidance Mode 설정
+    # 시작 시 고정, 변경 후 재시작; 별도 모드 요청 토픽 없음.
+    guidance_mode: GPS              # GPS / LANE / HYBRID (LANE/HYBRID NOT_IMPLEMENTED)
+    # Global Path Provider 입력·발행 활성화
+    # GPS/HYBRID + map_file 비어있지 않을 때만 활성; LANE은 조회/발행/timer 없음.
+    # GNSS datum 확인 후 1회 latched 발행. 원점 변경 시 재발행하며
+    # 조회 실패/좌표계 불일치 시 기존 경로를 빈 경로로 철회.
+
 /control/sensor_interface:
   ros__parameters:
     # Sensor Interface 입력 검증 설정
@@ -61,11 +69,11 @@
   ros__parameters:
     # Path Planning 구독: GPS=global_pose+global_path, LANE=lane_pose, HYBRID=세 입력.
     # LANE/HYBRID는 공통 lane_enabled=true 필요. 선택 모드의 입력만 구독.
-    # Path Planning 발행: reference_path / guidance_status 항상 발행.
-    # Guidance Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 모드 요청 토픽 없음)
-    guidance_mode: GPS               # GPS / LANE / HYBRID (LANE/HYBRID NOT_IMPLEMENTED)
+    # Path Planning 발행: reference_path만 발행. 입력 불량/미구현 모드는 빈 경로.
+    # Guidance Mode는 위 공통 guidance_mode 사용; 파일 제공자와 같은 설정 공유.
     lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
-    map_datum_verified: false        # TODO: external Path and GNSS fixed ENU origin match
+    map_datum_verified: true         # 파일 제공자가 GNSS 실제 datum으로 재투영한 경로 사용.
+    # 별도 외부 Path 제공자로 교체하면 그 제공자의 datum 정합성을 확인해야 함.
     lane_correction_enabled: false   # true rejected until correction is implemented
 
 /control/mission_based_limit:

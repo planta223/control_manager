@@ -1,4 +1,5 @@
-# Configured startup guidance_mode: GPS / LANE / HYBRID (0, 1, 2).
+# Retired definition: not generated, installed or used by current nodes.
+# Kept as a historical file; Path Planning publishes ReferencePath only.
 uint8 GPS=0
 uint8 LANE=1
 uint8 HYBRID=2

@@ -45,6 +45,9 @@ flowchart TD
   SI --> O[Object: LiDAR primary / RGB / optional Depth]
   GP --> P[path_planning: GPS / LANE / HYBRID]
   G[GlobalPath] --> P
+  F[기존 MAP_*.json 최종 지도] --> FP[global_path_provider]
+  D[GNSS 실제 datum / frame 읽기 전용 조회] --> FP
+  FP --> G
   L[external Lane AI] --> SI
   SI --> LO[lane_observation]
   LO --> LE[lane_state_estimator]
@@ -54,7 +57,6 @@ flowchart TD
   SI --> VF[internal VehicleFeedback: unavailable]
   VF --> E
   QG[operation.yaml: guidance_mode, 재시작 필요] -.-> P
-  P --> GS[GuidanceStatus]
   P --> RP[ReferencePath]
   RP --> MP[motion_planning]
   MS --> MP
@@ -126,9 +128,7 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 ├─────────────────────────────────────────────┤
 │ Guidance config: HYBRID (변경 후 재시작)    │
 │ * LANE/HYBRID NOT_IMPLEMENTED: AUTO stop    │
-│ Configured: HYBRID    Actual: NONE          │
-│ Source: NONE   Valid: NO   Degraded: NO      │
-│ Reason: HYBRID_NOT_IMPLEMENTED              │
+│ ReferencePath: empty                       │
 ├─────────────────────────────────────────────┤
 │ Localization: GNSS / GNSS_IMU*                     │
 │ future fusion: NOT_IMPLEMENTED              │
@@ -146,7 +146,8 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 └─────────────────────────────────────────────┘
 ```
 
-GUI의 Control 요청/Guidance 설정 표시와 node가 보낸 actual 표시를 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
+Guidance는 시작 설정과 ReferencePath 유무를 표시하며 별도 상태 토픽은 없습니다.
+Control 요청과 node가 보낸 상태 표시는 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
 Optional sensor runtime toggle은 없습니다. config 활성 여부와 수신 age를 표시하더라도
 그것이 fusion/detection의 성공이나 센서 물리 정상 여부를 뜻하지 않습니다.
 센서 health/실제 외부 actuator feedback 계약은 미확정입니다. 내부 VehicleFeedback은 현재 invalid입니다.
@@ -180,7 +181,6 @@ Web Dashboard는 control_manager의 Guidance 및 arbitration 요청 UI를 갖고
 flowchart LR
   UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_selector]
   CFG -->|guidance_mode: 시작 시 선택| PP[path_planning]
-  PP -->|guidance_status GuidanceStatus| UI
   CM -->|status ControlStatus| UI
   GP[global_pose] --> UI
   MS[motion_state] --> UI
@@ -197,7 +197,7 @@ flowchart LR
 
 기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.
 Guidance는 operation.yaml의 guidance_mode=GPS / LANE / HYBRID로 시작 시 선택하며 변경 후 재시작합니다.
-별도 요청 토픽은 없고 `/control/guidance_status` (GuidanceStatus, reliable volatile)로 상태를 표시합니다.
-requested_mode는 설정값 0/1/2이며 NONE=255는 actual status sentinel입니다. 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
+별도 Guidance 요청/상태 토픽은 없으며 Path Planning의 출력은 ReferencePath 하나입니다.
+상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
 GUI는 단순 요청/표시 source이고 정지 판정 권한은 node/safety에 있습니다.
 GUI가 없어도 source freshness 검사와 AUTO invalid guidance stop 경로는 유지됩니다.

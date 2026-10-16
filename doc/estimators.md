@@ -65,7 +65,7 @@ stamp=0, validity=false, 명확한 reason으로 발행합니다. 미구현 출�
 Guidance GPS/LANE/HYBRID는 source mode와 독립입니다.
 Path Planning의 guidance_mode는 operation.yaml에서 시작 시 선택하며 변경 후 재시작합니다.
 GPS는 GlobalPose+GlobalPath, LANE은 LanePose, HYBRID는 세 입력만 구독합니다.
-별도 Guidance 모드 요청 토픽은 없으며 NONE은 actual_mode의 상태 표시로만 사용합니다.
+별도 Guidance 모드 요청/상태 토픽은 없습니다. ReferencePath만 발행하며 사용할 경로가 없으면 빈 경로입니다.
 
 ## 5. 독립 validity와 기존 검증 보존
 

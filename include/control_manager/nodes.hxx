@@ -2,6 +2,7 @@
 #include "control_manager/ros_support.hxx"
 #include "control_manager/core/lateral_controller.hxx"
 #include "control_manager/core/tracking.hxx"
+#include "control_manager/core/guidance.hxx"
 
 namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
@@ -62,8 +63,7 @@ class PathPlanningNode : public NodeBase {
   std::shared_ptr<Input<msg::GlobalPose>> pose_;
   std::shared_ptr<Input<msg::LanePose>> lane_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr publisher_;
-  rclcpp::Publisher<msg::GuidanceStatus>::SharedPtr guidance_publisher_;
-  std::uint8_t guidance_mode_{msg::GuidanceStatus::GPS};
+  core::GuidanceMode guidance_mode_{core::GuidanceMode::GPS};
   std::string frame_;
   double timeout_s_, lane_min_confidence_;
   bool datum_verified_;

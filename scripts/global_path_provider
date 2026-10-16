@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Publish an existing final-map file in the live GNSS odometry coordinate system."""
+import math
+import time
+
+import rclpy
+from rcl_interfaces.msg import ParameterDescriptor, ParameterType
+from rcl_interfaces.srv import GetParameters
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
+
+from global_path_map import load_route, project_route
+
+
+class GlobalPathProvider(Node):
+    def __init__(self):
+        super().__init__('global_path_provider', namespace='/control')
+        def param(name, default):
+            return self.declare_parameter(
+                name, default, ParameterDescriptor(read_only=True)).value
+        mode = param('guidance_mode', 'GPS')
+        if mode not in ('GPS', 'LANE', 'HYBRID'):
+            raise ValueError('guidance_mode must be GPS, LANE or HYBRID')
+        filename = param('map_file', '')
+        self.frame = param('map_frame', 'map')
+        self.base_frame = param('base_frame', 'base_link')
+        gnss_node = param('gnss_node', '/gnss_node')
+        topic = param('topics.global_path', '/control/global_path')
+        self.publisher = None
+        self.active_datum = None
+        self.pending = None
+        self.last_reason = None
+        if mode == 'LANE' or not filename:
+            self.get_logger().info('File provider inactive: LANE mode or empty map_file')
+            return  # Empty map_file permits an independent external ROS Path publisher.
+        if not self.frame or not self.base_frame or not topic or not gnss_node.startswith('/'):
+            raise ValueError('frames/topic must be nonempty; gnss_node must be an absolute ROS node name')
+        self.route = load_route(filename)  # Read-only; project/edit/background JSON is rejected.
+        self.publisher = self.create_publisher(Path, topic, QoSProfile(
+            depth=1, reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.client = self.create_client(GetParameters, gnss_node.rstrip('/') + '/get_parameters')
+        self.create_timer(1.0, self.poll)
+        self.get_logger().info(f'Loaded {len(self.route)} rear-axle points from {filename}; waiting for GNSS datum')
+
+    def invalidate(self, reason):
+        if self.active_datum is not None:
+            self.publisher.publish(self.make_path([]))  # Withdraw the previous latched route.
+            self.active_datum = None
+        if reason != self.last_reason:
+            self.get_logger().warning(reason)
+            self.last_reason = reason
+
+    def poll(self):
+        if self.pending is not None:
+            if time.monotonic() - self.request_time < 1.0:
+                return
+            future, self.pending = self.pending, None
+            self.client.remove_pending_request(future)
+            future.cancel()
+            self.invalidate('GNSS datum query timed out; global path withdrawn')
+        if not self.client.service_is_ready():
+            self.invalidate('GNSS parameter service unavailable; waiting for datum')
+            return
+        request = GetParameters.Request(names=['datum_lat', 'datum_lon', 'map_frame', 'base_frame'])
+        self.request_time = time.monotonic()
+        self.pending = self.client.call_async(request)
+        self.pending.add_done_callback(self.receive_datum)
+
+    def receive_datum(self, future):
+        if future is not self.pending:
+            return
+        self.pending = None
+        try:
+            values = future.result().values
+            if len(values) != 4 or [v.type for v in values] != [
+                    ParameterType.PARAMETER_DOUBLE, ParameterType.PARAMETER_DOUBLE,
+                    ParameterType.PARAMETER_STRING, ParameterType.PARAMETER_STRING]:
+                raise ValueError('GNSS datum/frame parameters unavailable or wrong type')
+            lat, lon = values[0].double_value, values[1].double_value
+            if not math.isfinite(lat) or not math.isfinite(lon):
+                raise ValueError('GNSS automatic datum not initialized yet')
+            if values[2].string_value != self.frame or values[3].string_value != self.base_frame:
+                raise ValueError('GNSS map_frame/base_frame differs from control_manager')
+            datum = (lat, lon)
+            if datum != self.active_datum:
+                points = project_route(self.route, lat, lon)
+                self.publisher.publish(self.make_path(points))
+                self.active_datum = datum
+                self.last_reason = None
+                self.get_logger().info(f'Published {len(points)} global-path points at GNSS datum {datum}')
+        except (ValueError, AttributeError, RuntimeError) as exc:
+            self.invalidate(str(exc))
+
+    def make_path(self, points):
+        path = Path()
+        path.header.frame_id = self.frame
+        path.header.stamp = self.get_clock().now().to_msg()
+        for i, (x, y) in enumerate(points):
+            pose = PoseStamped()
+            pose.header = path.header
+            pose.pose.position.x = x
+            pose.pose.position.y = y
+            # Tangent in the reprojected coordinate system; last pose uses incoming segment.
+            a, b = (points[i], points[i + 1]) if i + 1 < len(points) else (points[i - 1], points[i])
+            yaw = math.atan2(b[1] - a[1], b[0] - a[0])
+            pose.pose.orientation.z = math.sin(yaw / 2.0)
+            pose.pose.orientation.w = math.cos(yaw / 2.0)
+            path.poses.append(pose)
+        return path
+
+
+def main():
+    rclpy.init()
+    node = None
+    try:
+        node = GlobalPathProvider()
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node is not None:
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

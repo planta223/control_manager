@@ -7,25 +7,17 @@ TEST(Guidance, GpsRequiresBothInputs) {
     for (bool path : {false, true}) {
       const auto result = cm::evaluateGuidance(0, localization, path, "");
       EXPECT_EQ(result.valid, localization && path);
-      EXPECT_EQ(result.actual_mode.has_value(), result.valid);
-      EXPECT_FALSE(result.degraded);
-      if (result.valid) {
-        EXPECT_EQ(*result.actual_mode, cm::GuidanceMode::GPS);
-        EXPECT_EQ(result.active_source, "GLOBAL_PATH");
-      } else EXPECT_EQ(result.active_source, "NONE");
+      EXPECT_EQ(result.reason, !localization ? "GLOBAL_POSE_UNAVAILABLE" :
+                !path ? "GLOBAL_PATH_UNAVAILABLE" : "GPS_ACTIVE");
     }
   }
 }
-TEST(Guidance, UnsupportedNeverFallsBackAndRetainsRequest) {
+TEST(Guidance, UnsupportedNeverFallsBack) {
   for (auto requested : {1, 2}) {
     for (bool localization : {false, true}) {
       for (bool path : {false, true}) {
         const auto result = cm::evaluateGuidance(requested, localization, path, "");
-        EXPECT_EQ(result.requested_mode, requested);
         EXPECT_FALSE(result.valid);
-        EXPECT_FALSE(result.actual_mode.has_value());
-        EXPECT_FALSE(result.degraded);
-        EXPECT_EQ(result.active_source, "NONE");
         EXPECT_EQ(result.reason, requested == 1 ? "LANE_NOT_IMPLEMENTED" :
           !localization ? "GLOBAL_POSE_UNAVAILABLE" : !path ? "GLOBAL_PATH_UNAVAILABLE" :
           "HYBRID_NOT_IMPLEMENTED");
@@ -33,12 +25,10 @@ TEST(Guidance, UnsupportedNeverFallsBackAndRetainsRequest) {
     }
   }
 }
-TEST(Guidance, RejectEveryInvalidWireValue) {
+TEST(Guidance, RejectEveryInvalidModeValue) {
   for (int value = 3; value <= 255; ++value) {
     const auto result = cm::evaluateGuidance(value, true, true, "");
-    EXPECT_EQ(result.requested_mode, value);
     EXPECT_FALSE(result.valid);
-    EXPECT_FALSE(result.actual_mode.has_value());
     EXPECT_EQ(result.reason, "INVALID_GUIDANCE_MODE");
   }
 }
@@ -71,5 +61,5 @@ TEST(Guidance, HybridRequiresEveryInputAndStillDoesNotClaimSuccess) {
   EXPECT_EQ(cm::evaluateGuidance(2, true, true, "LANE_CONFIDENCE_LOW").reason, "LANE_CONFIDENCE_LOW");
   const auto result = cm::evaluateGuidance(2, true, true, "");
   EXPECT_EQ(result.reason, "HYBRID_NOT_IMPLEMENTED");
-  EXPECT_FALSE(result.valid); EXPECT_FALSE(result.actual_mode.has_value());
+  EXPECT_FALSE(result.valid);
 }

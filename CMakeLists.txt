@@ -16,7 +16,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
-  "msg/GuidanceStatus.msg" "msg/TrackingStatus.msg" "msg/VehicleFeedback.msg" "msg/VehicleInterfaceStatus.msg"
+  "msg/TrackingStatus.msg" "msg/VehicleFeedback.msg" "msg/VehicleInterfaceStatus.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
@@ -42,9 +42,14 @@ add_control_node(motion_planning_node MotionPlanningNode)
 add_control_node(motion_control_node MotionControlNode)
 add_control_node(control_selector_node ControlSelectorNode)
 add_control_node(vehicle_interface_node VehicleInterfaceNode)
+install(PROGRAMS scripts/global_path_provider DESTINATION lib/${PROJECT_NAME})
+install(FILES scripts/global_path_map.py DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME test_global_path_map
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test/test_global_path_map.py)
   ament_add_gtest(test_control_core test/test_control_core.cxx)
   target_link_libraries(test_control_core control_core)
   ament_add_gtest(test_guidance test/test_guidance.cxx)

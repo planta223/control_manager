@@ -17,7 +17,7 @@ import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool, UInt8
-from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, GuidanceStatus, LanePose, TrackingStatus, VehicleInterfaceStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose, TrackingStatus, VehicleInterfaceStatus
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -63,7 +63,7 @@ def observe(node):
     for topic, cls in [('global_pose', GlobalPose), ('motion_state', MotionState), ('selected_cmd', VehicleCommand),
                        ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
-                       ('object_state', ObjectState), ('guidance_status', GuidanceStatus),
+                       ('object_state', ObjectState),
                        ('reference_path', PathMsg), ('tracking_status', TrackingStatus)]:
         node.create_subscription(cls, '/control/' + topic,
                                  lambda msg, key=topic: values.__setitem__(key, msg), 10)
@@ -79,7 +79,7 @@ def default_stack():
     stack = Stack(['ros2', 'launch', 'control_manager', 'control_manager.xml'], 'smoke_default')
     try:
         wait_for(node, lambda: len([n for n, ns in node.get_node_names_and_namespaces()
-                                   if ns == '/control']) == 10, 'XML launches all ten nodes')
+                                   if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
         wait_for(node, lambda: 'tracking_status' in values, 'TrackingStatus delivered')
@@ -95,9 +95,10 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'vehicle_interface/status', 'status', 'guidance_status', 'tracking_status', 'tracking_mode_request']}
+                    'selected_cmd', 'vehicle_interface/status', 'status', 'tracking_status', 'tracking_mode_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
+        assert not node.get_publishers_info_by_topic('/control/guidance_status')
         print('PASS: required topic graph contracts', flush=True)
     finally:
         stack.close()
@@ -108,7 +109,6 @@ def startup_rejections():
     cases = [('vehicle_interface_node', 'dry_run:=false', 'UDP backend does not exist'),
              ('global_state_estimator', 'pose_mode:=INVALID', 'pose_mode must be'),
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
-             ('path_planning_node', 'map_file:=unsupported.json', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
              ('global_state_estimator', 'motion_mode:=INVALID', 'motion_mode must be'),
              ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be')]
@@ -235,44 +235,39 @@ def integrated_fixtures():
         mode_pub.publish(UInt8(data=ControlStatus.AUTO))
         wait_for(node, lambda: values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps == 1.0,
                  'AUTO selects only auto')
-        wait_for(node, lambda: 'guidance_status' in values and values['guidance_status'].valid,
-                 'GPS default publishes valid GuidanceStatus')
+        wait_for(node, lambda: 'reference_path' in values and bool(values['reference_path'].poses),
+                 'GPS default publishes ReferencePath')
         for lane_input in ['valid', 'invalid', 'stale', 'nan', 'absent']:
             active['lane'] = lane_input
             deadline = time.monotonic() + 0.7
             while time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.05)
-                status = values['guidance_status']
-                assert status.requested_mode == status.GPS == status.actual_mode
-                assert status.valid and not status.degraded and status.active_source == 'GLOBAL_PATH'
                 assert [(p.pose.position.x, p.pose.position.y) for p in values['reference_path'].poses] == [(0., 1.), (10., 1.), (20., 1.)]
             print('PASS: GPS ignores LanePose ' + lane_input, flush=True)
 
         for shape in ['empty', 'wrong_frame']:
             active['path'] = shape
-            wait_for(node, lambda: values['guidance_status'].reason == 'GLOBAL_PATH_UNAVAILABLE' and
-                     not values['guidance_status'].valid and not values['reference_path'].poses and
+            wait_for(node, lambda: not values['reference_path'].poses and
                      not values['protected_cmd'].valid and values['protected_cmd'].target_brake,
                      'invalid global path stops AUTO: ' + shape)
             active['path'] = 'valid'
-            wait_for(node, lambda: values['guidance_status'].valid and values['protected_cmd'].valid,
+            wait_for(node, lambda: bool(values['reference_path'].poses) and values['protected_cmd'].valid,
                      'restore valid global path')
         for timestamp in ['stale', 'future', 'zero']:
             active['gnss_stamp'] = timestamp
-            wait_for(node, lambda: values['guidance_status'].reason == 'GLOBAL_POSE_UNAVAILABLE' and
-                     not values['guidance_status'].valid and not values['reference_path'].poses and
+            wait_for(node, lambda: not values['reference_path'].poses and
                      not values['protected_cmd'].valid and values['protected_cmd'].target_brake,
                      'fresh callbacks cannot hide bad source timestamp: ' + timestamp)
             active['gnss_stamp'] = 'fresh'
-            wait_for(node, lambda: values['guidance_status'].valid and values['protected_cmd'].valid,
+            wait_for(node, lambda: bool(values['reference_path'].poses) and values['protected_cmd'].valid,
                      'restore fresh GNSS timestamp')
         # No GUI process or heartbeat is needed: node-side freshness still gates AUTO.
         active['gnss'] = False
-        wait_for(node, lambda: not values['guidance_status'].valid and
+        wait_for(node, lambda: not values['reference_path'].poses and
                  not values['protected_cmd'].valid and values['protected_cmd'].target_brake,
                  'no GUI requests: sensor timeout still stops AUTO')
         active['gnss'] = True
-        wait_for(node, lambda: values['guidance_status'].valid and values['protected_cmd'].valid,
+        wait_for(node, lambda: bool(values['reference_path'].poses) and values['protected_cmd'].valid,
                  'restore fixture after timeout')
         for mode in [ControlStatus.AUTO, ControlStatus.MANUAL]:
             mode_pub.publish(UInt8(data=mode))

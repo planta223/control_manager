@@ -144,8 +144,7 @@ def run():
         observation=values['observation']; stamp=observation.header.stamp
         assert observation==sent[('lane',stamp.sec,stamp.nanosec)]
         print('PASS: Lane four fields and source frame/stamp preserved exactly',flush=True)
-        wait_for(node,lambda:'guidance_status' in values and
-                 values['guidance_status'].reason=='LANE_NOT_IMPLEMENTED',
+        wait_for(node,lambda:'reference_path' in values and not values['reference_path'].poses,
                  'planner consumes ingress Lane; no path algorithm introduced')
         wait_for(node,lambda:'wheel_motion' in values and
                  values['wheel_motion'].reason=='WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED',
@@ -187,7 +186,7 @@ def run():
             lane=values['lane']; stamp=lane.header.stamp
             assert lane==sent[('lane',stamp.sec,stamp.nanosec)]
         state['lane']='low'
-        wait_for(node,lambda:values['guidance_status'].reason=='LANE_CONFIDENCE_LOW',
+        wait_for(node,lambda:values['lane'].confidence==.1,
                  'confidence policy stays in planning; ingress forwards low finite confidence')
         for case in ['nan_lateral','inf_heading','nan_confidence','range',
                      'stale','future','zero','negative','noncanonical']:
@@ -195,14 +194,15 @@ def run():
             settle(node,.2); before=counts['lane']
             settle(node,.7)
             assert counts['lane']==before,case+' was forwarded'
-            wait_for(node,lambda:values['guidance_status'].reason=='LANE_POSE_UNAVAILABLE',
-                     'reject malformed Lane without renewing last accepted timestamp: '+case)
+            assert not values['reference_path'].poses
+            print('PASS: reject malformed Lane without renewing last accepted timestamp: '+case, flush=True)
             state['lane']='good'
-            wait_for(node,lambda:values['guidance_status'].reason=='LANE_NOT_IMPLEMENTED',
+            wait_for(node,lambda:counts['lane']>before,
                      'Lane recovers after '+case)
         state['lane_send']=False
-        wait_for(node,lambda:values['guidance_status'].reason=='LANE_POSE_UNAVAILABLE',
-                 'Lane source silence expires downstream, no synthetic heartbeat')
+        settle(node,.2); before=counts['lane']; settle(node,.7)
+        assert counts['lane']==before and not values['reference_path'].poses
+        print('PASS: Lane source silence produces no synthetic heartbeat', flush=True)
         state['raw']=False
         wait_for(node,lambda:not values['global_pose'].valid and not values['motion_state'].speed_valid,
                  'raw source silence still stops both GNSS estimator outputs')

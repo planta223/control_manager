@@ -5,6 +5,11 @@
        description="Compatibility alias for operation_file; prefer operation_file for new invocations"/>
   <arg name="operation_file" default="$(var params_file)"/>
   <arg name="vehicle_file" default="$(find-pkg-share control_manager)/config/vehicle.yaml"/>
+  <node pkg="control_manager" exec="global_path_provider" name="global_path_provider" namespace="/control" output="screen">
+    <param from="$(var vehicle_file)"/>
+    <param from="$(var pipeline_file)"/>
+    <param from="$(var operation_file)"/>
+  </node>
   <node pkg="control_manager" exec="sensor_interface_node" name="sensor_interface" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var pipeline_file)"/>
