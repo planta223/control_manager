@@ -9,6 +9,7 @@ flowchart TD
   MC -->|auto_cmd: VehicleCommand| CS[control_selector: IDLE / MANUAL / AUTO]
   MAN[ManualCommand] -->|manual_cmd: VehicleCommand| CS
   MODE[operation.yaml: mode / 재시작 적용] -.-> CS
+  PAUSE[pause_request: PauseRequest] --> CS
   CS -->|selected_cmd: VehicleCommand| VI[vehicle_interface: final actuator protection]
   VI -->|actuator_raw: Float32MultiArray / dry_run=false| TX[기존 외부 trans]
   TX -->|9-byte UDP| BOARDS[조향 / 모터 / 브레이크 보드]
@@ -20,6 +21,59 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 `selected_cmd`에서 actuator-facing 소유자는 vehicle_interface 하나입니다.
 Vehicle Interface는 검사와 변환을 수행하고, 실제 패킷 조립·UDP 송신은 외부 `trans`를 재사용합니다.
 최종 보호 결과는 vehicle_interface 내부 값이며, 진단은 command input으로 사용하지 않습니다.
+
+## AUTO 일시정지 / 재개
+
+`operation.yaml`의 `mode: AUTO`는 유지하며 `start_paused: true`가 기본입니다.
+출발/재개 전에는 유효 GNSS/경로가 있어도 selected_cmd가 조향 0 / 속도 0 / brake=true를 유지합니다.
+mode는 여전히 시작 시 고정이며 pause는 모드 선택과 독립적인 운용 요청입니다.
+
+외부 입력 `/control/pause_request`는 `PauseRequest` (`Header header`, `bool pause`)입니다.
+Control Selector가 수신하고 `/control/status`의 `paused`, `resume_sequence`로 Motion Control에 전달합니다.
+요청 timestamp는 command_timeout_s 이내이고 정상 형식이어야 합니다. frame_id는 빈 문자열 또는 base_frame입니다.
+이전에 받아들인 요청보다 오래되거나 동일한 timestamp는 거부합니다. 받아들인 pause는 요청 수신이 끊겨도 유지됩니다.
+IDLE/MANUAL에서는 요청을 무시하며 기존 선택 동작을 유지합니다.
+
+새로 빌드한 control_manager overlay를 source한 터미널에서 다음을 사용합니다.
+`header: auto`는 ROS 2 CLI가 발행 시각으로 채웁니다. 반복 발행은 필요 없습니다.
+
+```bash
+# 출발 또는 재개
+ros2 topic pub --once /control/pause_request control_manager/msg/PauseRequest "{header: auto, pause: false}"
+# 일시정지
+ros2 topic pub --once /control/pause_request control_manager/msg/PauseRequest "{header: auto, pause: true}"
+# 수락 여부 및 최종 출력 확인
+ros2 topic echo /control/status --once
+ros2 topic echo /control/actuator_raw --once
+```
+
+일시정지 상태는 AUTO_PAUSED / STOPPED이며 최종 raw는 `[0, 0, 1]`입니다. 실제 정지 여부는 차량에서 확인합니다.
+노드나 UDP 송신기를 종료하는 방식이 아니므로 재개할 때 경로 진행 위치를 잃지 않습니다.
+Motion Control은 정지 중 진행 위치/구간 갱신을 멈추고 기존 진행 위치와 종점 완료 상태를 보존합니다.
+Selector 상태가 일시적으로 오래되어도 이미 인식한 pause를 임의 해제하지 않습니다.
+전달을 놓치더라도 이후 상태의 증가한 resume_sequence로 재개를 한 번만 인식합니다.
+
+긴 정지 후 heading이 유효하면 기존 진행 위치부터 Pure Pursuit을 재개합니다.
+재개 상태 발행 이후에 측정된 위치/속도를 먼저 기다리며 정지 중 캐시된 측정으로 진행 위치를 갱신하지 않습니다.
+Selector도 재개 수락 이후 생성된 AUTO 명령만 선택하여 정지 전 명령이 다시 출력되는 것을 막습니다.
+heading만 미확보이면 위치/속도/경로 검증을 통과한 뒤 RESUME_HEADING_ACTIVE로 조향 0 직진합니다.
+직진 출력이 시작된 때부터 control.yaml의 heading_bootstrap_timeout_s (현재 3초)를 적용합니다.
+heading을 확보하면 Pure Pursuit으로 전환하고 해당 재개 권한을 소진합니다.
+기한 내 확보 실패 시 RESUME_HEADING_TIMEOUT으로 정지합니다.
+같은 pause=false 요청을 반복해도 sequence나 제한 시간이 초기화되지 않습니다.
+새로운 pause=true → pause=false 전환으로만 명시적 재시도가 가능합니다.
+최초 출발에도 start_paused=true라면 같은 재개 절차를 사용합니다.
+start_paused=false는 기존 최초 heading bootstrap 동작을 유지합니다.
+
+재개는 GNSS 위치/속도 freshness, 위치 표준편차 3 m, 경로 이탈 3 m, 경로 변경 검사와 차량 한계를 우회하지 않습니다.
+GlobalPose.heading_unavailable은 신선하고 정상 quaternion인 GNSS의 yaw 분산 초과를 나타내며 valid를 true로 바꾸지 않습니다.
+Path Planning은 position_valid인 heading 미확보 상태에서도 경로를 유지하지만,
+Motion Control은 최초 출발 또는 명시적 재개에서만 직진을 허용합니다. 주행 중 자발적 heading 손실은 기존처럼 정지합니다.
+정지 중 차량을 옮기거나 돌리지 않고 재개 방향에 직진 공간을 확보하는 운용을 전제로 합니다.
+중간 위치에서 노드를 새로 실행하는 기능은 추가하지 않았으며 최초 검색은 여전히 경로 시작 10 m입니다.
+종점 완료는 pause/resume으로 해제하지 않습니다. 새 주행은 시작점에서 Motion Control을 재시작합니다.
+Selector를 단독 재시작하여 resume_sequence가 되돌아가면 Motion Control도 재시작해야 합니다.
+ControlStatus/GlobalPose wire 정의가 변경됐으므로 메시지 소비 노드는 같은 빌드로 함께 재시작합니다.
 
 ## actuator_raw 출력 / 기존 trans 연결
 
@@ -51,6 +105,7 @@ ros2 run trans trans --ros-args -p cmd_topic:=/control/actuator_raw
 |---|---|
 | IDLE | control_selector가 steer/speed=0, brake=true를 선택 |
 | AUTO / MANUAL | 해당 source만 선택; 다른 source fallback 없음 |
+| AUTO paused | control_selector가 source와 무관하게 AUTO_PAUSED zero/brake 명령 유지 |
 | source timestamp 형식 오류(sec < 0 / nanosec >= 10억), 수신/source timestamp timeout, frame | control_selector: stop, SOURCE_UNAVAILABLE |
 | 선택 source valid=false | control_selector: zero/brake stop, INVALID_SOURCE_COMMAND |
 | mode 변경 | operation.yaml 수정 후 selector 재시작; 새 source callback 필요 |
@@ -103,7 +158,7 @@ manual_cmd 입력 연결은 보류하며 AUTO에서는 수동 입력이 없어�
 `/control/estop` 구독·설정·내부 상태·보호 함수 인자는 제거했습니다. Vehicle Interface 입력은 selected_cmd 하나입니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
-현재 executable 11개 / custom message 10개 (지도 파일 제공자 포함). 기본 운용은 `dry_run=false`로 actuator_raw를 발행합니다.
+현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). 기본 운용은 `dry_run=false`로 actuator_raw를 발행합니다.
 UDP는 외부 trans의 별도 실행으로 연결하며 PID 비활성/0 gain은 유지합니다.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
@@ -113,6 +168,8 @@ UDP는 외부 trans의 별도 실행으로 연결하며 PID 비활성/0 gain은 
 선택 명령 기준 FSM·제거된 estop 토픽의 publisher/subscriber 부재·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
 최종 보호는 기존 dry-run 로그를 읽어 확인하며 테스트 전용 진단 토픽은 만들지 않습니다.
 `test/actuator_raw_smoke_test.py`는 출력 값·우회전 부호·후진·브레이크·차량 한계·바퀴 지름 변경·토픽 설정·dry_run을 검증합니다.
+`test/pause_resume_smoke_test.py`는 시작 정지, 요청 timestamp/순서 검사, 정지 유지, 반복 재개의 시간 제한,
+긴 정지 후 직진/heading 확보/시간 초과, 품질·freshness·경로 이탈 검사, 두 번째 교차점에서 진행 위치 보존과 종점 정지 유지를 검증합니다.
 외부 trans의 실제 steer/motor/brake 변환 함수로 패킷 필드도 확인하며, UDP 송신 노드는 실행하지 않습니다.
 GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout과 원본 timestamp 보존을 검증합니다.
 기존 pipeline/state split/tracking/ingress/estimator smoke는 현재 연결로 갱신합니다.

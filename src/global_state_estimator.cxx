@@ -92,6 +92,8 @@ msg::GlobalPose GlobalStateEstimatorNode::estimatePose() {
         std::isfinite(cov[35]) && cov[35] >= 0.0 && cov[35] < 1e11) have_valid_heading_ = true;
     out.initial_heading_unavailable = !have_valid_heading_ && orientation_valid &&
       std::isfinite(cov[35]) && cov[35] >= 1e11;
+    out.heading_unavailable = current(gnss_, timeout_s_) && frames_ok && orientation_valid &&
+      std::isfinite(cov[35]) && cov[35] > max_yaw_variance_;
     out.valid = out.position_valid && variance_ok(cov[35], max_yaw_variance_) && orientation_valid;
     out.position_variance_x_m2 = cov[0];
     out.position_variance_y_m2 = cov[7];

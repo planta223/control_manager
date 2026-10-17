@@ -24,7 +24,7 @@
 
     # Motion Control GPS 주행 검사 / 최초 heading 확보 설정 (PID / Pure Pursuit 공통)
     max_cross_track_m: 3.0           # USER_REQUESTED: 경로까지 거리 > 3 m이면 정지.
-    heading_bootstrap_timeout_s: 3.0 # GNSS legacy와 동일; AUTO 직진 시작 후 최대 시간.
+    heading_bootstrap_timeout_s: 3.0 # 최초 출발 / 명시적 재개 각각의 heading 확보 직진 최대 시간.
 
     # Motion Control 경로 진행 위치 / 세 구간 설정 (현재 map 전용)
     # MAP_2026-10-15_195100_test.json; provider는 원본 점의 순서를 유지함.

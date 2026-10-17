@@ -11,3 +11,7 @@ std_msgs/Header header
 uint8 mode
 uint8 fsm_state
 string reason
+# AUTO pause state, independent of source-command validity and FSM.
+bool paused
+# Increments only on an accepted paused -> resumed transition, not repeated resume requests.
+uint64 resume_sequence

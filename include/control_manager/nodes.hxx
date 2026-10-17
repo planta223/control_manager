@@ -118,6 +118,9 @@ class MotionControlNode : public NodeBase {
   std::chrono::steady_clock::time_point previous_tick_;
   std::optional<std::chrono::steady_clock::time_point> heading_bootstrap_start_;
   bool heading_bootstrap_enabled_, have_valid_heading_{false};
+  bool paused_{false}, resume_bootstrap_allowed_{false};
+  std::uint64_t resume_sequence_{0};
+  std::int64_t resume_after_ns_{0};
   bool run_completed_{false};  // Explicit AUTO completion; cleared only by node restart.
   bool goal_approach_seen_{false};
   double heading_bootstrap_timeout_s_, max_cross_track_m_, goal_tolerance_m_;

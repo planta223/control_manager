@@ -27,6 +27,7 @@
 
       # 외부 토픽: GUI/CLI/수동 명령 adapter가 발행 (이 패키지는 발행자를 기동하지 않음)
       manual_cmd: /control/manual_cmd # VehicleCommand 필요; keyboard raw 명령의 변환 필요
+      pause_request: /control/pause_request # PauseRequest; Control Selector의 AUTO 일시정지/재개 입력
 
       # Sensor Interface 발행 토픽 (/control/sensor_interface)
       sensor_gnss: /control/sensors/gnss_odom

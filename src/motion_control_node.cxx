@@ -82,9 +82,37 @@ void MotionControlNode::update() {
     return in && in->value && ingress::validStampFormat(in->value->header.stamp) &&
       current(in, timeout_s_);
   };
-  // Once acquired, a lost/poor heading never starts a new straight-drive grace period.
+  if (current_input(control_status_) && control_status_->value->header.frame_id == base_frame_) {
+    const auto &status = *control_status_->value;
+    paused_ = status.mode == msg::ControlStatus::AUTO && status.paused;
+    if (status.resume_sequence < resume_sequence_) {
+      stop("RESUME_SEQUENCE_REGRESSED_RESTART_REQUIRED"); return;
+    }
+    if (status.resume_sequence > resume_sequence_) {
+      resume_sequence_ = status.resume_sequence;
+      resume_after_ns_ = rclcpp::Time(status.header.stamp).nanoseconds();
+      heading_bootstrap_start_.reset();
+      resume_bootstrap_allowed_ = status.mode == msg::ControlStatus::AUTO;
+    }
+  }
+  // Pausing preserves route progress/completion. A stale status cannot release the pause.
+  if (paused_) { stop("AUTO_PAUSED", true); return; }
+  // Do not advance the remembered route using samples cached during the pause.
+  if (resume_after_ns_ > 0) {
+    if (!current_input(pose_) || !current_input(motion_) ||
+        rclcpp::Time(pose_->value->header.stamp).nanoseconds() < resume_after_ns_ ||
+        rclcpp::Time(motion_->value->header.stamp).nanoseconds() < resume_after_ns_) {
+      stop("RESUME_WAITING_FOR_FRESH_STATE"); return;
+    }
+    resume_after_ns_ = 0;
+  }
+  // Heading loss during normal driving never grants a new straight-drive window.
+  // Only an explicit paused -> resumed transition may re-arm it.
   if (current_input(pose_) && pose_->value->header.frame_id == frame_ &&
-      pose_->value->valid && std::isfinite(pose_->value->yaw_rad)) have_valid_heading_ = true;
+      pose_->value->valid && std::isfinite(pose_->value->yaw_rad)) {
+    have_valid_heading_ = true;
+    resume_bootstrap_allowed_ = false;
+  }
   // Existing PID/PP require a pose and path in the same global frame. A local
   // lane path needs an agreed tracking-frame adapter, not a fabricated zero pose.
   if (current_input(plan_) && plan_->value->valid &&
@@ -94,7 +122,9 @@ void MotionControlNode::update() {
     stop("LOCAL_REFERENCE_PATH_NOT_SUPPORTED"); return;
   }
   if (!current_input(pose_) || !current_input(motion_) || !current_input(plan_) ||
-      (!pose_->value->valid && !(pose_->value->position_valid && pose_->value->initial_heading_unavailable)) ||
+      (!pose_->value->valid && !(pose_->value->position_valid &&
+       (pose_->value->initial_heading_unavailable ||
+        (resume_bootstrap_allowed_ && pose_->value->heading_unavailable)))) ||
       !motion_->value->speed_valid ||
       motion_->value->header.frame_id != base_frame_ || pose_->value->header.frame_id != frame_ || !plan_->value->valid ||
       plan_->value->header.frame_id != frame_ || !std::isfinite(plan_->value->target_speed_mps) ||
@@ -135,20 +165,25 @@ void MotionControlNode::update() {
     if (path_distance > max_cross_track_m_) { stop("PATH_DEVIATION_EXCEEDED"); return; }
   }
   if (!pose_->value->valid) {
-    if (have_valid_heading_) { stop("HEADING_UNAVAILABLE_AFTER_ACQUISITION"); return; }
+    if (have_valid_heading_ && !resume_bootstrap_allowed_) {
+      stop("HEADING_UNAVAILABLE_AFTER_ACQUISITION"); return;
+    }
     if (!heading_bootstrap_enabled_) { stop("HEADING_BOOTSTRAP_DISABLED"); return; }
     if (!current_input(control_status_) || control_status_->value->header.frame_id != base_frame_) {
       stop("HEADING_BOOTSTRAP_CONTROL_STATUS_UNAVAILABLE"); return;
     }
-    if (control_status_->value->mode != msg::ControlStatus::AUTO) {
+    if (control_status_->value->mode != msg::ControlStatus::AUTO || control_status_->value->paused) {
       stop("HEADING_BOOTSTRAP_WAITING_FOR_AUTO", true); return;
     }
     if (!heading_bootstrap_start_) heading_bootstrap_start_ = tick_time;
     if (std::chrono::duration<double>(tick_time - *heading_bootstrap_start_).count() >=
-        heading_bootstrap_timeout_s_) { stop("HEADING_BOOTSTRAP_TIMEOUT"); return; }
+        heading_bootstrap_timeout_s_) {
+      stop(resume_bootstrap_allowed_ ? "RESUME_HEADING_TIMEOUT" : "HEADING_BOOTSTRAP_TIMEOUT"); return;
+    }
     tracking_->reset(); previous_path_.clear();
     const core::Command straight{0.0, plan.target_speed_mps, false, true,
-                                now().nanoseconds(), "HEADING_BOOTSTRAP_ACTIVE"};
+                                now().nanoseconds(), resume_bootstrap_allowed_
+                                  ? "RESUME_HEADING_ACTIVE" : "HEADING_BOOTSTRAP_ACTIVE"};
     publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
     return;  // Never run PID / Pure Pursuit using an unavailable yaw.
   }

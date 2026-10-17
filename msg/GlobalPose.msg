@@ -11,5 +11,8 @@ float64 yaw_variance_rad2
 bool position_valid
 # GNSS has never supplied an observed heading and currently marks yaw unobserved.
 bool initial_heading_unavailable
+# Fresh, well-formed GNSS orientation whose yaw variance exceeds the quality limit.
+# May be true after a long stop. Does not make yaw valid or authorize straight driving.
+bool heading_unavailable
 bool valid
 string reason

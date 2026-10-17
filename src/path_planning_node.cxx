@@ -33,7 +33,8 @@ PathPlanningNode::PathPlanningNode() : NodeBase("path_planning") {
 void PathPlanningNode::update() {
   const bool localization_available = pose_ && pose_->value &&
     ingress::validStampFormat(pose_->value->header.stamp) && current(pose_, timeout_s_) &&
-    (pose_->value->valid || (pose_->value->position_valid && pose_->value->initial_heading_unavailable)) &&
+    (pose_->value->valid || (pose_->value->position_valid &&
+     (pose_->value->initial_heading_unavailable || pose_->value->heading_unavailable))) &&
     pose_->value->header.frame_id == frame_ &&
     std::isfinite(pose_->value->x_m) && std::isfinite(pose_->value->y_m) &&
     std::isfinite(pose_->value->yaw_rad);
@@ -52,7 +53,7 @@ void PathPlanningNode::update() {
   const auto decision = core::evaluateGuidance(static_cast<std::uint8_t>(guidance_mode_), localization_available,
                                                global_path_available, lane_error);
   nav_msgs::msg::Path path;
-  // Keep the GPS path available for the bounded initial straight-drive procedure.
+  // Keep the GPS path available for bounded initial/resume heading acquisition.
   // Motion Control still requires valid yaw for all path-tracking steering.
   if (decision.valid) path = *global_->value;
   path.header = header(frame_);  // Planning generation time, not sensor measurement time.

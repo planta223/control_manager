@@ -101,6 +101,7 @@
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
     route_progress_enabled: true  # 현재 map의 전반 / 중반 / 후반 진행 위치 기억; profile은 control.yaml.
     heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
+    # 명시적 일시정지→재개 시에도 heading만 미확보이면 같은 제한 시간으로 직진.
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
     # PID 게인 / Pure Pursuit lookahead / 공통 도착 허용 거리는 control.yaml에서 설정.
@@ -108,11 +109,12 @@
 
 /control/control_selector:
   ros__parameters:
-    # Control Selector 구독: auto_cmd / manual_cmd.
+    # Control Selector 구독: auto_cmd / manual_cmd / pause_request.
     # Control Selector 발행: selected_cmd / status 항상 발행.
     rate_hz: 50.0                  # Motion Control / Vehicle Interface와 동일한 명령 주기.
     # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     mode: AUTO                      # IDLE / MANUAL / AUTO
+    start_paused: true              # AUTO 시작 시 정지 유지; pause_request.pause=false로 출발/재개.
     
 /control/vehicle_interface:
   ros__parameters:

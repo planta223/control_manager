@@ -6,6 +6,12 @@ PID disabled/zero gains, 미확정 운용 한계는 0,
 현재 `dry_run=false`에서 Vehicle Interface가 actuator_raw를 발행합니다.
 실제 UDP는 별도 실행하는 기존 외부 trans가 담당하며 `dry_run=true`는 raw 발행을 비활성화합니다.
 
+AUTO는 `operation.yaml`의 `start_paused: true`에 따라 일시정지 상태로 시작합니다.
+`/control/pause_request` (`PauseRequest`)에 timestamp를 포함한 `pause=false`를 발행하면 출발/재개하고,
+`pause=true`는 경로 진행 위치를 보존하며 속도 0 / 브레이크를 유지합니다.
+긴 정지 후 heading만 미확보이면 명시적 재개당 최대 3초 직진으로 확보하며 실패 시 정지합니다.
+명령과 조건은 [doc/command_path.md](doc/command_path.md#auto-일시정지--재개)에 있습니다.
+
 ## 현재 architecture (독립 상태 출력 + 두 estimator)
 
 **노드는 global_state_estimator로 통합하고 GlobalPose/MotionState 메시지는 분리 유지합니다.**
@@ -795,6 +801,7 @@ python3 -B src/control_manager/test/ingress_smoke_test.py
 python3 -B src/control_manager/test/estimator_modes_smoke_test.py
 python3 -B src/control_manager/test/command_path_smoke_test.py
 python3 -B src/control_manager/test/actuator_raw_smoke_test.py
+python3 -B src/control_manager/test/pause_resume_smoke_test.py
 ```
 
 결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,

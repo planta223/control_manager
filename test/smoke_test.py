@@ -65,7 +65,8 @@ class SelectorFixture:
         wait_for(self.node, lambda: ('control_selector','/control') not in
                  self.node.get_node_names_and_namespaces(), 'previous configured selector stopped')
         config = yaml.safe_load(Path(self.operation_file).read_text())
-        config.setdefault('/control/control_selector', {'ros__parameters':{}})['ros__parameters']['mode'] = name
+        config.setdefault('/control/control_selector', {'ros__parameters':{}})['ros__parameters'].update(
+            mode=name, start_paused=False)  # Legacy arbitration fixtures explicitly opt into immediate selection.
         self.generation += 1
         filename = LOG/(self.label+'_'+str(self.generation)+'_'+name+'.yaml')
         filename.write_text(yaml.safe_dump(config))
@@ -140,22 +141,23 @@ def default_stack():
                                    if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
-        wait_for(node, lambda: not values['protected_cmd'].valid and
-                 values['protected_cmd'].reason=='INVALID_OR_STALE_COMMAND' and
+        wait_for(node, lambda: values['protected_cmd'].valid and
+                 values['protected_cmd'].reason=='AUTO_PAUSED' and
                  values['status'].mode == ControlStatus.AUTO and
-                 values['status'].fsm_state == ControlStatus.FAULT,
-                 'default AUTO stops without GNSS input')
+                 values['status'].paused and values['status'].resume_sequence == 0 and
+                 values['status'].fsm_state == ControlStatus.STOPPED,
+                 'default AUTO stays paused without GNSS input until an explicit resume')
         assert values['protected_cmd'].target_brake
-        assert not values['selected_cmd'].valid
+        assert values['selected_cmd'].valid and values['selected_cmd'].target_brake
         assert values['protected_cmd'].target_speed_mps == 0.0
         assert 'object_state' not in values  # Explicitly disabled; no fabricated clear observation.
-        assert not values['auto_cmd'].valid
-        print('PASS: default GNSS-only ingress, disabled objects, AUTO and missing-input stop', flush=True)
+        assert values['auto_cmd'].target_brake
+        print('PASS: default GNSS-only ingress, disabled objects, AUTO and startup pause', flush=True)
         for topic in ('lane_observation', 'lane_pose', 'vehicle_feedback', 'object_state', 'mission_limit'):
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'status', 'actuator_raw']}
+                    'selected_cmd', 'status', 'actuator_raw', 'pause_request']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert {i.node_name for i in node.get_publishers_info_by_topic('/control/actuator_raw')} == {
             'vehicle_interface'}

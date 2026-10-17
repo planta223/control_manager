@@ -6,6 +6,10 @@ class ControlSelectorNode : public NodeBase {
  private:
   void update();
   core::ControlMode mode_{core::ControlMode::IDLE};
+  bool paused_;
+  std::int64_t last_pause_request_ns_{0};
+  std::int64_t resume_after_ns_{0};
+  std::uint64_t resume_sequence_{0};
   std::shared_ptr<Input<msg::VehicleCommand>> manual_, auto_;
   rclcpp::Publisher<msg::VehicleCommand>::SharedPtr selected_publisher_;
   rclcpp::Publisher<msg::ControlStatus>::SharedPtr status_publisher_;
