@@ -3,6 +3,7 @@
 Use the same localhost/domain 179 environment as smoke_test.py.
 """
 import copy
+from collections import deque
 import math
 import subprocess
 import time
@@ -15,16 +16,17 @@ from std_msgs.msg import UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
 from control_manager.msg import GlobalPose, MotionState, VehicleCommand, MotionPlan, ObjectState, ControlStatus
-from smoke_test import ROOT, LOG, Stack, observe, wait_for
+from smoke_test import ROOT, LOG, Stack, SelectorFixture, observe, wait_for
 from operation_smoke_test import command
 
 
 def run():
     node = rclpy.create_node('tracking_fixture_test')
-    values = observe(node)
+    auto_history=deque(maxlen=256)
+    values = observe(node,auto_history)
     pubs = {name: node.create_publisher(cls, '/control/' + name, 10) for name, cls in [
         ('global_pose', GlobalPose), ('motion_state', MotionState), ('motion_plan', MotionPlan), ('object_state', ObjectState),
-        ('manual_cmd', VehicleCommand), ('mode_request', UInt8), ('control_status_fixture', ControlStatus)]}
+        ('manual_cmd', VehicleCommand), ('control_status_fixture', ControlStatus)]}
     legacy_request = node.create_publisher(UInt8, '/control/tracking_mode_request', 10)
     active = dict(state=True, motion=True, speed_valid=True, motion_age=0, motion_frame='base_link',
                   plan=True, state_age=0, plan_age=0, path_age=0,
@@ -121,11 +123,12 @@ def run():
     xml = ET.parse(ROOT/'launch/control_manager.xml')
     for elem in list(xml.getroot()):
         if elem.tag == 'node' and elem.attrib['name'] not in {
-                'control_selector','vehicle_interface'}:
+                'vehicle_interface'}:
             xml.getroot().remove(elem)
     launch = LOG/'tracking_fixture.xml'; xml.write(launch, encoding='unicode')
     values.clear()
     stack = Stack(['ros2','launch',str(launch),'operation_file:='+str(cfg)], 'tracking_integration')
+    selector = SelectorFixture(node,values,cfg,'tracking_selector')
     def start_controller(mode):
         config['/control/motion_control']['ros__parameters']['tracking_mode'] = mode
         filename = LOG / ('tracking_startup_' + mode + '.yaml')
@@ -169,15 +172,20 @@ def run():
                 'protected_cmd' in values and not values['protected_cmd'].valid and values['protected_cmd'].target_brake)
 
     def wait_reset(label, expected=0.2):
-        wait_for(node, lambda: auto_pid() and abs(values['auto_cmd'].target_steer_rad-expected)<1e-6, label)
+        stamp=values['auto_cmd'].header.stamp
+        after=(stamp.sec,stamp.nanosec)
+        # The single zero-I output can arrive before Vehicle Interface recovers.
+        # Inspect received source samples instead of only the latest overwritten value.
+        wait_for(node, lambda: auto_pid() and any(
+            (msg.header.stamp.sec,msg.header.stamp.nanosec)>after and msg.valid and
+            msg.reason in ('PID_ACTIVE','PID_PREVIEW_STATE_RESET') and
+            abs(msg.target_steer_rad-expected)<1e-6 for msg in auto_history), label)
 
     try:
         wait_for(node, lambda: command_reason('PID_PREVIEW_STATE_RESET'),
                  'IDLE PID preview uses no integral history')
         assert abs(values['auto_cmd'].target_steer_rad-0.2)<1e-6
-        wait_for(node, lambda: pubs['mode_request'].get_subscription_count() > 0 and 'status' in values,
-                 'Control Selector discovered before one-shot mode request')
-        pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+        selector.set_mode('AUTO')
         wait_for(node, auto_pid, 'configured default PID produces AUTO command')
         assert values['auto_cmd'].target_speed_mps == 1. and not values['auto_cmd'].target_brake
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad > 0.28,
@@ -229,12 +237,12 @@ def run():
         wait_reset('PID restart starts with zero accumulated history')
         wait_for(node, lambda: auto_pid() and values['auto_cmd'].target_steer_rad>0.28,
                  'accumulate before MANUAL reset')
-        pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
+        selector.set_mode('MANUAL')
         wait_for(node, lambda: values['status'].mode == ControlStatus.MANUAL and
                  command_reason('PID_PREVIEW_STATE_RESET') and
                  abs(values['auto_cmd'].target_steer_rad-0.2)<1e-6,
                  'MANUAL resets PID state while arbitration stays independent')
-        pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+        selector.set_mode('AUTO')
         wait_for(node, auto_pid, 'AUTO resumes after MANUAL')
         for key, bad, good in [('state',False,True), ('motion',False,True),
                                ('speed_valid',False,True), ('motion_age',10,0),
@@ -286,7 +294,7 @@ def run():
         for mode in ('PID','PURE_PURSUIT'):
             restart_controller(mode)
             active.update(state_x=1.0, state_y=0.0, y=0.0, path='dense')
-            pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
+            selector.set_mode('MANUAL')
             wait_for(node, lambda: values['status'].mode==ControlStatus.MANUAL,
                      mode+' MANUAL selected before goal preview')
             spin_for(0.2)  # Deliver the relayed MANUAL status before moving the synthetic pose.
@@ -295,7 +303,7 @@ def run():
             active['state_x']=1.0
             wait_for(node, lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake,
                      mode+' MANUAL preview does not latch AUTO completion')
-            pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+            selector.set_mode('AUTO')
             wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
                      values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
                      mode+' AUTO run selected')
@@ -317,11 +325,11 @@ def run():
             stays_completed('all required input timeouts',0.7)
             active.update(state=True,motion=True,plan=True,y=1.0,state_x=1.0)
             stays_completed('path replacement')
-            pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
+            selector.set_mode('MANUAL')
             wait_for(node, lambda: values['status'].mode==ControlStatus.MANUAL and
                      values['protected_cmd'].target_speed_mps==0.4,
                      mode+' explicit MANUAL remains independent after completion')
-            pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+            selector.set_mode('AUTO')
             wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
                      values['protected_cmd'].valid and values['protected_cmd'].target_brake,
                      mode+' returning to AUTO retains completed stop')
@@ -353,7 +361,7 @@ def run():
             stays_completed('position jitter after endpoint passage')
         print('ALL TRACKING SMOKE CHECKS PASSED',flush=True)
     finally:
-        controller.close(); stack.close(); node.destroy_timer(timer); node.destroy_node()
+        controller.close(); selector.close(); stack.close(); node.destroy_timer(timer); node.destroy_node()
 
 
 if __name__ == '__main__':

@@ -5,8 +5,10 @@ import math
 import rclpy
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from std_msgs.msg import Bool, UInt8
+from rcl_interfaces.srv import SetParameters
+from rclpy.parameter import Parameter
 from control_manager.msg import VehicleCommand, ControlStatus
-from smoke_test import observe, wait_for
+from smoke_test import SelectorFixture, observe, wait_for
 from state_split_smoke_test import start, settle
 
 
@@ -15,7 +17,7 @@ def run():
     values=observe(node)
     pubs={key:node.create_publisher(VehicleCommand,'/control/'+key,10)
           for key in ['auto_cmd','manual_cmd','selected_cmd']}
-    modes=node.create_publisher(UInt8,'/control/mode_request',10)
+    legacy_modes=node.create_publisher(UInt8,'/control/mode_request',10)
     durable=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,
                        reliability=ReliabilityPolicy.RELIABLE)
     estop=node.create_publisher(Bool,'/control/estop',durable)
@@ -53,12 +55,12 @@ def run():
                     'vehicle.limits.min_steering_deg:='+str(-math.degrees(0.5)),
                     'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
                     'vehicle.limits.min_speed_kph:=-7.2', 'vehicle.limits.max_speed_kph:=7.2')
-    selector=start('control_selector','command_selector')
+    selector=SelectorFixture(node,values,label='command_selector')
     def safe():
         c=values.get('protected_cmd')
         return c is not None and not c.valid and c.target_brake and c.target_speed_mps==0 and c.target_steer_rad==0
     def choose(mode,speed):
-        modes.publish(UInt8(data=mode))
+        selector.set_mode(mode)
         wait_for(node,lambda:'status' in values and values['status'].mode==mode and
                  values.get('protected_cmd') is not None and values['protected_cmd'].valid and
                  values['protected_cmd'].target_speed_mps==speed,'mode selection '+str(mode))
@@ -66,6 +68,18 @@ def run():
         wait_for(node,lambda:'protected_cmd' in values and values['protected_cmd'].reason=='IDLE' and
                  values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps==0,
                  'IDLE emits neutral stop with healthy sources')
+        assert not node.get_subscriptions_info_by_topic('/control/mode_request')
+        client=node.create_client(SetParameters,'/control/control_selector/set_parameters')
+        wait_for(node,client.service_is_ready,'selector parameter service discovered')
+        future=client.call_async(SetParameters.Request(parameters=[
+            Parameter('mode',value='AUTO').to_parameter_msg()]))
+        wait_for(node,future.done,'runtime mode parameter update answered')
+        assert not future.result().results[0].successful
+        node.destroy_client(client)
+        for removed_request in (ControlStatus.AUTO,255): legacy_modes.publish(UInt8(data=removed_request))
+        settle(node,0.3)
+        assert values['status'].mode==ControlStatus.IDLE
+        print('PASS: YAML mode is read-only and removed mode_request has no subscriber or effect',flush=True)
         for mode,key,speed in [(ControlStatus.AUTO,'auto',.8),(ControlStatus.MANUAL,'manual',.4)]:
             choose(mode,speed)
             c=values['selected_cmd']; t=c.header.stamp

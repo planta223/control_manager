@@ -17,7 +17,8 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profi
 import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Bool, UInt8
+from std_msgs.msg import Bool
+from ament_index_python.packages import get_package_prefix
 from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose, VehicleInterfaceStatus
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,44 @@ class Stack:
         self.log.close()
 
 
+class SelectorFixture:
+    """Change test modes by writing operation YAML and restarting only the selector."""
+    def __init__(self, node, values, operation_file=None, label='selector_fixture'):
+        self.node, self.values = node, values
+        self.operation_file = operation_file or ROOT/'config/operation.yaml'
+        self.label, self.generation, self.stack = label, 0, None
+        self.set_mode('IDLE')
+
+    def set_mode(self, mode):
+        name = {0:'IDLE', 1:'MANUAL', 2:'AUTO'}.get(mode, mode)
+        if name not in ('IDLE','MANUAL','AUTO'): raise ValueError('invalid fixture mode')
+        self.close()
+        wait_for(self.node, lambda: ('control_selector','/control') not in
+                 self.node.get_node_names_and_namespaces(), 'previous configured selector stopped')
+        config = yaml.safe_load(Path(self.operation_file).read_text())
+        config.setdefault('/control/control_selector', {'ros__parameters':{}})['ros__parameters']['mode'] = name
+        self.generation += 1
+        filename = LOG/(self.label+'_'+str(self.generation)+'_'+name+'.yaml')
+        filename.write_text(yaml.safe_dump(config))
+        args = [get_package_prefix('control_manager')+'/lib/control_manager/control_selector_node',
+                '--ros-args','-r','__ns:=/control']
+        for params in (ROOT/'config/vehicle.yaml',ROOT/'config/pipeline.yaml',filename):
+            args += ['--params-file',str(params)]
+        self.values.pop('status',None)
+        self.stack = Stack(args,self.label+'_'+str(self.generation))
+        expected = {'IDLE':0,'MANUAL':1,'AUTO':2}[name]
+        try:
+            wait_for(self.node,lambda: 'status' in self.values and self.values['status'].mode==expected,
+                     'operation YAML selects '+name+' after selector restart')
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        if self.stack is not None:
+            self.stack.close(); self.stack = None
+
+
 def wait_for(node, condition, label, timeout=10):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -59,15 +98,17 @@ def wait_for(node, condition, label, timeout=10):
     raise AssertionError('Timeout: ' + label)
 
 
-def observe(node):
+def observe(node, auto_history=None):
     values = {}
     for topic, cls in [('global_pose', GlobalPose), ('motion_state', MotionState), ('selected_cmd', VehicleCommand),
                        ('auto_cmd', VehicleCommand),
                        ('motion_plan', MotionPlan), ('status', ControlStatus),
                        ('object_state', ObjectState),
                        ('reference_path', PathMsg)]:
-        node.create_subscription(cls, '/control/' + topic,
-                                 lambda msg, key=topic: values.__setitem__(key, msg), 10)
+        def receive(msg, key=topic):
+            values[key]=msg
+            if key=='auto_cmd' and auto_history is not None: auto_history.append(msg)
+        node.create_subscription(cls, '/control/' + topic, receive, 10)
     node.create_subscription(VehicleInterfaceStatus, '/control/vehicle_interface/status',
         lambda msg: (values.__setitem__('vehicle_interface_status', msg),
                      values.__setitem__('protected_cmd', msg.protected_command)), 10)
@@ -98,6 +139,7 @@ def default_stack():
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
+        assert not node.get_subscriptions_info_by_topic('/control/mode_request')
         assert not node.get_publishers_info_by_topic('/control/guidance_status')
         assert not node.get_publishers_info_by_topic('/control/tracking_status')
         print('PASS: required topic graph contracts', flush=True)
@@ -112,7 +154,8 @@ def startup_rejections():
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),
              ('global_state_estimator', 'motion_mode:=INVALID', 'motion_mode must be'),
-             ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be')]
+             ('motion_control_node', 'tracking_mode:=INVALID', 'tracking_mode must be'),
+             ('control_selector_node', 'mode:=INVALID', 'mode must be')]
     for executable, parameter, reason in cases:
         result = subprocess.run(['ros2', 'run', 'control_manager', executable, '--ros-args', '-p',
                                  parameter], env=ENV, capture_output=True, text=True, timeout=10)
@@ -147,9 +190,9 @@ def integrated_fixtures():
     fixture_config = LOG / 'fixture_params.yaml'
     fixture_config.write_text(yaml.safe_dump(config))
     xml = ET.parse(ROOT / 'launch/control_manager.xml')
-    # Replace only the unimplemented perception node with explicit test observations.
+    # Supply perception fixtures and restart the selector separately from the rest of the stack.
     for element in list(xml.getroot()):
-        if element.tag == 'node' and element.attrib['name'] == 'object_manager':
+        if element.tag == 'node' and element.attrib['name'] in {'object_manager','control_selector'}:
             xml.getroot().remove(element)
     fixture_launch = LOG / 'fixture_launch.xml'
     xml.write(fixture_launch, encoding='unicode')
@@ -158,7 +201,6 @@ def integrated_fixtures():
     gnss_pub = node.create_publisher(Odometry, '/gnss/odom', qos_profile_sensor_data)
     object_pub = node.create_publisher(ObjectState, '/control/object_state', 10)
     manual_pub = node.create_publisher(VehicleCommand, '/control/manual_cmd', 10)
-    mode_pub = node.create_publisher(UInt8, '/control/mode_request', 10)
     lane_pub = node.create_publisher(LanePose, '/test/external_lane', 10)
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
@@ -223,6 +265,7 @@ def integrated_fixtures():
     stack = Stack(['ros2', 'launch', str(fixture_launch), 'operation_file:=' + str(fixture_config),
                    'mission_file:=' + str(fixture_mission)],
                   'smoke_integration')
+    selector = SelectorFixture(node,values,fixture_config,'pipeline_selector')
     try:
         wait_for(node, lambda: 'global_pose' in values and values['global_pose'].valid,
                  'GNSS relay and covariance/pose adapter')
@@ -232,7 +275,7 @@ def integrated_fixtures():
         wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and
                  values['auto_cmd'].target_speed_mps == 1.0 and values['auto_cmd'].target_steer_rad > 0.0,
                  'global Path -> mission -> plan -> Adaptive Pure Pursuit')
-        mode_pub.publish(UInt8(data=ControlStatus.MANUAL))
+        selector.set_mode('MANUAL')
         wait_for(node, lambda: 'protected_cmd' in values and values['protected_cmd'].valid and
                  values['protected_cmd'].target_speed_mps == 0.4 and
                  values['protected_cmd'].target_steer_rad == -0.15, 'MANUAL selects only manual')
@@ -243,7 +286,7 @@ def integrated_fixtures():
                  'manual source timeout stops despite healthy AUTO')
         assert old_stamp.sec > 0
         active['manual'] = True
-        mode_pub.publish(UInt8(data=ControlStatus.AUTO))
+        selector.set_mode('AUTO')
         wait_for(node, lambda: values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps == 1.0,
                  'AUTO selects only auto')
         wait_for(node, lambda: 'reference_path' in values and bool(values['reference_path'].poses),
@@ -281,7 +324,7 @@ def integrated_fixtures():
         wait_for(node, lambda: bool(values['reference_path'].poses) and values['protected_cmd'].valid,
                  'restore fixture after timeout')
         for mode in [ControlStatus.AUTO, ControlStatus.MANUAL]:
-            mode_pub.publish(UInt8(data=mode))
+            selector.set_mode(mode)
             estop_pub.publish(Bool(data=True))
             wait_for(node, lambda: values['protected_cmd'].reason == 'E_STOP' and
                      values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps == 0.0,
@@ -303,7 +346,7 @@ def integrated_fixtures():
         wait_for(node, lambda: values['motion_plan'].stop_request and values['protected_cmd'].valid
                  and values['protected_cmd'].target_speed_mps == .4,
                  'obstacle stops planning, not direct MANUAL command selection')
-        mode_pub.publish(UInt8(data=ControlStatus.AUTO))
+        selector.set_mode('AUTO')
         wait_for(node, lambda: values['motion_plan'].reason == 'MISSION_OR_OBSTACLE_STOP' and
                  values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps == 0.,
                  'detected obstacle stops AUTO through MotionPlan and AutoCommand')
@@ -312,10 +355,11 @@ def integrated_fixtures():
         wait_for(node, lambda: not values['motion_plan'].valid and not values['protected_cmd'].valid,
                  'stale obstacle state stops AUTO in motion planning')
         active['object'] = True
-        mode_pub.publish(UInt8(data=255))
+        selector.set_mode('IDLE')
         wait_for(node, lambda: values['status'].mode == ControlStatus.IDLE and values['protected_cmd'].valid
-                 and values['protected_cmd'].target_brake, 'invalid mode request returns to IDLE')
+                 and values['protected_cmd'].target_brake, 'configured IDLE returns to neutral stop')
     finally:
+        selector.close()
         stack.close()
         node.destroy_timer(timer)
         node.destroy_node()

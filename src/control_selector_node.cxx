@@ -12,19 +12,6 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   interface_status_ = input<msg::VehicleInterfaceStatus>("vehicle_interface_status");
   selected_publisher_ = output<msg::VehicleCommand>("selected_cmd");
   status_publisher_ = output<msg::ControlStatus>("status");
-  subscriptions_.push_back(create_subscription<std_msgs::msg::UInt8>(topic("mode_request"), 10,
-    [this](std_msgs::msg::UInt8::ConstSharedPtr request) {
-      const auto next = request->data <= static_cast<std::uint8_t>(core::ControlMode::AUTO)
-          ? static_cast<core::ControlMode>(request->data) : core::ControlMode::IDLE;
-      if (request->data > static_cast<std::uint8_t>(core::ControlMode::AUTO))
-        RCLCPP_ERROR(get_logger(), "Invalid mode request: switching to IDLE");
-      if (next != mode_) {
-        mode_ = next;
-        manual_->value.reset(); auto_->value.reset(); interface_status_->value.reset();
-        // Require new source callbacks after switching; never fall back to other mode.
-        selected_publisher_->publish(toRos(core::stop(now().nanoseconds(), "MODE_CHANGED"), frame_));
-      }
-    }));
   tick([this] { update(); });
 }
 void ControlSelectorNode::update() {

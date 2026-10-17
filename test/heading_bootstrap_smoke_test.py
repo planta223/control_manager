@@ -2,15 +2,15 @@
 """GNSS -> estimators -> planning -> control, hardware-free heading startup checks."""
 import copy
 import time
+import xml.etree.ElementTree as ET
 
 import rclpy
 import yaml
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry, Path as PathMsg
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
-from std_msgs.msg import UInt8
 from control_manager.msg import ControlStatus
-from smoke_test import ROOT, LOG, Stack, observe, wait_for
+from smoke_test import ROOT, LOG, Stack, SelectorFixture, observe, wait_for
 
 
 def run():
@@ -19,7 +19,6 @@ def run():
     odom_pub = node.create_publisher(Odometry, '/gnss/odom', qos_profile_sensor_data)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', QoSProfile(
         depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE))
-    mode_pub = node.create_publisher(UInt8, '/control/mode_request', 10)
     state = dict(y=0.0, covariance=4.5, yaw_covariance=1e12, path=True)
 
     def publish():
@@ -49,8 +48,13 @@ def run():
     control['/control/motion_control']['ros__parameters']['heading_bootstrap_timeout_s'] = 0.7
     operation_file = LOG/'heading_bootstrap_operation.yaml'; operation_file.write_text(yaml.safe_dump(operation))
     control_file = LOG/'heading_bootstrap_control.yaml'; control_file.write_text(yaml.safe_dump(control))
-    stack = Stack(['ros2','launch','control_manager','control_manager.xml',
+    xml=ET.parse(ROOT/'launch/control_manager.xml')
+    for element in list(xml.getroot()):
+        if element.tag=='node' and element.attrib['name']=='control_selector': xml.getroot().remove(element)
+    launch=LOG/'heading_bootstrap_launch.xml';xml.write(launch,encoding='unicode')
+    stack = Stack(['ros2','launch',str(launch),
                    'operation_file:='+str(operation_file),'control_file:='+str(control_file)], 'heading_bootstrap')
+    selector=SelectorFixture(node,values,operation_file,'heading_selector')
 
     def auto(reason):
         return 'auto_cmd' in values and values['auto_cmd'].reason == reason
@@ -71,9 +75,7 @@ def run():
         state['path'] = False
         wait_for(node,lambda: 'motion_plan' in values and not values['motion_plan'].valid,
                  'missing map blocks startup')
-        wait_for(node,lambda: mode_pub.get_subscription_count()>0 and 'status' in values,
-                 'selector ready for AUTO request')
-        mode_pub.publish(UInt8(data=ControlStatus.AUTO))
+        selector.set_mode('AUTO')
         wait_for(node,lambda: values['status'].mode==ControlStatus.AUTO,'AUTO selected')
         settle(0.9)
         assert not values['auto_cmd'].valid and values['auto_cmd'].target_brake
@@ -110,7 +112,7 @@ def run():
         assert stack.process.poll() is None
         print('ALL HEADING BOOTSTRAP CHECKS PASSED',flush=True)
     finally:
-        stack.close(); node.destroy_timer(timer); node.destroy_node()
+        selector.close(); stack.close(); node.destroy_timer(timer); node.destroy_node()
 
 
 if __name__ == '__main__':

@@ -62,7 +62,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | mission_based_limit_node | mission 활성 시 optional object_state; 구간 정책 활성 시 global_pose + mission_map | mission_limit; 구간 속도 상한·마진·정지·불확실성 판단 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd만 발행; PID/PP, speed pass-through |
-| control_selector_node | auto_cmd, manual_cmd, mode_request; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
+| control_selector_node | auto_cmd, manual_cmd; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
 | vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
 
 ## Sensor ingress 경계
@@ -115,8 +115,8 @@ actual steering을 표현할 메시지로 재사용하지 않았습니다. 외�
 WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
-Vehicle Control mode_request는 control_selector, ManualCommand도 control_selector,
-E-STOP은 vehicle_interface로 직접 전달합니다. Guidance/Tracking은 operation.yaml의 시작 설정입니다.
+ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
+Vehicle Control / Guidance / Tracking은 operation.yaml의 시작 설정이며 별도 모드 요청 토픽은 없습니다.
 Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 요청 토픽은 없습니다.
 어느 것도 ingress나 estimator를 경유하지 않습니다.
 
@@ -584,7 +584,9 @@ ros2 run control_manager global_state_estimator --ros-args -r __ns:=/control \
 Motion Control을 직접 실행할 때는 `--params-file /absolute/path/control.yaml`도 지정합니다.
 제어 계산값을 바꾼 뒤에는 Motion Control을 재시작합니다.
 
-Vehicle Control mode는 시작값이며 실행 중 전환은 기존 mode_request topic을 사용합니다.
+Vehicle Control mode는 operation.yaml의 /control/control_selector.ros__parameters.mode에서
+IDLE / MANUAL / AUTO로 시작 시 고정합니다. 변경 후 Control Selector를 재시작해야 합니다.
+mode parameter는 read-only이며 /control/mode_request 구독과 topics.mode_request 설정은 제거했습니다.
 Guidance/Tracking, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
 활성화 key는 각 파일의 공통 영역에서 한 번 정의하고 consumer가 함께 사용합니다.
 Mission 활성화는 mission.yaml, 다른 센서/Object 활성화는 operation.yaml에서 설정합니다.

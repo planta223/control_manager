@@ -179,7 +179,7 @@ Web Dashboard는 control_manager의 Guidance 및 arbitration 요청 UI를 갖고
 
 ```mermaid
 flowchart LR
-  UI[제안 RQT GUI] -->|mode_request UInt8| CM[control_selector]
+  CFG -->|mode: 시작 시 선택 / 재시작 적용| CM[control_selector]
   CFG -->|guidance_mode: 시작 시 선택| PP[path_planning]
   CM -->|status ControlStatus| UI
   GP[global_pose] --> UI
@@ -189,13 +189,14 @@ flowchart LR
   OS[object_state] --> UI
   VS[vehicle_interface/status: 보호 결과 진단] --> UI
   RX[sensors topics: 수신 age] --> UI
-  CFG[시작 config: optional sensor 활성 설정] -.-> UI
+  CFG[operation.yaml: 모드 / optional sensor 활성 설정] -.-> UI
   UI -->|estop Bool: true 요청| VI[vehicle_interface dry_run]
   CM -->|selected_cmd| VI
   VI --> VS
 ```
 
-기존 `/control/mode_request`, `/control/status` 등은 변경하지 않았습니다.
+`/control/status`는 유지하며 `/control/mode_request` 구독은 제거했습니다.
+Vehicle Control은 operation.yaml의 mode=IDLE / MANUAL / AUTO로 시작 시 선택하며 변경 후 selector를 재시작합니다.
 Guidance는 operation.yaml의 guidance_mode=GPS / LANE / HYBRID로 시작 시 선택하며 변경 후 재시작합니다.
 별도 Guidance 요청/상태 토픽은 없으며 Path Planning의 출력은 ReferencePath 하나입니다.
 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.

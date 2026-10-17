@@ -14,7 +14,6 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include <std_msgs/msg/u_int8.hpp>
 #include "control_manager/core/types.hxx"
 #include "control_manager/msg/global_pose.hpp"
 #include "control_manager/msg/motion_state.hpp"
@@ -48,7 +47,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
   {"vehicle_interface_status", "/control/vehicle_interface/status"}, {"status", "/control/status"},
-  {"mode_request", "/control/mode_request"}, {"estop", "/control/estop"},
+  {"estop", "/control/estop"},
 };
 template<class T> struct Input {
   typename T::ConstSharedPtr value;

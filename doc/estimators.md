@@ -39,7 +39,8 @@ GlobalPath -----------------|--> path_planning
                              control_selector → vehicle_interface (protection / dry_run)
 ```
 
-Map/Path는 planning reference입니다. mode request, ManualCommand, E-STOP은 command/event입니다.
+Map/Path는 planning reference입니다. ManualCommand와 E-STOP은 command/event이며,
+Vehicle Control / Guidance / Tracking 모드는 operation.yaml의 시작 설정입니다.
 이들은 ingress/estimator로 보내지 않습니다. 실제 외부 센서/feedback은 ingress를 통과합니다.
 
 ## 2–4. 모드와 required inputs

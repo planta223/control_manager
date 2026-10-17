@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # Startup choices / software policy / bench tuning, NOT measured vehicle limits.
-    # Parameters are read-only after startup; Vehicle Control requests use the owner topic.
+    # Parameters are read-only after startup; 변경 후 해당 노드를 재시작.
     rate_hz: 20.0
     state_timeout_s: 0.5
     command_timeout_s: 0.5
@@ -107,10 +107,10 @@
 
 /control/control_selector:
   ros__parameters:
-    # Control Selector 구독: auto_cmd / manual_cmd / mode_request / vehicle_interface_status.
+    # Control Selector 구독: auto_cmd / manual_cmd / vehicle_interface_status.
     # Control Selector 발행: selected_cmd / status 항상 발행.
-    # Vehicle Control Mode 설정
-    mode: IDLE                      # Initial mode; mode_request changes runtime mode
+    # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
+    mode: IDLE                      # IDLE / MANUAL / AUTO
     
 /control/vehicle_interface:
   ros__parameters:

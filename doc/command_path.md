@@ -8,7 +8,7 @@ flowchart TD
   MP[MotionPlan] --> MC[motion_control]
   MC -->|auto_cmd: VehicleCommand| CS[control_selector: IDLE / MANUAL / AUTO]
   MAN[ManualCommand] -->|manual_cmd: VehicleCommand| CS
-  MODE[mode_request] --> CS
+  MODE[operation.yaml: mode / 재시작 적용] -.-> CS
   CS -->|selected_cmd: VehicleCommand| VI[vehicle_interface: final actuator protection]
   ES[E-STOP] --> VI
   VI --> DRY[dry_run: no hardware transmission]
@@ -29,7 +29,7 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 | AUTO / MANUAL | 해당 source만 선택; 다른 source fallback 없음 |
 | source 수신/source timestamp timeout, frame | control_selector: stop, SOURCE_UNAVAILABLE |
 | 선택 source valid=false | control_selector: zero/brake stop, INVALID_SOURCE_COMMAND |
-| mode 전환 | 캐시 초기화, MODE_CHANGED stop 후 새 source callback 필요 |
+| mode 변경 | operation.yaml 수정 후 selector 재시작; 새 source callback 필요 |
 | 선택 명령 수신/source timestamp timeout, frame | vehicle_interface: selector 중단에도 자체 timer로 stop |
 | E-STOP | vehicle_interface: true는 explicit false까지 유지, 모든 mode와 invalid command보다 우선 |
 | NaN/Inf, brake+0이 아닌 속도 | vehicle_interface: INVALID_COMMAND_VALUES stop |
@@ -72,7 +72,10 @@ DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않�
 - 기존 final command subscriber는 필요에 따라 새 **진단 타입**을 구독하도록 별도 이행해야 함. 호환 alias 없음.
 - MANUAL의 localization/object gate 제거는 의도된 정책 변경이며 state 판단은 AUTO planning/control의 책임.
 
-유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/mode_request`, `/control/selected_cmd`,
+Vehicle Control mode는 operation.yaml에서 시작 시 선택합니다. `/control/mode_request` 구독은 제거했으며,
+read-only mode 변경은 selector 재시작으로 적용합니다. 시작값 오류는 fallback 없이 시작 오류입니다.
+
+유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/selected_cmd`,
 `/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
 추가: `/control/vehicle_interface/status` 진단 토픽과 `VehicleInterfaceStatus.msg`.
 현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
