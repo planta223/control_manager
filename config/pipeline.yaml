@@ -63,6 +63,16 @@
       selected_cmd: /control/selected_cmd
       status: /control/status
 
+      # Vehicle Interface 발행 토픽 (/control/vehicle_interface): 외부 trans 입력
+      actuator_raw: /control/actuator_raw # Float32MultiArray [steering, speed, brake]; 우회전/전진 +
+
+/control/vehicle_interface:
+  ros__parameters:
+    # 기존 trans 프로토콜: normalized ±1 -> 조향 ±30 deg / 모터 ±1500 RPM.
+    trans:
+      steering_full_scale_deg: 30.0
+      motor_full_scale_rpm: 1500.0
+
 /control/global_path_provider:
   ros__parameters:
     # 외부 파일 입력: gps-final-map v1, 후륜축 중심 경로. 프로젝트/배경 지도 JSON은 불가.

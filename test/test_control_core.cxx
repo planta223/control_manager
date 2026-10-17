@@ -102,6 +102,46 @@ TEST(VehicleLimits, AutoSaturatesBothSteeringDirectionsAndForwardSpeed) {
   EXPECT_FALSE(cm::limitAutomaticCommand(c,limits).valid);  // AUTO remains forward-only.
   EXPECT_FALSE(cm::limitAutomaticCommand(command(),{}).valid);
 }
+TEST(ActuatorRaw, RightPositiveSteeringAndWheelSpeedConversion) {
+  const cm::ActuatorConversionConfig cfg{0.5, 1.0, 30.0, 1500.0};
+  auto c=command();
+  c.target_steer_rad=-std::acos(-1.0)/12.0;  // Right 15 degrees.
+  c.target_speed_mps=10.0/3.6;
+  auto raw=cm::actuatorRaw(c,cfg);
+  EXPECT_FLOAT_EQ(raw[0],0.5F);
+  EXPECT_NEAR(raw[1],0.07073553,1e-7);  // 106.103 RPM / 1500; trans rounds to speed=7.
+  EXPECT_FLOAT_EQ(raw[2],0.0F);
+  c.target_steer_rad=-c.target_steer_rad; c.target_speed_mps=-c.target_speed_mps;
+  raw=cm::actuatorRaw(c,cfg);
+  EXPECT_FLOAT_EQ(raw[0],-0.5F);
+  EXPECT_NEAR(raw[1],-0.07073553,1e-7);
+  auto larger_wheel=cfg; larger_wheel.wheel_diameter_m=1.0;
+  EXPECT_NEAR(cm::actuatorRaw(c,larger_wheel)[1],raw[1]/2.0,1e-7);
+  auto reduction=cfg; reduction.motor_to_wheel_ratio=2.0;
+  EXPECT_NEAR(cm::actuatorRaw(c,reduction)[1],raw[1]*2.0,1e-7);
+}
+TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
+  const cm::ActuatorConversionConfig cfg{0.5, 1.0, 30.0, 1500.0};
+  auto c=command(); c.target_steer_rad=-1.0; c.target_speed_mps=100.0;
+  auto raw=cm::actuatorRaw(c,cfg);
+  EXPECT_FLOAT_EQ(raw[0],1.0F); EXPECT_FLOAT_EQ(raw[1],1.0F);
+  c.target_steer_rad=1.0; c.target_speed_mps=-100.0;
+  raw=cm::actuatorRaw(c,cfg);
+  EXPECT_FLOAT_EQ(raw[0],-1.0F); EXPECT_FLOAT_EQ(raw[1],-1.0F);
+  c.target_brake=true;
+  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  c=command(); c.valid=false;
+  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  c=command(); c.target_speed_mps=std::numeric_limits<double>::quiet_NaN();
+  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  EXPECT_EQ(cm::actuatorRaw(command(),{}),(std::array<float,3>{0,0,1}));
+  for (double bad : {0.0, -0.5, std::numeric_limits<double>::infinity()}) {
+    auto invalid=cfg; invalid.wheel_diameter_m=bad;
+    EXPECT_FALSE(cm::validActuatorConversion(invalid));
+    invalid=cfg; invalid.motor_to_wheel_ratio=bad;
+    EXPECT_FALSE(cm::validActuatorConversion(invalid));
+  }
+}
 TEST(VehicleLimits, SignedBoundaryAndInvalidLowerLimits) {
   auto c=command(); c.target_speed_mps=-2.0; c.target_steer_rad=0.4;
   EXPECT_TRUE(cm::protectActuatorCommand(c,now_ns,config()).valid);

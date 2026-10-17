@@ -49,6 +49,25 @@ Command protectActuatorCommand(const Command &c,
     return stop(now, "COMMAND_OUT_OF_RANGE");
   return c;  // Preserve source time; periodic forwarding must not renew a dead source.
 }
+bool validActuatorConversion(const ActuatorConversionConfig &cfg) {
+  for (const double value : {cfg.wheel_diameter_m, cfg.motor_to_wheel_ratio,
+                             cfg.steering_full_scale_deg, cfg.motor_full_scale_rpm})
+    if (!std::isfinite(value) || value <= 0.0) return false;
+  return true;
+}
+std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfig &cfg) {
+  if (!c.valid || c.target_brake || !validActuatorConversion(cfg) ||
+      !std::isfinite(c.target_steer_rad) || !std::isfinite(c.target_speed_mps))
+    return {0.0F, 0.0F, 1.0F};
+  const double pi = std::acos(-1.0);
+  const double steering = -c.target_steer_rad * 180.0 / pi / cfg.steering_full_scale_deg;
+  const double motor_rpm = c.target_speed_mps * 60.0 / (pi * cfg.wheel_diameter_m) *
+                           cfg.motor_to_wheel_ratio;
+  const double speed = motor_rpm / cfg.motor_full_scale_rpm;
+  if (!std::isfinite(steering) || !std::isfinite(speed)) return {0.0F, 0.0F, 1.0F};
+  return {static_cast<float>(std::clamp(steering, -1.0, 1.0)),
+          static_cast<float>(std::clamp(speed, -1.0, 1.0)), 0.0F};
+}
 VehicleFsmState fsmState(bool has_final, bool is_fresh, const Command &c, ControlMode mode) {
   if (!has_final) return VehicleFsmState::INIT;
   if (!is_fresh || !c.valid) return VehicleFsmState::FAULT;

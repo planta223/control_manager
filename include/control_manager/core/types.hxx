@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -53,6 +54,13 @@ struct ActuatorProtectionConfig {
   VehicleLimits limits;
   double command_timeout_s{0.5};
 };
+// Existing trans input: normalized right-positive steering, forward-positive motor speed, brake.
+struct ActuatorConversionConfig {
+  double wheel_diameter_m{0.0}, motor_to_wheel_ratio{1.0};
+  double steering_full_scale_deg{30.0}, motor_full_scale_rpm{1500.0};
+};
+bool validActuatorConversion(const ActuatorConversionConfig &config);
+std::array<float, 3> actuatorRaw(const Command &command, const ActuatorConversionConfig &config);
 bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);
 Command stop(std::int64_t now_ns, const std::string &reason, bool valid = false);
 Command selectCommand(ControlMode mode, const Command &manual, const Command &automatic,

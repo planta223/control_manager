@@ -44,6 +44,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"mission_map", "/control/mission_map"},
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
+  {"actuator_raw", "/control/actuator_raw"},
   {"status", "/control/status"},
 };
 template<class T> struct Input {

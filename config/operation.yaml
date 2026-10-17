@@ -115,9 +115,9 @@
 /control/vehicle_interface:
   ros__parameters:
     # Vehicle Interface 구독: selected_cmd 항상 유지 (보호 입력 비활성화 없음).
-    # Vehicle Interface 발행 토픽 없음; 최종 보호 결과는 내부 처리 / dry-run 로그, actuator 송신 미구현.
+    # Vehicle Interface 발행: actuator_raw (dry_run=false); 실제 UDP는 외부 trans 담당.
     # 최종 보호·운용 한계 설정
-    dry_run: true                   # false rejected: no UDP backend implemented
+    dry_run: false                  # true: 로그만 / false: actuator_raw 발행, 외부 trans는 별도 실행
     operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.
     # Motion Control은 vehicle.limits로 제한, 여기서는 범위 밖 명령을 STOP 처리.
-    # Steering road-wheel calibration, motor raw/mps and brake model are NOT_VERIFIED.
+    # actuator_raw 조향은 우회전 +. 속도는 vehicle의 바퀴 지름 / 구동비로 RPM 환산.

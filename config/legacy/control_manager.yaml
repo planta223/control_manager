@@ -102,7 +102,7 @@
     mode: IDLE                      # Initial mode; mode_request changes runtime mode
 /control/vehicle_interface:
   ros__parameters:
-    dry_run: true                   # false rejected: no UDP backend implemented
+    dry_run: true                   # true: 로그만 / false: actuator_raw 발행 (UDP는 외부 trans)
     operating_limits_verified: false
     max_steer_rad: 0.0               # TODO NOT_VERIFIED; zero disables driving
     max_speed_mps: 0.0               # TODO NOT_VERIFIED; zero disables driving

@@ -114,7 +114,7 @@ def observe(node, auto_history=None):
 
 def watch_protection_log(node, values, stack):
     """Inspect existing dry-run output for protection tests without a ROS status topic."""
-    pattern=re.compile(r'\[DRY_RUN\] steer=(\S+) rad speed=(\S+) m/s brake=(\d) valid=(\d) reason=([\w:]*)')
+    pattern=re.compile(r'\[(?:DRY_RUN|ACTUATOR_RAW)\] steer=(\S+) rad speed=(\S+) m/s brake=(\d) valid=(\d) reason=([\w:]*)')
     previous=[0]
     def read():
         output=Path(stack.log.name).read_text(errors='replace')
@@ -153,8 +153,10 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'status']}
+                    'selected_cmd', 'status', 'actuator_raw']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
+        assert {i.node_name for i in node.get_publishers_info_by_topic('/control/actuator_raw')} == {
+            'vehicle_interface'}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/mode_request')
@@ -172,7 +174,7 @@ def default_stack():
 
 
 def startup_rejections():
-    cases = [('vehicle_interface_node', 'dry_run:=false', 'UDP backend does not exist'),
+    cases = [('vehicle_interface_node', 'vehicle.wheel_diameter_m:=0.0', 'vehicle.wheel_diameter_m must be positive'),
              ('global_state_estimator', 'pose_mode:=INVALID', 'pose_mode must be'),
              ('path_planning_node', 'lane_correction_enabled:=true', 'not implemented'),
              ('path_planning_node', 'guidance_mode:=INVALID', 'guidance_mode must be'),

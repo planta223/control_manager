@@ -10,6 +10,8 @@
       front_axle_from_rear_m: 1.553   # MEASURED
       wheelbase_m: 1.328              # MEASURED: 1.553 - 0.225
       track_width_m: 1.060            # MEASURED
+      wheel_diameter_m: 0.50         # TEMPORARY: user 50 cm; replace after measurement
+      motor_to_wheel_ratio: 1.0      # USER_CONFIRMED: motor RPM / wheel RPM, direct drive
       # Vehicle command limits; degrees / km/h here, rad / m/s internally.
       limits:
         min_steering_deg: -30.0      # USER_SPECIFIED: right negative
@@ -32,7 +34,8 @@
     path_reference:
       offset_x_m: 0.0                # CONFIG: rear axle centre
       offset_y_m: 0.0                # CONFIG: rear axle centre
-    # Wheelbase and command limits are consumed now. Other geometry documents future footprint/TF.
+    # Wheelbase / command limits / wheel diameter / drive ratio are consumed now.
+    # Other geometry documents future footprint/TF.
     # TODO NOT_MEASURED: rear axle ground height, GNSS rotation, IMU xyz/RPY,
     # camera roll/yaw and optical-frame transform, and LiDAR rotation extrinsics.
     # NO TF is published from these partial measurements.

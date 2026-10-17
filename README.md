@@ -3,7 +3,8 @@
 ROS 2 Humble / C++17 / ament_cmake, `.cxx` / `.hxx`, XML launch 기반 상위제어 skeleton입니다.
 **실차 주행 준비 완료를 뜻하지 않습니다.** operation.yaml은 GNSS 테스트용 AUTO이며 YAML 없이 실행하면 IDLE입니다.
 PID disabled/zero gains, 미확정 운용 한계는 0,
-`dry_run=true`를 유지합니다. UDP backend가 없으며 `dry_run=false`는 시작 오류입니다.
+현재 `dry_run=false`에서 Vehicle Interface가 actuator_raw를 발행합니다.
+실제 UDP는 별도 실행하는 기존 외부 trans가 담당하며 `dry_run=true`는 raw 발행을 비활성화합니다.
 
 ## 현재 architecture (독립 상태 출력 + 두 estimator)
 
@@ -39,7 +40,7 @@ External GNSS / IMU / motor·steering feedback / Lane AI / RGB / LiDAR / Depth
                                     |
                       control_selector [IDLE/MANUAL/AUTO]
                                     |
-                      selected_cmd → vehicle_interface (protection / dry_run)
+                      selected_cmd → vehicle_interface → actuator_raw → 기존 외부 trans → UDP
 
 * Global/map tracking dependency remains; local Lane tracking adapter is NOT_IMPLEMENTED.
 ```
@@ -64,7 +65,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command는 ingress나 
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd만 발행; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd | selected_cmd, status; 선택 명령 기준 arbitration/FSM |
-| vehicle_interface_node | selected_cmd | 발행 토픽 없음; 최종 명령 보호와 dry-run 로그, actuator 송신 없음 |
+| vehicle_interface_node | selected_cmd | actuator_raw (dry_run=false); 최종 보호·우회전 양수 변환·바퀴 지름/구동비 기반 RPM 환산 |
 
 ## Sensor ingress 경계
 
@@ -341,7 +342,11 @@ control_selector는 mode별 source 선택, source frame/validity/timeout 검사,
 vehicle_interface는 선택 명령 수신/source timeout, non-finite/제동·속도 모순,
 미검증 운용 한계와 범위 초과를 검사합니다. 범위 초과는 기존처럼 clamp 대신 stop입니다.
 vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
-최종 보호 결과는 Vehicle Interface 내부 값과 기존 dry-run 로그로만 남으며 actuator backend는 미구현입니다.
+최종 보호 결과를 actuator_raw `[steering, speed, brake]`로 변환해 발행합니다 (`dry_run=false`).
+바퀴 지름은 vehicle.yaml의 wheel_diameter_m=0.50 m (임시), motor_to_wheel_ratio=1.0 (사용자 확인)입니다.
+내부 좌회전 양수 rad를 외부 우회전 양수 ±1로 변환하고, 속도는 m/s → 바퀴 RPM → 모터 RPM / 1500으로 환산합니다.
+기존 trans의 패킷 조립과 UDP를 재사용하며 연결 명령·정수 속도 해상도는 [Command path 보고서](doc/command_path.md)를 참고합니다.
+`dry_run=true`에서는 로그만 남기고 actuator_raw를 발행하지 않습니다. 외부 trans는 기본 launch가 실행하지 않습니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
 ControlStatus는 선택 명령의 유효성 / freshness / speed / brake와 mode를 기준으로 생성합니다.
@@ -779,6 +784,7 @@ python3 -B src/control_manager/test/state_split_smoke_test.py
 python3 -B src/control_manager/test/ingress_smoke_test.py
 python3 -B src/control_manager/test/estimator_modes_smoke_test.py
 python3 -B src/control_manager/test/command_path_smoke_test.py
+python3 -B src/control_manager/test/actuator_raw_smoke_test.py
 ```
 
 결과 로그: package 내부 `log/smoke_result.txt`, `log/smoke_default.log`,

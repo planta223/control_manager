@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <std_msgs/msg/float32_multi_array.hpp>
 #include "control_manager/ros_support.hxx"
 #include "control_manager/core/lateral_controller.hxx"
 #include "control_manager/core/tracking.hxx"
@@ -133,7 +134,9 @@ class VehicleInterfaceNode : public NodeBase {
  private:
   void update();
   core::ActuatorProtectionConfig config_;
+  core::ActuatorConversionConfig conversion_;
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr actuator_publisher_;
   std::string frame_;
 };
 }  // namespace control_manager

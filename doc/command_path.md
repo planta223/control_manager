@@ -10,14 +10,40 @@ flowchart TD
   MAN[ManualCommand] -->|manual_cmd: VehicleCommand| CS
   MODE[operation.yaml: mode / 재시작 적용] -.-> CS
   CS -->|selected_cmd: VehicleCommand| VI[vehicle_interface: final actuator protection]
-  VI --> DRY[dry_run: no hardware transmission]
+  VI -->|actuator_raw: Float32MultiArray / dry_run=false| TX[기존 외부 trans]
+  TX -->|9-byte UDP| BOARDS[조향 / 모터 / 브레이크 보드]
   CS --> ST[status: ControlStatus / FSM]
   ST --> MC
 ```
 
 SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재사용합니다.
-`selected_cmd`에서 actuator-facing 소유자는 vehicle_interface 하나입니다. 실제 UDP/CAN backend는 없습니다.
+`selected_cmd`에서 actuator-facing 소유자는 vehicle_interface 하나입니다.
+Vehicle Interface는 검사와 변환을 수행하고, 실제 패킷 조립·UDP 송신은 외부 `trans`를 재사용합니다.
 최종 보호 결과는 vehicle_interface 내부 값이며, 진단은 command input으로 사용하지 않습니다.
+
+## actuator_raw 출력 / 기존 trans 연결
+
+`/control/actuator_raw`는 `std_msgs/Float32MultiArray`이며 순서는 `[steering, speed, brake]`입니다.
+`operation.yaml`의 `dry_run=false`에서 기존 rate_hz로 발행하며 `true`이면 발행자를 생성하지 않습니다.
+현재 운용 설정은 false이며 외부 trans 노드는 control_manager launch가 자동 실행하지 않습니다.
+출력 이름은 pipeline.yaml의 `topics.actuator_raw`로 설정합니다. 외부 trans의 cmd_topic도 같은 이름으로 지정합니다.
+
+```bash
+ros2 run trans trans --ros-args -p cmd_topic:=/control/actuator_raw
+```
+
+- 내부 VehicleCommand는 rad / 좌회전 양수입니다. raw 조향은 `-steer_rad × 180 / π / 30`으로 우회전 양수입니다.
+- 바퀴 RPM은 `speed_mps × 60 / (π × wheel_diameter_m)`입니다.
+- 모터 RPM은 바퀴 RPM × motor_to_wheel_ratio이며 raw 속도는 모터 RPM / 1500입니다. 전진 양수를 유지합니다.
+- vehicle.yaml의 바퀴 지름 0.50 m는 임시값, 구동비 1:1은 사용자 확인값입니다. 실측 후 지름만 수정하면 환산에 반영됩니다.
+- trans의 ±30 deg / ±1500 RPM 계약은 pipeline.yaml의 `trans.*`에 둡니다. raw 조향·속도는 ±1로 제한합니다.
+- 최종 보호에서 거부된 명령 또는 브레이크 명령은 `[0, 0, 1]`로 발행합니다.
+
+기존 trans는 steering × 30과 speed × 100을 정수로 반올림하고 브레이크를 misc bit 7로 인코딩합니다.
+지름 0.50 m / 구동비 1일 때 속도 한 단계는 약 1.414 km/h입니다. 예를 들어 10 km/h 목표는
+106.103 RPM → raw 0.0707355 → 패킷 speed=7 → 105 RPM, 약 9.896 km/h에 해당합니다.
+기존 입력 만료 검사는 유지하며 추가 단절 감시나 watchdog은 구현하지 않습니다.
+기존 `/cmd` 대신 전용 actuator_raw 토픽을 사용하며 기존 수동주행·GNSS의 송신자를 함께 실행하지 않습니다.
 
 ## 책임 이동
 
@@ -77,7 +103,8 @@ manual_cmd 입력 연결은 보류하며 AUTO에서는 수동 입력이 없어�
 `/control/estop` 구독·설정·내부 상태·보호 함수 인자는 제거했습니다. Vehicle Interface 입력은 selected_cmd 하나입니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
-현재 executable 11개 / custom message 10개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
+현재 executable 11개 / custom message 10개 (지도 파일 제공자 포함). 기본 운용은 `dry_run=false`로 actuator_raw를 발행합니다.
+UDP는 외부 trans의 별도 실행으로 연결하며 PID 비활성/0 gain은 유지합니다.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
 ## 검증
@@ -85,6 +112,8 @@ msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
 `test/command_path_smoke_test.py`는 AUTO/MANUAL 선택·timeout·timestamp 형식/신선도 거부·복구·수동 입력 없는 AUTO·invalid source·IDLE,
 선택 명령 기준 FSM·제거된 estop 토픽의 publisher/subscriber 부재·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
 최종 보호는 기존 dry-run 로그를 읽어 확인하며 테스트 전용 진단 토픽은 만들지 않습니다.
+`test/actuator_raw_smoke_test.py`는 출력 값·우회전 부호·후진·브레이크·차량 한계·바퀴 지름 변경·토픽 설정·dry_run을 검증합니다.
+외부 trans의 실제 steer/motor/brake 변환 함수로 패킷 필드도 확인하며, UDP 송신 노드는 실행하지 않습니다.
 GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout과 원본 timestamp 보존을 검증합니다.
 기존 pipeline/state split/tracking/ingress/estimator smoke는 현재 연결로 갱신합니다.
 실행 방법은 README의 package-only build/test 환경을 사용하며 모든 fixture와 출력은 package 내부입니다.

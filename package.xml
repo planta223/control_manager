@@ -3,7 +3,7 @@
 <package format="3">
   <name>control_manager</name>
   <version>0.6.0</version>
-  <description>Dry-run upper control architecture with a single observation/feedback ingress, global_state_estimator and lane_state_estimator with separate GlobalPose/MotionState, GPS/LANE/HYBRID planning contracts, Pure Pursuit, control_selector and actuator-facing protection inside vehicle_interface.</description>
+  <description>Upper control architecture with a single observation/feedback ingress, global_state_estimator and lane_state_estimator with separate GlobalPose/MotionState, GPS/LANE/HYBRID planning contracts, Pure Pursuit, control_selector and protected trans-compatible actuator output inside vehicle_interface.</description>
   <maintainer email="sukyun02@users.noreply.github.com">baqu4</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
