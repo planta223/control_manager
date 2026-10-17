@@ -228,6 +228,14 @@ Lane filtering/curvature/polyline/geometry 추정은 하지 않습니다. headin
 최신 최종 지도를 기본 후보로 사용하며 여러 지도 사이의 실차 품질 우열을 판정한 것은 아닙니다.
 
 `pipeline.yaml`의 `/control/global_path_provider.map_file`에 현재 workspace의 절대 경로를 지정합니다.
+실행 시 `map_file:=...`로 경로만 덮어쓸 수 있습니다. 미지정/빈 인자이면 기존 pipeline 설정을 사용합니다.
+Docker에서는 호스트 main/이 /workspace로 마운트되므로 다음처럼 실행합니다.
+
+```bash
+ros2 launch control_manager control_manager.xml \
+  map_file:=/workspace/decision/script/map_generator/test/review/maps/MAP_2026-10-15_195100_test.json
+```
+
 다른 workspace에서는 이 경로를 바꾸십시오. 파일은 읽기만 하며 원본을 수정하지 않습니다.
 파일 제공자는 `gps-final-map` v1, WGS84/ENU/m, `rear_axle_center`, 열린 경로,
 증가하는 순번·거리 및 유한한 위경도를 검사합니다. 현재 경로는 5,066점, 약 506.45 m입니다.

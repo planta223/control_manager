@@ -7,11 +7,14 @@
   <arg name="mission_file" default="$(find-pkg-share control_manager)/config/mission.yaml"/>
   <arg name="control_file" default="$(find-pkg-share control_manager)/config/control.yaml"/>
   <arg name="vehicle_file" default="$(find-pkg-share control_manager)/config/vehicle.yaml"/>
+  <arg name="map_file" default=""
+       description="Global map JSON path override; empty keeps pipeline.yaml map_file"/>
   <node pkg="control_manager" exec="global_path_provider" name="global_path_provider" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var pipeline_file)"/>
     <param from="$(var mission_file)"/>
     <param from="$(var operation_file)"/>
+    <param name="map_file_override" value="$(var map_file)" type="str"/>
   </node>
   <node pkg="control_manager" exec="sensor_interface_node" name="sensor_interface" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>

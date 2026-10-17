@@ -25,6 +25,7 @@ class GlobalPathProvider(Node):
         if mode not in ('GPS', 'LANE', 'HYBRID'):
             raise ValueError('guidance_mode must be GPS, LANE or HYBRID')
         filename = param('map_file', '')
+        filename = param('map_file_override', '') or filename
         self.frame = param('map_frame', 'map')
         self.base_frame = param('base_frame', 'base_link')
         gnss_node = param('gnss_node', '/gnss_node')
