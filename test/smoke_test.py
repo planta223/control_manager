@@ -131,7 +131,9 @@ def watch_protection_log(node, values, stack):
 def default_stack():
     node = rclpy.create_node('default_contract_test')
     values = observe(node)
-    stack = Stack(['ros2', 'launch', 'control_manager', 'control_manager.xml'], 'smoke_default')
+    map_file = ROOT.parents[1]/'decision/script/map_generator/test/review/maps/MAP_2026-10-15_195100_test.json'
+    stack = Stack(['ros2', 'launch', 'control_manager', 'control_manager.xml',
+                   'map_file:='+str(map_file)], 'smoke_default')
     protection_probe=watch_protection_log(node,values,stack)
     try:
         wait_for(node, lambda: len([n for n, ns in node.get_node_names_and_namespaces()
@@ -190,6 +192,8 @@ def startup_rejections():
 
 def integrated_fixtures():
     config = yaml.safe_load((ROOT / 'config/operation.yaml').read_text())
+    # This fixture supplies global_path itself; do not start a competing file source.
+    config['/control/global_path_provider'] = {'ros__parameters': {'map_file': ''}}
     config['/**']['ros__parameters'].update({
         'lane_enabled': True, 'object_state_enabled': True})
     mission_config = yaml.safe_load((ROOT / 'config/mission.yaml').read_text())

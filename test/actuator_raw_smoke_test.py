@@ -58,7 +58,7 @@ def run():
                              motor.to_speed_raw(raw[1]), brake.to_misc(raw[2])))
 
     try:
-        launch()
+        launch('vehicle.wheel_diameter_m:=0.5')  # Fixed fixture; production diameter is editable.
         speed_raw = (10/3.6) * 60 / (math.pi*.50) / 1500
         assert expect([.5, speed_raw, 0], 'right 15 degrees / 10 km/h normalized output') == (15, 7, 0)
         assert {i.node_name for i in node.get_publishers_info_by_topic('/control/actuator_raw')} == {
@@ -78,7 +78,7 @@ def run():
         active.update(steer=-math.radians(15))
         launch('vehicle.wheel_diameter_m:=1.0')
         expect([.5, speed_raw/2, 0], 'wheel diameter change updates RPM conversion')
-        launch('topics.actuator_raw:=/test/actuator_raw')
+        launch('topics.actuator_raw:=/test/actuator_raw', 'vehicle.wheel_diameter_m:=0.5')
         expect([.5, speed_raw, 0], 'actuator_raw topic can be configured', '/test/actuator_raw')
         assert not node.get_publishers_info_by_topic('/control/actuator_raw')
         launch('dry_run:=true')

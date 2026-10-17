@@ -430,7 +430,9 @@ IDLE/MANUAL에서 계산한 종점 preview는 AUTO 완료를 저장하지 않습
 명시적으로 MANUAL을 선택하면 기존 Control Selector의 수동 명령 선택은 그대로 가능합니다.
 TrackingStatus 토픽과 메시지 생성은 제외했으며 msg/TrackingStatus.msg는 과거 정의로 보관합니다.
 tracking_mode는 read-only 시작 설정이며 변경 후 노드를 재시작합니다.
-명령은 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
+Motion Control / Control Selector / Vehicle Interface의 명령은 operation.yaml의 노드별 rate_hz(50 Hz)로 발행합니다.
+외부 trans는 actuator_raw 수신마다 UDP를 송신하며, 센서 입력과 나머지 처리 노드의 기본 주기는 별도로 유지합니다.
+잘못된 tracking_mode 문자열은 시작 오류입니다.
 
 ### PID 수식 / 부호 / 시간
 

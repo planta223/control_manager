@@ -96,6 +96,7 @@
   ros__parameters:
     # Motion Control 구독: global_pose / motion_state / motion_plan / status.
     # Motion Control 발행: auto_cmd만 발행.
+    rate_hz: 50.0                  # 제어 계산·명령 발행 주기; 센서 입력 주기와 독립.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
     route_progress_enabled: true  # 현재 map의 전반 / 중반 / 후반 진행 위치 기억; profile은 control.yaml.
@@ -109,6 +110,7 @@
   ros__parameters:
     # Control Selector 구독: auto_cmd / manual_cmd.
     # Control Selector 발행: selected_cmd / status 항상 발행.
+    rate_hz: 50.0                  # Motion Control / Vehicle Interface와 동일한 명령 주기.
     # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     mode: AUTO                      # IDLE / MANUAL / AUTO
     
@@ -116,6 +118,7 @@
   ros__parameters:
     # Vehicle Interface 구독: selected_cmd 항상 유지 (보호 입력 비활성화 없음).
     # Vehicle Interface 발행: actuator_raw (dry_run=false); 실제 UDP는 외부 trans 담당.
+    rate_hz: 50.0                  # 외부 trans는 actuator_raw 수신마다 UDP 송신.
     # 최종 보호·운용 한계 설정
     dry_run: false                  # true: 로그만 / false: actuator_raw 발행, 외부 trans는 별도 실행
     operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.

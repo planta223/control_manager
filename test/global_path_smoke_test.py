@@ -58,7 +58,7 @@ def main():
             stack.close()
             wait_for(node, lambda: ('global_path_provider', '/control') not in
                      node.get_node_names_and_namespaces(), 'inactive provider stopped')
-    stacks = [Stack(command('global_path_provider', 'mission_limit_enabled:=true',
+    stacks = [Stack(command('global_path_provider', 'map_file:='+str(filename), 'mission_limit_enabled:=true',
                             'mission_sections_enabled:=true'), 'map_provider'),
               Stack(command('path_planning_node'), 'map_path_planning')]
     try:
