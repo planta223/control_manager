@@ -3,8 +3,7 @@
 import copy
 import math
 import rclpy
-from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
-from std_msgs.msg import Bool, UInt8
+from std_msgs.msg import UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
 from control_manager.msg import VehicleCommand, ControlStatus
@@ -18,9 +17,6 @@ def run():
     pubs={key:node.create_publisher(VehicleCommand,'/control/'+key,10)
           for key in ['auto_cmd','manual_cmd','selected_cmd']}
     legacy_modes=node.create_publisher(UInt8,'/control/mode_request',10)
-    durable=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                       reliability=ReliabilityPolicy.RELIABLE)
-    estop=node.create_publisher(Bool,'/control/estop',durable)
     active={'auto':True,'manual':True,'invalid_manual':False,'direct':False,'kind':'good',
             'auto_stamp':'good','manual_stamp':'good'}
     sent={}
@@ -140,14 +136,9 @@ def run():
         wait_for(node,lambda:values['protected_cmd'].valid,'valid manual source recovers')
         for mode,speed in [(ControlStatus.AUTO,.8),(ControlStatus.MANUAL,.4),(ControlStatus.IDLE,0.)]:
             choose(mode,speed)
-            estop.publish(Bool(data=True))
-            expected_fsm=ControlStatus.READY if mode==ControlStatus.IDLE else ControlStatus.DRIVING
-            wait_for(node,lambda:safe() and values['protected_cmd'].reason=='E_STOP' and
-                     values['status'].fsm_state==expected_fsm,'E-STOP protects independently of selector mode '+str(mode))
-            settle(node,.7)
-            assert values['protected_cmd'].reason=='E_STOP'
-            estop.publish(Bool(data=False))
-            wait_for(node,lambda:values['protected_cmd'].valid,'explicit E-STOP reset')
+        assert not node.get_subscriptions_info_by_topic('/control/estop')
+        assert not node.get_publishers_info_by_topic('/control/estop')
+        print('PASS: removed estop topic has no publisher or subscriber',flush=True)
         for topic in ['global_pose','motion_state','guidance_status','object_state']:
             assert not {i.node_name for i in node.get_subscriptions_info_by_topic('/control/'+topic)} & {
                 'control_selector','vehicle_interface'}
@@ -178,8 +169,6 @@ def run():
             wait_for(node,lambda:values['protected_cmd'].valid,'protected command recovers: '+kind)
         active['direct']=False
         wait_for(node,safe,'direct selected publisher silence stops actuator boundary')
-        estop.publish(Bool(data=True))
-        wait_for(node,lambda:safe() and values['protected_cmd'].reason=='E_STOP','E-STOP wins over missing command')
         print('ALL COMMAND PATH SMOKE CHECKS PASSED',flush=True)
     finally:
         if selector is not None: selector.close()

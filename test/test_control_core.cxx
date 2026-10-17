@@ -26,32 +26,33 @@ TEST(Arbitration, ModeIsolationAndTimestampPreserved) {
   a.timestamp_ns -= 100;
   EXPECT_EQ(cm::selectCommand(cm::ControlMode::AUTO,m,a,now_ns).timestamp_ns,a.timestamp_ns);
 }
-TEST(ActuatorProtection, EstopOverridesModesAndInvalidCommand) {
+TEST(ActuatorProtection, ValidSelectedCommandsAcceptedAcrossModes) {
   for (auto mode : {cm::ControlMode::IDLE, cm::ControlMode::AUTO, cm::ControlMode::MANUAL}) {
     const auto c = cm::selectCommand(mode,command(),command(),now_ns);
-    const auto out = cm::protectActuatorCommand(c,true,now_ns,config());
-    EXPECT_EQ(out.reason,"E_STOP"); EXPECT_FALSE(out.valid);
-    EXPECT_TRUE(out.target_brake); EXPECT_DOUBLE_EQ(out.target_speed_mps,0);
-    EXPECT_DOUBLE_EQ(out.target_steer_rad,0);
+    const auto out = cm::protectActuatorCommand(c,now_ns,config());
+    EXPECT_TRUE(out.valid); EXPECT_EQ(out.reason,c.reason);
+    EXPECT_EQ(out.target_brake,c.target_brake);
+    EXPECT_DOUBLE_EQ(out.target_speed_mps,c.target_speed_mps);
+    EXPECT_DOUBLE_EQ(out.target_steer_rad,c.target_steer_rad);
+    EXPECT_EQ(out.timestamp_ns,c.timestamp_ns);
   }
-  EXPECT_EQ(cm::protectActuatorCommand({},true,now_ns,{}).reason,"E_STOP");
 }
 TEST(ActuatorProtection, InvalidLimitsFailClosed) {
-  EXPECT_EQ(cm::protectActuatorCommand(command(),false,now_ns,{}).reason,"OPERATING_LIMITS_NOT_VERIFIED");
+  EXPECT_EQ(cm::protectActuatorCommand(command(),now_ns,{}).reason,"OPERATING_LIMITS_NOT_VERIFIED");
   for (double bad : {0., -1., std::numeric_limits<double>::quiet_NaN(),
                      std::numeric_limits<double>::infinity()}) {
     auto cfg=config(); cfg.limits.max_speed_mps=bad;
-    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),now_ns,cfg).valid);
     cfg=config(); cfg.limits.max_steer_rad=bad;
-    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),now_ns,cfg).valid);
   }
 }
 TEST(ActuatorProtection, InvalidAndStaleSourceStop) {
   auto c=command(); c.valid=false;
-  EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"INVALID_OR_STALE_COMMAND");
+  EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"INVALID_OR_STALE_COMMAND");
   for (auto stamp : {0LL, now_ns+1LL, now_ns-600000000LL}) {
     c=command(); c.timestamp_ns=stamp;
-    const auto out=cm::protectActuatorCommand(c,false,now_ns,config());
+    const auto out=cm::protectActuatorCommand(c,now_ns,config());
     EXPECT_FALSE(out.valid); EXPECT_TRUE(out.target_brake);
     EXPECT_DOUBLE_EQ(out.target_speed_mps,0); EXPECT_DOUBLE_EQ(out.target_steer_rad,0);
   }
@@ -62,26 +63,26 @@ TEST(ActuatorProtection, FiniteRangeAndContradictoryBrake) {
                     std::numeric_limits<double>::infinity(),
                     -std::numeric_limits<double>::infinity()}) {
     c=command(); c.target_steer_rad=bad;
-    EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"INVALID_COMMAND_VALUES");
+    EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"INVALID_COMMAND_VALUES");
     c=command(); c.target_speed_mps=bad;
-    EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"INVALID_COMMAND_VALUES");
+    EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"INVALID_COMMAND_VALUES");
   }
   c=command(); c.target_speed_mps=-.1;
-  EXPECT_TRUE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
+  EXPECT_TRUE(cm::protectActuatorCommand(c,now_ns,config()).valid);
   c=command(); c.target_brake=true;
-  EXPECT_FALSE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
+  EXPECT_FALSE(cm::protectActuatorCommand(c,now_ns,config()).valid);
   for (double steer : {-.41,.41}) {
     c=command(); c.target_steer_rad=steer;
-    EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
+    EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
   }
   c=command(); c.target_speed_mps=2.01;
-  EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
+  EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
   c=command(); c.target_speed_mps=-2.01;
-  EXPECT_EQ(cm::protectActuatorCommand(c,false,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
+  EXPECT_EQ(cm::protectActuatorCommand(c,now_ns,config()).reason,"COMMAND_OUT_OF_RANGE");
 }
 TEST(ActuatorProtection, BoundaryAcceptedAndSourceTimePreserved) {
   auto c=command(); c.target_speed_mps=2.; c.target_steer_rad=-.4; c.timestamp_ns-=100;
-  const auto out=cm::protectActuatorCommand(c,false,now_ns,config());
+  const auto out=cm::protectActuatorCommand(c,now_ns,config());
   EXPECT_TRUE(out.valid); EXPECT_EQ(out.timestamp_ns,c.timestamp_ns);
   EXPECT_DOUBLE_EQ(out.target_speed_mps,2.); EXPECT_DOUBLE_EQ(out.target_steer_rad,-.4);
 }
@@ -103,13 +104,13 @@ TEST(VehicleLimits, AutoSaturatesBothSteeringDirectionsAndForwardSpeed) {
 }
 TEST(VehicleLimits, SignedBoundaryAndInvalidLowerLimits) {
   auto c=command(); c.target_speed_mps=-2.0; c.target_steer_rad=0.4;
-  EXPECT_TRUE(cm::protectActuatorCommand(c,false,now_ns,config()).valid);
+  EXPECT_TRUE(cm::protectActuatorCommand(c,now_ns,config()).valid);
   for (double bad : {0.1, std::numeric_limits<double>::quiet_NaN(),
                      -std::numeric_limits<double>::infinity()}) {
     auto cfg=config(); cfg.limits.min_speed_mps=bad;
-    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),now_ns,cfg).valid);
     cfg=config(); cfg.limits.min_steer_rad=bad;
-    EXPECT_FALSE(cm::protectActuatorCommand(command(),false,now_ns,cfg).valid);
+    EXPECT_FALSE(cm::protectActuatorCommand(command(),now_ns,cfg).valid);
   }
 }
 TEST(Fsm, ModeAndFsmAreSeparate) {

@@ -114,7 +114,7 @@
     
 /control/vehicle_interface:
   ros__parameters:
-    # Vehicle Interface 구독: selected_cmd / estop 항상 유지 (보호 입력 비활성화 없음).
+    # Vehicle Interface 구독: selected_cmd 항상 유지 (보호 입력 비활성화 없음).
     # Vehicle Interface 발행 토픽 없음; 최종 보호 결과는 내부 처리 / dry-run 로그, actuator 송신 미구현.
     # 최종 보호·운용 한계 설정
     dry_run: true                   # false rejected: no UDP backend implemented

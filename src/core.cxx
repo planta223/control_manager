@@ -35,9 +35,8 @@ Command limitAutomaticCommand(const Command &c, const VehicleLimits &l) {
     out.reason += "_LIMITED";
   return out;
 }
-Command protectActuatorCommand(const Command &c, bool estop,
+Command protectActuatorCommand(const Command &c,
                                std::int64_t now, const ActuatorProtectionConfig &cfg) {
-  if (estop) return stop(now, "E_STOP");
   if (!c.valid || !fresh(c.timestamp_ns, now, cfg.command_timeout_s))
     return stop(now, "INVALID_OR_STALE_COMMAND");
   if (!std::isfinite(c.target_steer_rad) || !std::isfinite(c.target_speed_mps) ||

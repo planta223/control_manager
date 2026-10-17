@@ -173,12 +173,12 @@ def run():
         assert {'global_state_estimator'}<=subscribers('/control/sensors/gnss_odom')
         assert subscribers('/imu/data')=={'sensor_interface'}
         for topic in ['/control/global_path','/control/mode_request',
-                      '/control/manual_cmd','/control/estop']:
+                      '/control/manual_cmd']:
             assert 'sensor_interface' not in subscribers(topic)
             assert 'sensor_interface' not in publishers(topic)
         assert 'path_planning' not in subscribers('/control/global_path')  # LANE startup mode.
         assert 'path_planning' not in subscribers('/control/global_pose')
-        print('PASS: sensor/Lane/feedback ownership and map/operator/safety exclusions',flush=True)
+        print('PASS: sensor/Lane/feedback ownership and map/operator exclusions',flush=True)
         for case,heading in [('negative_heading',-.7),('good',.7)]:
             state['lane']=case
             wait_for(node,lambda:values['lane'].heading_error_rad==heading,

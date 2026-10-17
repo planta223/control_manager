@@ -31,7 +31,6 @@ flowchart TD
   Q[mode_request] --> CM
   CM --> ST[ControlStatus / FSM]
   CM -->|selected_cmd| VI[vehicle_interface: protection / dry_run]
-  ES[E-STOP] --> VI
 ```
 
 ## AFTER control_manager (상태 분리 + ingress 현재 구현)
@@ -69,7 +68,6 @@ flowchart TD
   MC --> CM[control_selector: IDLE / MANUAL / AUTO]
   U[ManualCommand] --> CM
   CM -->|selected_cmd| VI[vehicle_interface: protection / dry_run]
-  ES[E-STOP] --> VI
   VI -.->|diagnostic status for FSM| CM
 ```
 
@@ -142,7 +140,6 @@ RQT 차량 화면은 없으므로 가상의 BEFORE 제어 화면을 만들지 �
 │ actual steering / brake: UNKNOWN           │
 ├─────────────────────────────────────────────┤
 │ Safety / Fault / Reason / status age       │
-│ [E-STOP 요청]                              │
 └─────────────────────────────────────────────┘
 ```
 
@@ -189,8 +186,7 @@ flowchart LR
   OS[object_state] --> UI
   RX[sensors topics: 수신 age] --> UI
   CFG[operation.yaml: 모드 / optional sensor 활성 설정] -.-> UI
-  UI -->|estop Bool: true 요청| VI[vehicle_interface dry_run]
-  CM -->|selected_cmd| VI
+  CM -->|selected_cmd| VI[vehicle_interface dry_run]
 ```
 
 `/control/status`는 유지하며 `/control/mode_request` 구독은 제거했습니다.
@@ -198,5 +194,6 @@ Vehicle Control은 operation.yaml의 mode=IDLE / MANUAL / AUTO로 시작 시 선
 Guidance는 operation.yaml의 guidance_mode=GPS / LANE / HYBRID로 시작 시 선택하며 변경 후 재시작합니다.
 별도 Guidance 요청/상태 토픽은 없으며 Path Planning의 출력은 ReferencePath 하나입니다.
 상태 표시는 새 GlobalPose/MotionState 계약을 사용해야 합니다.
-GUI는 단순 요청/표시 source이고 정지 판정 권한은 node/safety에 있습니다.
+GUI는 상태 표시용이며 정지 판정은 planning/control/vehicle_interface에서 수행합니다.
+`/control/estop` 입력은 제거했으며 GUI의 비상정지 요청 토픽도 없습니다.
 GUI가 없어도 source freshness 검사와 AUTO invalid guidance stop 경로는 유지됩니다.

@@ -57,7 +57,7 @@ bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);
 Command stop(std::int64_t now_ns, const std::string &reason, bool valid = false);
 Command selectCommand(ControlMode mode, const Command &manual, const Command &automatic,
                       std::int64_t now_ns);
-Command protectActuatorCommand(const Command &command, bool estop,
+Command protectActuatorCommand(const Command &command,
                                std::int64_t now_ns, const ActuatorProtectionConfig &config);
 VehicleFsmState fsmState(bool has_final, bool final_fresh, const Command &final,
                          ControlMode mode);

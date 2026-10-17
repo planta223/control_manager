@@ -45,7 +45,7 @@ External GNSS / IMU / motor·steering feedback / Lane AI / RGB / LiDAR / Depth
 ```
 
 GlobalPose는 map 기준 위치/방향, LanePose는 lane 기준 차량의 상대 pose, MotionState는 차량 운동입니다.
-Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingress나 estimator를 거치지 않습니다.
+Guidance와 각 state source mode는 별개입니다. Map/command는 ingress나 estimator를 거치지 않습니다.
 
 ## Node별 subscribe / publish
 
@@ -64,7 +64,7 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd만 발행; PID/PP, speed pass-through |
 | control_selector_node | auto_cmd, manual_cmd | selected_cmd, status; 선택 명령 기준 arbitration/FSM |
-| vehicle_interface_node | selected_cmd, estop | 발행 토픽 없음; 최종 명령 보호와 dry-run 로그, actuator 송신 없음 |
+| vehicle_interface_node | selected_cmd | 발행 토픽 없음; 최종 명령 보호와 dry-run 로그, actuator 송신 없음 |
 
 ## Sensor ingress 경계
 
@@ -116,7 +116,7 @@ actual steering을 표현할 메시지로 재사용하지 않았습니다. 외�
 WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
-ManualCommand는 control_selector, E-STOP은 vehicle_interface로 직접 전달합니다.
+ManualCommand는 control_selector로 직접 전달합니다.
 Vehicle Control / Guidance / Tracking은 operation.yaml의 시작 설정이며 별도 모드 요청 토픽은 없습니다.
 Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 요청 토픽은 없습니다.
 어느 것도 ingress나 estimator를 경유하지 않습니다.
@@ -338,15 +338,15 @@ invalid MotionPlan → invalid AutoCommand → selector stop으로 이어집니�
 장애물 검출/관측 만료에 따른 AUTO 정지는 기존 motion_planning에서 처리하며 추가 판단 알고리즘은 없습니다.
 
 control_selector는 mode별 source 선택, source frame/validity/timeout 검사, IDLE 정지를 담당합니다.
-vehicle_interface는 E-STOP, 선택 명령 수신/source timeout, non-finite/음수 속도/제동·속도 모순,
+vehicle_interface는 선택 명령 수신/source timeout, non-finite/제동·속도 모순,
 미검증 운용 한계와 범위 초과를 검사합니다. 범위 초과는 기존처럼 clamp 대신 stop입니다.
-E-STOP true는 explicit false까지 유지됩니다. vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
+vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
 최종 보호 결과는 Vehicle Interface 내부 값과 기존 dry-run 로그로만 남으며 actuator backend는 미구현입니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
 ControlStatus는 선택 명령의 유효성 / freshness / speed / brake와 mode를 기준으로 생성합니다.
 IDLE은 READY, 유효한 주행 명령은 DRIVING, 유효한 정지는 STOPPED, invalid/만료는 FAULT입니다.
-Vehicle Interface의 E-STOP / 범위 초과 / 만료 결과는 이 FSM과 Motion Control의 상태 기반 reset에 되돌리지 않습니다.
+Vehicle Interface의 범위 초과 / 만료 결과는 이 FSM과 Motion Control의 상태 기반 reset에 되돌리지 않습니다.
 Motion Control의 PID 이력·종점 통과 판정은 선택 명령 기준 ControlStatus를 사용합니다.
 
 물리 E-STOP/재시작 latch/인증/하드웨어 watchdog은 미구현입니다. 안전 범위 및 PID gain은 모두 기존 값 그대로입니다.
@@ -661,7 +661,7 @@ ros2 launch control_manager control_manager.xml
 
 하드웨어 없는 검증은 기존 실행 중인 ROS 시스템과 분리된 ROS_DOMAIN_ID / localhost 환경에서 수행합니다.
 `test/smoke_test.py`는 10-node launch의 기본 invalid stop, 생성된 msg, topic 연결,
-GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, E-STOP, 범위/timeout을 검증합니다.
+GNSS 입력/stale, 계획/Pure Pursuit 연결, 모드별 선택, 범위/timeout을 검증합니다.
 테스트 fixture의 센서/명령/limits는 **테스트 전용**이며 runtime perception이 가짜 관측을 생성하지 않습니다.
 실행 절차 및 결과는 아래 검증 기록을 참고합니다.
 

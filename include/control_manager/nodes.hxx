@@ -135,6 +135,5 @@ class VehicleInterfaceNode : public NodeBase {
   core::ActuatorProtectionConfig config_;
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
   std::string frame_;
-  bool estop_{false};
 };
 }  // namespace control_manager

@@ -10,7 +10,6 @@ flowchart TD
   MAN[ManualCommand] -->|manual_cmd: VehicleCommand| CS
   MODE[operation.yaml: mode / 재시작 적용] -.-> CS
   CS -->|selected_cmd: VehicleCommand| VI[vehicle_interface: final actuator protection]
-  ES[E-STOP] --> VI
   VI --> DRY[dry_run: no hardware transmission]
   CS --> ST[status: ControlStatus / FSM]
   ST --> MC
@@ -30,7 +29,6 @@ SelectedCommand는 별도 새 타입을 만들지 않고 `VehicleCommand`를 재
 | 선택 source valid=false | control_selector: zero/brake stop, INVALID_SOURCE_COMMAND |
 | mode 변경 | operation.yaml 수정 후 selector 재시작; 새 source callback 필요 |
 | 선택 명령 수신/source timestamp timeout, frame | vehicle_interface: selector 중단에도 자체 timer로 stop |
-| E-STOP | vehicle_interface: true는 explicit false까지 유지, 모든 mode와 invalid command보다 우선 |
 | NaN/Inf, brake+0이 아닌 속도 | vehicle_interface: INVALID_COMMAND_VALUES stop |
 | 미검증/0 운용 한계 | vehicle_interface: OPERATING_LIMITS_NOT_VERIFIED stop |
 | steering/speed 물리 범위 초과 | vehicle_interface: COMMAND_OUT_OF_RANGE stop; 기존 정책대로 clamp하지 않음 |
@@ -50,7 +48,7 @@ PID / Pure Pursuit 자동 경로 추종은 전진 전용입니다.
 ControlStatus는 mode와 selected_cmd만으로 생성합니다. Vehicle Interface 없이도 발행됩니다.
 IDLE은 READY, valid 주행은 DRIVING, valid 정지는 STOPPED, invalid/만료 명령은 FAULT입니다.
 reason은 선택 결과의 사유이며 header는 상태 발행 시각입니다.
-Vehicle Interface의 E-STOP·범위 초과·만료 판단은 내부 보호와 기존 dry-run 로그로 남습니다.
+Vehicle Interface의 범위 초과·만료 판단은 내부 보호와 기존 dry-run 로그로 남습니다.
 그 결과를 Selector의 FSM이나 Motion Control로 되돌리지 않습니다.
 Motion Control의 PID 이력 및 종점 통과 판정은 선택 명령 기준 FSM으로 동작합니다.
 DRIVING은 명령 상태이며 실측 차량 운동이나 최종 보호 통과를 뜻하지 않습니다.
@@ -75,7 +73,8 @@ manual_cmd 입력 연결은 보류하며 AUTO에서는 수동 입력이 없어�
 두 입력 구독은 유지하며 시간 변환 전에 형식을 검사합니다. 잘못된 수동 timestamp도 AUTO를 중단시키지 않습니다.
 
 유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/selected_cmd`,
-`/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
+`/control/status`, 모든 planning/tracking/state topic과 message.
+`/control/estop` 구독·설정·내부 상태·보호 함수 인자는 제거했습니다. Vehicle Interface 입력은 selected_cmd 하나입니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
 현재 executable 11개 / custom message 10개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
@@ -84,9 +83,9 @@ msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
 ## 검증
 
 `test/command_path_smoke_test.py`는 AUTO/MANUAL 선택·timeout·timestamp 형식/신선도 거부·복구·수동 입력 없는 AUTO·invalid source·IDLE,
-선택 명령 기준 FSM·mode 독립 E-STOP·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
+선택 명령 기준 FSM·제거된 estop 토픽의 publisher/subscriber 부재·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
 최종 보호는 기존 dry-run 로그를 읽어 확인하며 테스트 전용 진단 토픽은 만들지 않습니다.
-GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout/E-STOP과 원본 timestamp 보존을 검증합니다.
+GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout과 원본 timestamp 보존을 검증합니다.
 기존 pipeline/state split/tracking/ingress/estimator smoke는 현재 연결로 갱신합니다.
 실행 방법은 README의 package-only build/test 환경을 사용하며 모든 fixture와 출력은 package 내부입니다.
 

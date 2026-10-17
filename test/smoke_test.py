@@ -18,7 +18,6 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profi
 import yaml
 from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Bool
 from ament_index_python.packages import get_package_prefix
 from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose
 
@@ -159,6 +158,8 @@ def default_stack():
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/mode_request')
+        assert not node.get_subscriptions_info_by_topic('/control/estop')
+        assert not node.get_publishers_info_by_topic('/control/estop')
         assert not node.get_publishers_info_by_topic('/control/guidance_status')
         assert not node.get_publishers_info_by_topic('/control/tracking_status')
         assert not node.get_publishers_info_by_topic('/control/vehicle_interface/status')
@@ -227,7 +228,6 @@ def integrated_fixtures():
     durable = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                          reliability=ReliabilityPolicy.RELIABLE)
     path_pub = node.create_publisher(PathMsg, '/control/global_path', durable)
-    estop_pub = node.create_publisher(Bool, '/control/estop', durable)
     active = {'gnss': True, 'object': True, 'manual': True,
               'gnss_stamp': 'fresh', 'lane': 'absent', 'path': 'valid'}
     manual = VehicleCommand(target_steer_rad=-0.15, target_speed_mps=0.4,
@@ -346,14 +346,7 @@ def integrated_fixtures():
         active['gnss'] = True
         wait_for(node, lambda: bool(values['reference_path'].poses) and values['protected_cmd'].valid,
                  'restore fixture after timeout')
-        for mode in [ControlStatus.AUTO, ControlStatus.MANUAL]:
-            selector.set_mode(mode)
-            estop_pub.publish(Bool(data=True))
-            wait_for(node, lambda: values['protected_cmd'].reason == 'E_STOP' and
-                     values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps == 0.0,
-                     'E-STOP overrides mode ' + str(mode))
-            estop_pub.publish(Bool(data=False))
-            wait_for(node, lambda: values['protected_cmd'].valid, 'explicit E-STOP reset')
+        selector.set_mode('MANUAL')
         manual.target_steer_rad = 0.8
         wait_for(node, lambda: values['protected_cmd'].reason == 'COMMAND_OUT_OF_RANGE', 'steering range stop')
         manual.target_steer_rad = float('nan')

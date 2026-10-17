@@ -3,7 +3,7 @@
 namespace control_manager {
 SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
   // Single ingress for real-time external observations and actual vehicle feedback.
-  // Map/Path, operator/manual commands and E-STOP have separate owners.
+  // Map/Path and operator/manual commands have separate owners.
   if (enabled("gnss_enabled", true)) relay<nav_msgs::msg::Odometry>("gnss", "sensor_gnss");
   if (enabled("rgb_enabled", true)) relay<sensor_msgs::msg::Image>("rgb", "sensor_rgb");
   if (enabled("lidar_enabled", true)) relay<sensor_msgs::msg::PointCloud2>("lidar", "sensor_lidar");

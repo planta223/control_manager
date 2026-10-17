@@ -45,7 +45,6 @@
       guidance_status: /control/guidance_status
       tracking_mode_request: /control/tracking_mode_request
       tracking_status: /control/tracking_status
-      estop: /control/estop
 /control/sensor_interface:
   ros__parameters:
     # input_timeout_s: common source-age admission policy. Lane confidence threshold

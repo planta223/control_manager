@@ -9,10 +9,6 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   config_.operating_limits_verified = param<bool>("operating_limits_verified", false);
   config_.limits = vehicleLimits();
   selected_ = input<msg::VehicleCommand>("selected_cmd");
-  subscriptions_.push_back(create_subscription<std_msgs::msg::Bool>(topic("estop"),
-    rclcpp::QoS(1).reliable().transient_local(), [this](std_msgs::msg::Bool::ConstSharedPtr value) {
-      estop_ = value->data;  // Latches true until explicit false, independent of mode/source.
-    }));
   RCLCPP_INFO(get_logger(), "[DRY_RUN] actuator protection active; no actuator socket or UDP sender exists");
   tick([this] { update(); });
 }
@@ -21,7 +17,7 @@ void VehicleInterfaceNode::update() {
   if (current(selected_, config_.command_timeout_s) && selected_->value->header.frame_id == frame_)
     command = toCore(*selected_->value);
   const auto protected_command = core::protectActuatorCommand(
-    command, estop_, now().nanoseconds(), config_);
+    command, now().nanoseconds(), config_);
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
     "[DRY_RUN] steer=%.4f rad speed=%.3f m/s brake=%d valid=%d reason=%s",
     protected_command.target_steer_rad, protected_command.target_speed_mps,

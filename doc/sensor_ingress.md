@@ -90,7 +90,6 @@ vehicle_feedback_enabled=true일 때만 unavailable heartbeat를 발행하고 WH
 - Vehicle Control request: operator command → control_selector.
 - Guidance/Tracking mode: operation.yaml의 시작 설정이며 변경 후 재시작.
 - ManualCommand: command path → control_selector.
-- E-STOP: safety event → vehicle_interface.
 
 ## 10. Custom message
 
