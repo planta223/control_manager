@@ -149,8 +149,8 @@ def run():
         values.pop('auto_cmd', None)
         controller = start_controller(mode)
         wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and
-                 not values['auto_cmd'].target_brake and values['protected_cmd'].valid and
-                 not values['protected_cmd'].target_brake,
+                 not values['auto_cmd'].target_brake and values['selected_cmd'].valid and
+                 not values['selected_cmd'].target_brake,
                  'restarted '+mode+' command path discovered before PID accumulation')
         active['control_stamp'] = saved_control_stamp
 
@@ -164,17 +164,17 @@ def run():
     def auto_pid():
         return ('auto_cmd' in values and values['auto_cmd'].valid and
                 values['auto_cmd'].reason in ('PID_ACTIVE', 'PID_PREVIEW_STATE_RESET') and
-                'protected_cmd' in values and values['protected_cmd'].valid and
-                values['protected_cmd'].target_speed_mps == 1.)
+                'selected_cmd' in values and values['selected_cmd'].valid and
+                values['selected_cmd'].target_speed_mps == 1.)
 
     def invalid():
         return ('auto_cmd' in values and not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
-                'protected_cmd' in values and not values['protected_cmd'].valid and values['protected_cmd'].target_brake)
+                'selected_cmd' in values and not values['selected_cmd'].valid and values['selected_cmd'].target_brake)
 
     def wait_reset(label, expected=0.2):
         stamp=values['auto_cmd'].header.stamp
         after=(stamp.sec,stamp.nanosec)
-        # The single zero-I output can arrive before Vehicle Interface recovers.
+        # The single zero-I output can arrive before Selector recovers.
         # Inspect received source samples instead of only the latest overwritten value.
         wait_for(node, lambda: auto_pid() and any(
             (msg.header.stamp.sec,msg.header.stamp.nanosec)>after and msg.valid and
@@ -265,7 +265,7 @@ def run():
                     assert controller.process.poll() is None
                     active[key]='good'
                     wait_for(node, lambda: values['auto_cmd'].valid and
-                             not values['auto_cmd'].target_brake and values['protected_cmd'].valid,
+                             not values['auto_cmd'].target_brake and values['selected_cmd'].valid,
                              mode+' timestamp recovery without node restart: '+key)
         restart_controller('PID')
         wait_reset('PID restart after malformed timestamp checks')
@@ -305,12 +305,12 @@ def run():
                      mode+' MANUAL preview does not latch AUTO completion')
             selector.set_mode('AUTO')
             wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
-                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     values['selected_cmd'].valid and not values['selected_cmd'].target_brake,
                      mode+' AUTO run selected')
             spin_for(0.2)
             active['state_x']=19.8
-            wait_for(node, lambda: command_reason('GOAL_REACHED') and values['protected_cmd'].valid and
-                     values['protected_cmd'].target_brake, mode+' AUTO arrival completes run')
+            wait_for(node, lambda: command_reason('GOAL_REACHED') and values['selected_cmd'].valid and
+                     values['selected_cmd'].target_brake, mode+' AUTO arrival completes run')
 
             def stays_completed(label, seconds=0.3):
                 spin_for(seconds)
@@ -327,23 +327,23 @@ def run():
             stays_completed('path replacement')
             selector.set_mode('MANUAL')
             wait_for(node, lambda: values['status'].mode==ControlStatus.MANUAL and
-                     values['protected_cmd'].target_speed_mps==0.4,
+                     values['selected_cmd'].target_speed_mps==0.4,
                      mode+' explicit MANUAL remains independent after completion')
             selector.set_mode('AUTO')
             wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
-                     values['protected_cmd'].valid and values['protected_cmd'].target_brake,
+                     values['selected_cmd'].valid and values['selected_cmd'].target_brake,
                      mode+' returning to AUTO retains completed stop')
             stays_completed('mode changes')
             restart_controller(mode)
             wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
-                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     values['selected_cmd'].valid and not values['selected_cmd'].target_brake,
                      mode+' explicit node restart permits a new run')
             active.update(state_x=20.35,state_y=0.0,y=0.0)
             wait_for(node,lambda: not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
                      not command_reason('GOAL_REACHED'),mode+' behind endpoint without approach is not completion')
             active['state_x']=19.6
             wait_for(node,lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
-                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     values['selected_cmd'].valid and not values['selected_cmd'].target_brake,
                      mode+' approaching dense route endpoint')
             spin_for(0.3)
             active.update(state_x=20.35,state_y=0.31)
@@ -351,12 +351,12 @@ def run():
                      not command_reason('GOAL_REACHED'),mode+' passage outside endpoint corridor does not finish')
             active.update(state_x=19.6,state_y=0.0)
             wait_for(node,lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
-                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     values['selected_cmd'].valid and not values['selected_cmd'].target_brake,
                      mode+' valid endpoint approach recovers')
             spin_for(0.3)
             active['state_x']=20.35
-            wait_for(node,lambda: command_reason('GOAL_REACHED') and values['protected_cmd'].valid and
-                     values['protected_cmd'].target_brake,mode+' skipped arrival radius completes on endpoint passage')
+            wait_for(node,lambda: command_reason('GOAL_REACHED') and values['selected_cmd'].valid and
+                     values['selected_cmd'].target_brake,mode+' skipped arrival radius completes on endpoint passage')
             active['state_x']=19.6
             stays_completed('position jitter after endpoint passage')
         print('ALL TRACKING SMOKE CHECKS PASSED',flush=True)

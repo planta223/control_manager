@@ -8,7 +8,7 @@ from std_msgs.msg import Bool, UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
 from control_manager.msg import VehicleCommand, ControlStatus
-from smoke_test import SelectorFixture, observe, wait_for
+from smoke_test import SelectorFixture, observe, wait_for, watch_protection_log
 from state_split_smoke_test import start, settle
 
 
@@ -51,11 +51,15 @@ def run():
             if kind=='wrong_frame': c.header.frame_id='map'
             pubs['selected_cmd'].publish(c)
     timer=node.create_timer(.05,publish)
+    selector=SelectorFixture(node,values,label='command_selector')
+    wait_for(node,lambda: values['status'].fsm_state==ControlStatus.READY and
+             values.get('selected_cmd') is not None and values['selected_cmd'].reason=='IDLE',
+             'selector reports selected-command status without a Vehicle Interface')
     interface=start('vehicle_interface','command_interface','operating_limits_verified:=true',
                     'vehicle.limits.min_steering_deg:='+str(-math.degrees(0.5)),
                     'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
                     'vehicle.limits.min_speed_kph:=-7.2', 'vehicle.limits.max_speed_kph:=7.2')
-    selector=SelectorFixture(node,values,label='command_selector')
+    protection_probe=watch_protection_log(node,values,interface)
     def safe():
         c=values.get('protected_cmd')
         return c is not None and not c.valid and c.target_brake and c.target_speed_mps==0 and c.target_steer_rad==0
@@ -64,6 +68,9 @@ def run():
         wait_for(node,lambda:'status' in values and values['status'].mode==mode and
                  values.get('protected_cmd') is not None and values['protected_cmd'].valid and
                  values['protected_cmd'].target_speed_mps==speed,'mode selection '+str(mode))
+        expected=ControlStatus.READY if mode==ControlStatus.IDLE else ControlStatus.DRIVING
+        wait_for(node,lambda: values['status'].fsm_state==expected and
+                 values['status'].reason==values['selected_cmd'].reason,'FSM describes selected command')
     try:
         wait_for(node,lambda:'protected_cmd' in values and values['protected_cmd'].reason=='IDLE' and
                  values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps==0,
@@ -88,19 +95,22 @@ def run():
             active[key]=False
             wait_for(node,lambda:safe() and values['selected_cmd'].reason=='SOURCE_UNAVAILABLE',
                      key+' timeout stops despite other fresh source')
+            assert values['status'].fsm_state==ControlStatus.FAULT
             active[key]=True
             wait_for(node,lambda:values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==speed,
                      key+' source recovers')
         active['invalid_manual']=True
         wait_for(node,lambda:safe() and values['selected_cmd'].reason=='INVALID_SOURCE_COMMAND',
                  'invalid manual source is neutralized, no AUTO fallback')
+        assert values['status'].fsm_state==ControlStatus.FAULT
         active['invalid_manual']=False
         wait_for(node,lambda:values['protected_cmd'].valid,'valid manual source recovers')
         for mode,speed in [(ControlStatus.AUTO,.8),(ControlStatus.MANUAL,.4),(ControlStatus.IDLE,0.)]:
             choose(mode,speed)
             estop.publish(Bool(data=True))
+            expected_fsm=ControlStatus.READY if mode==ControlStatus.IDLE else ControlStatus.DRIVING
             wait_for(node,lambda:safe() and values['protected_cmd'].reason=='E_STOP' and
-                     values['status'].fsm_state==ControlStatus.FAULT,'E-STOP overrides mode '+str(mode))
+                     values['status'].fsm_state==expected_fsm,'E-STOP protects independently of selector mode '+str(mode))
             settle(node,.7)
             assert values['protected_cmd'].reason=='E_STOP'
             estop.publish(Bool(data=False))
@@ -108,10 +118,11 @@ def run():
         for topic in ['global_pose','motion_state','guidance_status','object_state']:
             assert not {i.node_name for i in node.get_subscriptions_info_by_topic('/control/'+topic)} & {
                 'control_selector','vehicle_interface'}
-        assert values['vehicle_interface_status'].dry_run
+        assert not node.get_publishers_info_by_topic('/control/vehicle_interface/status')
+        assert not node.get_subscriptions_info_by_topic('/control/vehicle_interface/status')
         assert {i.node_name for i in node.get_subscriptions_info_by_topic('/control/selected_cmd')
                 if i.node_namespace=='/control'}=={'vehicle_interface'}
-        print('PASS: direct command path, no state/object dependencies, diagnostics are dry-run only',flush=True)
+        print('PASS: direct command path, no state/object dependencies or Vehicle Interface status topic',flush=True)
         selector.close(); selector=None
         wait_for(node,safe,'selector shutdown expires at vehicle interface')
         active['direct']=True
@@ -139,7 +150,7 @@ def run():
         print('ALL COMMAND PATH SMOKE CHECKS PASSED',flush=True)
     finally:
         if selector is not None: selector.close()
-        interface.close(); node.destroy_timer(timer); node.destroy_node()
+        interface.close(); node.destroy_timer(protection_probe); node.destroy_timer(timer); node.destroy_node()
 
 
 if __name__=='__main__':

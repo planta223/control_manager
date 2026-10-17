@@ -11,7 +11,7 @@ from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from control_manager.msg import (GlobalPose, MotionState, LanePose,
                                  MissionLimit, ObjectState, VehicleCommand, MotionPlan)
-from smoke_test import ROOT, Stack, observe, wait_for
+from smoke_test import ROOT, Stack, observe, wait_for, watch_protection_log
 
 
 def start(executable, label, *params):
@@ -232,6 +232,7 @@ def downstream():
                     'vehicle.limits.min_steering_deg:='+str(-math.degrees(0.5)),
                     'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
                     'vehicle.limits.min_speed_kph:=-3.6', 'vehicle.limits.max_speed_kph:=3.6')]
+    protection_probe=watch_protection_log(node,values,stacks[-1])
     try:
         wait_for(node, lambda: 'motion_plan' in values and values['motion_plan'].valid and
                  values['motion_plan'].header.frame_id == 'base_link',
@@ -257,7 +258,7 @@ def downstream():
         print('PASS: actuator boundary has no state/guidance/object subscriptions',flush=True)
     finally:
         for stack in stacks: stack.close()
-        node.destroy_timer(timer); node.destroy_node()
+        node.destroy_timer(protection_probe); node.destroy_timer(timer); node.destroy_node()
 
 
 if __name__ == '__main__':

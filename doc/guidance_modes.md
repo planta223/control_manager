@@ -187,12 +187,10 @@ flowchart LR
   LN[lane_pose] --> UI
   RP[reference_path] --> UI
   OS[object_state] --> UI
-  VS[vehicle_interface/status: 보호 결과 진단] --> UI
   RX[sensors topics: 수신 age] --> UI
   CFG[operation.yaml: 모드 / optional sensor 활성 설정] -.-> UI
   UI -->|estop Bool: true 요청| VI[vehicle_interface dry_run]
   CM -->|selected_cmd| VI
-  VI --> VS
 ```
 
 `/control/status`는 유지하며 `/control/mode_request` 구독은 제거했습니다.

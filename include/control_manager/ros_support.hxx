@@ -18,7 +18,6 @@
 #include "control_manager/msg/global_pose.hpp"
 #include "control_manager/msg/motion_state.hpp"
 #include "control_manager/msg/vehicle_feedback.hpp"
-#include "control_manager/msg/vehicle_interface_status.hpp"
 #include "control_manager/msg/lane_pose.hpp"
 #include "control_manager/msg/object_state.hpp"
 #include "control_manager/msg/mission_limit.hpp"
@@ -46,7 +45,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"mission_map", "/control/mission_map"},
   {"motion_plan", "/control/motion_plan"}, {"auto_cmd", "/control/auto_cmd"},
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
-  {"vehicle_interface_status", "/control/vehicle_interface/status"}, {"status", "/control/status"},
+  {"status", "/control/status"},
   {"estop", "/control/estop"},
 };
 template<class T> struct Input {

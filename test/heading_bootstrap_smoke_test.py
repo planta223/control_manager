@@ -82,7 +82,7 @@ def run():
         state['path'] = True
         wait_for(node,lambda: auto('HEADING_BOOTSTRAP_ACTIVE') and values['auto_cmd'].valid and
                  values['auto_cmd'].target_steer_rad==0.0 and values['auto_cmd'].target_speed_mps>0 and
-                 values['protected_cmd'].valid,'bounded straight startup reaches protected command')
+                 values['selected_cmd'].valid,'bounded straight startup reaches selected command')
         wait_for(node,lambda: auto('HEADING_BOOTSTRAP_TIMEOUT') and
                  not values['auto_cmd'].valid and values['auto_cmd'].target_brake,
                  'heading startup expires without stopping the node')

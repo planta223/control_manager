@@ -160,7 +160,7 @@ void MotionControlNode::update() {
     goal_approach_seen_=false;
   }
   previous_path_ = path;
-  // During tracking, arbitration status controls PID history; mode/safety stay with their owners.
+  // Selected-command status controls PID history and end passage; final protection stays in Vehicle Interface.
   // P-only preview during IDLE/MANUAL/FAULT permits existing startup/recovery flow
   // without accumulating windup or a circular FAULT -> invalid AUTO -> FAULT latch.
   const bool accumulate_pid = current_input(control_status_) &&

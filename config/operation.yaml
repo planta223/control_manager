@@ -107,7 +107,7 @@
 
 /control/control_selector:
   ros__parameters:
-    # Control Selector 구독: auto_cmd / manual_cmd / vehicle_interface_status.
+    # Control Selector 구독: auto_cmd / manual_cmd.
     # Control Selector 발행: selected_cmd / status 항상 발행.
     # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     mode: IDLE                      # IDLE / MANUAL / AUTO
@@ -115,7 +115,7 @@
 /control/vehicle_interface:
   ros__parameters:
     # Vehicle Interface 구독: selected_cmd / estop 항상 유지 (보호 입력 비활성화 없음).
-    # Vehicle Interface 발행: vehicle_interface_status 항상 발행, actuator 송신 미구현.
+    # Vehicle Interface 발행 토픽 없음; 최종 보호 결과는 내부 처리 / dry-run 로그, actuator 송신 미구현.
     # 최종 보호·운용 한계 설정
     dry_run: true                   # false rejected: no UDP backend implemented
     operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.

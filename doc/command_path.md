@@ -12,7 +12,6 @@ flowchart TD
   CS -->|selected_cmd: VehicleCommand| VI[vehicle_interface: final actuator protection]
   ES[E-STOP] --> VI
   VI --> DRY[dry_run: no hardware transmission]
-  VI -.->|vehicle_interface/status: diagnostic only| CS
   CS --> ST[status: ControlStatus / FSM]
   ST --> MC
 ```
@@ -46,18 +45,15 @@ Motion Control은 vehicle.yaml의 조향 범위와 전진 속도 상한으로 AU
 Vehicle Interface는 같은 범위를 사용하며, 범위 내 음수 속도 명령도 허용합니다.
 PID / Pure Pursuit 자동 경로 추종은 전진 전용입니다.
 
-## 진단과 FSM
+## 선택 명령 기준 FSM
 
-`/control/vehicle_interface/status` (`VehicleInterfaceStatus`) 필드:
-
-- `header`: 진단 발행 시각과 base frame.
-- `dry_run`: 항상 true. 실제 차량 feedback이나 송신 성공을 뜻하지 않음.
-- `protected_command`: 최종 보호 결과. 정상 명령의 source stamp는 보존하며, stop은 판단 시각을 사용.
-
-control_selector는 이 진단을 **FSM 관찰에만** 사용합니다. 명령 source 선택은 영향을 받지 않습니다.
-따라서 기존 final-protection 기반 FAULT와 PID의 FAULT reset/preview 동작을 유지합니다.
-진단 중단/만료 시 FSM은 FAULT이며 해당 진단이 새 actuator command로 재입력되지는 않습니다.
-DRIVING은 여전히 명령 상태이며 실측 차량 운동을 뜻하지 않습니다.
+ControlStatus는 mode와 selected_cmd만으로 생성합니다. Vehicle Interface 없이도 발행됩니다.
+IDLE은 READY, valid 주행은 DRIVING, valid 정지는 STOPPED, invalid/만료 명령은 FAULT입니다.
+reason은 선택 결과의 사유이며 header는 상태 발행 시각입니다.
+Vehicle Interface의 E-STOP·범위 초과·만료 판단은 내부 보호와 기존 dry-run 로그로 남습니다.
+그 결과를 Selector의 FSM이나 Motion Control로 되돌리지 않습니다.
+Motion Control의 PID 이력 및 종점 통과 판정은 선택 명령 기준 FSM으로 동작합니다.
+DRIVING은 명령 상태이며 실측 차량 운동이나 최종 보호 통과를 뜻하지 않습니다.
 
 ## Breaking changes / 제거 항목
 
@@ -77,14 +73,16 @@ read-only mode 변경은 selector 재시작으로 적용합니다. 시작값 오
 
 유지: `/control/auto_cmd`, `/control/manual_cmd`, `/control/selected_cmd`,
 `/control/status`, `/control/estop`, 모든 planning/tracking/state topic과 message.
-추가: `/control/vehicle_interface/status` 진단 토픽과 `VehicleInterfaceStatus.msg`.
-현재 executable 11개 / custom message 11개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
+`/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
+msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
+현재 executable 11개 / custom message 10개 (지도 파일 제공자 포함). `dry_run=true`, PID 비활성/0 gain 유지.
 역사적 원문 `doc/2_셋업프롬프트.txt`는 현행 launch/config 지시가 아닙니다.
 
 ## 검증
 
 `test/command_path_smoke_test.py`는 AUTO/MANUAL 선택·timeout·invalid source·IDLE,
-mode 독립 E-STOP/FSM·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
+선택 명령 기준 FSM·mode 독립 E-STOP·selector 종료·직접 주입한 비정상 SelectedCommand·범위 초과를 검증합니다.
+최종 보호는 기존 dry-run 로그를 읽어 확인하며 테스트 전용 진단 토픽은 만들지 않습니다.
 GTest는 최종 보호의 NaN/Inf/후진 범위/제동 모순/한계/timeout/E-STOP과 원본 timestamp 보존을 검증합니다.
 기존 pipeline/state split/tracking/ingress/estimator smoke는 현재 연결로 갱신합니다.
 실행 방법은 README의 package-only build/test 환경을 사용하며 모든 fixture와 출력은 package 내부입니다.

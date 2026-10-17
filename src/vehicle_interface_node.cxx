@@ -9,7 +9,6 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   config_.operating_limits_verified = param<bool>("operating_limits_verified", false);
   config_.limits = vehicleLimits();
   selected_ = input<msg::VehicleCommand>("selected_cmd");
-  status_publisher_ = output<msg::VehicleInterfaceStatus>("vehicle_interface_status");
   subscriptions_.push_back(create_subscription<std_msgs::msg::Bool>(topic("estop"),
     rclcpp::QoS(1).reliable().transient_local(), [this](std_msgs::msg::Bool::ConstSharedPtr value) {
       estop_ = value->data;  // Latches true until explicit false, independent of mode/source.
@@ -23,11 +22,6 @@ void VehicleInterfaceNode::update() {
     command = toCore(*selected_->value);
   const auto protected_command = core::protectActuatorCommand(
     command, estop_, now().nanoseconds(), config_);
-  msg::VehicleInterfaceStatus status;
-  status.header = header(frame_);
-  status.dry_run = true;
-  status.protected_command = toRos(protected_command, frame_);
-  status_publisher_->publish(status);  // Diagnostic only, never an actuator command topic.
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
     "[DRY_RUN] steer=%.4f rad speed=%.3f m/s brake=%d valid=%d reason=%s",
     protected_command.target_steer_rad, protected_command.target_speed_mps,

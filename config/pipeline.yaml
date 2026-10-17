@@ -64,8 +64,6 @@
       selected_cmd: /control/selected_cmd
       status: /control/status
 
-      # Vehicle Interface 발행 토픽 (/control/vehicle_interface), 최종 보호 결과 진단
-      vehicle_interface_status: /control/vehicle_interface/status
 /control/global_path_provider:
   ros__parameters:
     # 외부 파일 입력: gps-final-map v1, 후륜축 중심 경로. 프로젝트/배경 지도 JSON은 불가.

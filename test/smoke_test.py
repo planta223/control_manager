@@ -6,6 +6,7 @@ All generated files/logs are confined to control_manager/log.
 import copy
 import math
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -19,7 +20,7 @@ from nav_msgs.msg import Odometry, Path as PathMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool
 from ament_index_python.packages import get_package_prefix
-from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose, VehicleInterfaceStatus
+from control_manager.msg import GlobalPose, MotionState, VehicleCommand, ObjectState, MotionPlan, ControlStatus, LanePose
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / 'log'
@@ -109,21 +110,37 @@ def observe(node, auto_history=None):
             values[key]=msg
             if key=='auto_cmd' and auto_history is not None: auto_history.append(msg)
         node.create_subscription(cls, '/control/' + topic, receive, 10)
-    node.create_subscription(VehicleInterfaceStatus, '/control/vehicle_interface/status',
-        lambda msg: (values.__setitem__('vehicle_interface_status', msg),
-                     values.__setitem__('protected_cmd', msg.protected_command)), 10)
     return values
+
+
+def watch_protection_log(node, values, stack):
+    """Inspect existing dry-run output for protection tests without a ROS status topic."""
+    pattern=re.compile(r'\[DRY_RUN\] steer=(\S+) rad speed=(\S+) m/s brake=(\d) valid=(\d) reason=([\w:]*)')
+    previous=[0]
+    def read():
+        output=Path(stack.log.name).read_text(errors='replace')
+        if len(output)==previous[0]: return
+        previous[0]=len(output)
+        matches=list(pattern.finditer(output))
+        if not matches: return
+        steer,speed,brake,valid,reason=matches[-1].groups()
+        values['protected_cmd']=VehicleCommand(target_steer_rad=float(steer),target_speed_mps=float(speed),
+            target_brake=brake=='1',valid=valid=='1',reason=reason)
+    return node.create_timer(0.1,read)
 
 
 def default_stack():
     node = rclpy.create_node('default_contract_test')
     values = observe(node)
     stack = Stack(['ros2', 'launch', 'control_manager', 'control_manager.xml'], 'smoke_default')
+    protection_probe=watch_protection_log(node,values,stack)
     try:
         wait_for(node, lambda: len([n for n, ns in node.get_node_names_and_namespaces()
                                    if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
+        wait_for(node, lambda: values['protected_cmd'].valid and values['protected_cmd'].reason=='IDLE',
+                 'dry-run log confirms IDLE protection after source discovery')
         assert values['status'].mode == ControlStatus.IDLE
         assert values['protected_cmd'].valid and values['protected_cmd'].target_brake
         assert values['protected_cmd'].reason == 'IDLE'
@@ -135,16 +152,19 @@ def default_stack():
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',
                     'reference_path', 'motion_plan', 'auto_cmd', 'manual_cmd',
-                    'selected_cmd', 'vehicle_interface/status', 'status']}
+                    'selected_cmd', 'status']}
         assert required <= {name for name, _ in node.get_topic_names_and_types()}
         assert not node.get_subscriptions_info_by_topic('/control/guidance_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/tracking_mode_request')
         assert not node.get_subscriptions_info_by_topic('/control/mode_request')
         assert not node.get_publishers_info_by_topic('/control/guidance_status')
         assert not node.get_publishers_info_by_topic('/control/tracking_status')
+        assert not node.get_publishers_info_by_topic('/control/vehicle_interface/status')
+        assert not node.get_subscriptions_info_by_topic('/control/vehicle_interface/status')
         print('PASS: required topic graph contracts', flush=True)
     finally:
         stack.close()
+        node.destroy_timer(protection_probe)
         node.destroy_node()
 
 
@@ -266,6 +286,7 @@ def integrated_fixtures():
                    'mission_file:=' + str(fixture_mission)],
                   'smoke_integration')
     selector = SelectorFixture(node,values,fixture_config,'pipeline_selector')
+    protection_probe=watch_protection_log(node,values,stack)
     try:
         wait_for(node, lambda: 'global_pose' in values and values['global_pose'].valid,
                  'GNSS relay and covariance/pose adapter')
@@ -361,6 +382,7 @@ def integrated_fixtures():
     finally:
         selector.close()
         stack.close()
+        node.destroy_timer(protection_probe)
         node.destroy_timer(timer)
         node.destroy_node()
 

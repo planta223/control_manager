@@ -9,7 +9,6 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   timeout_s_ = positive("command_timeout_s", 0.5);
   manual_ = input<msg::VehicleCommand>("manual_cmd");
   auto_ = input<msg::VehicleCommand>("auto_cmd");
-  interface_status_ = input<msg::VehicleInterfaceStatus>("vehicle_interface_status");
   selected_publisher_ = output<msg::VehicleCommand>("selected_cmd");
   status_publisher_ = output<msg::ControlStatus>("status");
   tick([this] { update(); });
@@ -27,16 +26,10 @@ void ControlSelectorNode::update() {
   msg::ControlStatus status;
   status.header = header(frame_);
   status.mode = static_cast<std::uint8_t>(mode_);
-  const auto final = interface_status_->value
-    ? toCore(interface_status_->value->protected_command) : core::Command{};
-  const bool protection_fresh = current(interface_status_, timeout_s_) &&
-    interface_status_->value->header.frame_id == frame_ &&
-    interface_status_->value->protected_command.header.frame_id == frame_ &&
-    core::fresh(final.timestamp_ns, now().nanoseconds(), timeout_s_);
+  // This FSM describes selection only; final actuator protection belongs to Vehicle Interface.
   status.fsm_state = static_cast<std::uint8_t>(core::fsmState(
-    static_cast<bool>(interface_status_->value), protection_fresh, final, mode_));
-  status.reason = !interface_status_->value ? "WAITING_FOR_VEHICLE_INTERFACE" :
-    (!protection_fresh ? "VEHICLE_INTERFACE_STATUS_STALE" : final.reason);
+    true, core::fresh(selected.timestamp_ns, now().nanoseconds(), timeout_s_), selected, mode_));
+  status.reason = selected.reason;
   status_publisher_->publish(status);
 }
 }  // namespace control_manager

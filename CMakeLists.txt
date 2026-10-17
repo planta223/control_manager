@@ -16,7 +16,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MissionMap.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
-  "msg/VehicleFeedback.msg" "msg/VehicleInterfaceStatus.msg"
+  "msg/VehicleFeedback.msg"
   DEPENDENCIES std_msgs nav_msgs)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 

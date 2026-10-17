@@ -62,8 +62,8 @@ Guidance와 각 state source mode는 별개입니다. Map/command/E-STOP은 ingr
 | mission_based_limit_node | mission 활성 시 optional object_state; 구간 정책 활성 시 global_pose + mission_map | mission_limit; 구간 속도 상한·마진·정지·불확실성 판단 |
 | motion_planning_node | reference_path, motion_state; 활성화한 object_state/mission_limit만 | motion_plan; 활성 제한·장애물 검사, 비활성은 reason에 표시 |
 | motion_control_node | global_pose, motion_state, motion_plan, status | auto_cmd만 발행; PID/PP, speed pass-through |
-| control_selector_node | auto_cmd, manual_cmd; vehicle_interface_status는 FSM 관찰용 | selected_cmd, status; arbitration/FSM |
-| vehicle_interface_node | selected_cmd, estop | vehicle_interface/status; 최종 명령 보호와 dry-run 진단, actuator 송신 없음 |
+| control_selector_node | auto_cmd, manual_cmd | selected_cmd, status; 선택 명령 기준 arbitration/FSM |
+| vehicle_interface_node | selected_cmd, estop | 발행 토픽 없음; 최종 명령 보호와 dry-run 로그, actuator 송신 없음 |
 
 ## Sensor ingress 경계
 
@@ -149,9 +149,8 @@ Guidance는 operation.yaml의 guidance_mode로 시작 시 고정하며 별도 �
   비기하학적 MissionLimit의 기존 map Header 계약은 유지합니다.
 - **VehicleCommand**: 좌측 양수 `target_steer_rad`, 전진 `target_speed_mps`, bool brake, valid, reason.
   내부 물리 단위이며 motor raw/normalized joystick/실제 feedback과 다릅니다.
-- **VehicleInterfaceStatus**: Header, dry_run, protected_command. 최종 보호 결과의 진단 전용이며
-  실제 feedback이나 actuator 입력이 아닙니다. protected_command는 VehicleCommand 타입을 재사용합니다.
-- **ControlStatus**: 차량 제어 모드/FSM. Motion Control의 PID 이력 관리에 사용합니다.
+- **ControlStatus**: 차량 제어 모드 / 선택 명령 기준 FSM. Motion Control의 PID 이력·종점 통과 판정에 사용합니다.
+  Vehicle Interface 보호 결과나 실측 운동 상태를 뜻하지 않습니다.
 
 GlobalPose와 MotionState는 독립 C++ core type도 제공합니다. ROS VehicleState/msg/topic은 제거했습니다.
 `TrackingState`는 기존 PID/PP 호출 직전에만 만드는 **알고리즘 인자**입니다. estimator output이나
@@ -341,14 +340,17 @@ control_selector는 mode별 source 선택, source frame/validity/timeout 검사,
 vehicle_interface는 E-STOP, 선택 명령 수신/source timeout, non-finite/음수 속도/제동·속도 모순,
 미검증 운용 한계와 범위 초과를 검사합니다. 범위 초과는 기존처럼 clamp 대신 stop입니다.
 E-STOP true는 explicit false까지 유지됩니다. vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
-최종 보호 결과는 내부 값이며 actuator backend는 미구현입니다. `/control/vehicle_interface/status`는
-`VehicleInterfaceStatus` 진단 전용으로 dry_run과 protected_command를 표시합니다. 실제 feedback이 아닙니다.
-control_selector는 이 진단을 FSM에만 사용하고 source 선택에는 사용하지 않습니다. 기존 final-protection 기반
-FAULT/READY/DRIVING 관찰 및 PID reset 계약을 유지합니다. 진단 중단은 FSM FAULT이며 actuator 입력 경로가 되지 않습니다.
+최종 보호 결과는 Vehicle Interface 내부 값과 기존 dry-run 로그로만 남으며 actuator backend는 미구현입니다.
+`/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
+msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
+ControlStatus는 선택 명령의 유효성 / freshness / speed / brake와 mode를 기준으로 생성합니다.
+IDLE은 READY, 유효한 주행 명령은 DRIVING, 유효한 정지는 STOPPED, invalid/만료는 FAULT입니다.
+Vehicle Interface의 E-STOP / 범위 초과 / 만료 결과는 이 FSM과 Motion Control의 상태 기반 reset에 되돌리지 않습니다.
+Motion Control의 PID 이력·종점 통과 판정은 선택 명령 기준 ControlStatus를 사용합니다.
 
 물리 E-STOP/재시작 latch/인증/하드웨어 watchdog은 미구현입니다. 안전 범위 및 PID gain은 모두 기존 값 그대로입니다.
 
-AUTO는 auto_cmd만, MANUAL은 manual_cmd만 선택합니다. invalid ControlMode 요청은 IDLE입니다.
+AUTO는 auto_cmd만, MANUAL은 manual_cmd만 선택합니다. operation.yaml의 잘못된 mode는 시작 오류입니다.
 FSM INIT/READY/DRIVING/STOPPED/FAULT는 그대로이며 DRIVING은 명령 단계이지 actual motion feedback이 아닙니다.
 RGB는 traffic light/sign/Lane 입력용이며 실제 recognition은 없습니다. IMU/Depth는 config opt-in이고 runtime toggle은 없습니다.
 Pure Pursuit는 GNSS 패키지 책임이 아니라 Motion Control 내부 lateral controller입니다.

@@ -134,7 +134,6 @@ class VehicleInterfaceNode : public NodeBase {
   void update();
   core::ActuatorProtectionConfig config_;
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
-  rclcpp::Publisher<msg::VehicleInterfaceStatus>::SharedPtr status_publisher_;
   std::string frame_;
   bool estop_{false};
 };
