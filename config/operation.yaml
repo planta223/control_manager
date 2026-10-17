@@ -110,7 +110,7 @@
     # Control Selector 구독: auto_cmd / manual_cmd.
     # Control Selector 발행: selected_cmd / status 항상 발행.
     # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
-    mode: IDLE                      # IDLE / MANUAL / AUTO
+    mode: AUTO                      # IDLE / MANUAL / AUTO
     
 /control/vehicle_interface:
   ros__parameters:

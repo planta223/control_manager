@@ -1,4 +1,5 @@
 #include "control_manager/control_selector_node.hxx"
+#include "control_manager/ingress.hxx"
 namespace control_manager {
 ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   const auto mode = param<std::string>("mode", "IDLE");
@@ -15,7 +16,8 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
 }
 void ControlSelectorNode::update() {
   auto read = [this](const std::shared_ptr<Input<msg::VehicleCommand>> &in) {
-    if (!current(in, timeout_s_) || in->value->header.frame_id != frame_)
+    if (!in || !in->value || !ingress::validStampFormat(in->value->header.stamp) ||
+        !current(in, timeout_s_) || in->value->header.frame_id != frame_)
       return core::stop(now().nanoseconds(), "SOURCE_UNAVAILABLE");
     if (!in->value->valid)
       return core::stop(now().nanoseconds(), "INVALID_SOURCE_COMMAND");

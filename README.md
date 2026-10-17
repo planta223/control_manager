@@ -1,7 +1,8 @@
 # control_manager
 
 ROS 2 Humble / C++17 / ament_cmake, `.cxx` / `.hxx`, XML launch 기반 상위제어 skeleton입니다.
-**실차 주행 준비 완료를 뜻하지 않습니다.** 기본 IDLE, PID disabled/zero gains, 미확정 운용 한계는 0,
+**실차 주행 준비 완료를 뜻하지 않습니다.** operation.yaml은 GNSS 테스트용 AUTO이며 YAML 없이 실행하면 IDLE입니다.
+PID disabled/zero gains, 미확정 운용 한계는 0,
 `dry_run=true`를 유지합니다. UDP backend가 없으며 `dry_run=false`는 시작 오류입니다.
 
 ## 현재 architecture (독립 상태 출력 + 두 estimator)

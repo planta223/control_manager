@@ -139,15 +139,17 @@ def default_stack():
                                    if ns == '/control']) == 11, 'XML launches all eleven nodes')
         wait_for(node, lambda: 'protected_cmd' in values and
                  'auto_cmd' in values and 'status' in values, 'custom messages delivered')
-        wait_for(node, lambda: values['protected_cmd'].valid and values['protected_cmd'].reason=='IDLE',
-                 'dry-run log confirms IDLE protection after source discovery')
-        assert values['status'].mode == ControlStatus.IDLE
-        assert values['protected_cmd'].valid and values['protected_cmd'].target_brake
-        assert values['protected_cmd'].reason == 'IDLE'
+        wait_for(node, lambda: not values['protected_cmd'].valid and
+                 values['protected_cmd'].reason=='INVALID_OR_STALE_COMMAND' and
+                 values['status'].mode == ControlStatus.AUTO and
+                 values['status'].fsm_state == ControlStatus.FAULT,
+                 'default AUTO stops without GNSS input')
+        assert values['protected_cmd'].target_brake
+        assert not values['selected_cmd'].valid
         assert values['protected_cmd'].target_speed_mps == 0.0
         assert 'object_state' not in values  # Explicitly disabled; no fabricated clear observation.
         assert not values['auto_cmd'].valid
-        print('PASS: default GNSS-only ingress, disabled objects, IDLE and final safe stop', flush=True)
+        print('PASS: default GNSS-only ingress, disabled objects, AUTO and missing-input stop', flush=True)
         for topic in ('lane_observation', 'lane_pose', 'vehicle_feedback', 'object_state', 'mission_limit'):
             assert not node.get_publishers_info_by_topic('/control/' + topic)
         required = {'/control/' + s for s in ['global_pose', 'motion_state',

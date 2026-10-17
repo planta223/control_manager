@@ -21,7 +21,8 @@ def run():
     durable=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,
                        reliability=ReliabilityPolicy.RELIABLE)
     estop=node.create_publisher(Bool,'/control/estop',durable)
-    active={'auto':True,'manual':True,'invalid_manual':False,'direct':False,'kind':'good'}
+    active={'auto':True,'manual':True,'invalid_manual':False,'direct':False,'kind':'good',
+            'auto_stamp':'good','manual_stamp':'good'}
     sent={}
     def publish():
         stamp=node.get_clock().now().to_msg()
@@ -30,7 +31,15 @@ def run():
             c=VehicleCommand(target_speed_mps=speed,target_steer_rad=steer,
                              target_brake=False,valid=not (key=='manual' and active['invalid_manual']),
                              reason='TEST_'+key)
-            c.header.stamp=stamp; c.header.frame_id='base_link'
+            c.header.stamp=copy.deepcopy(stamp); c.header.frame_id='base_link'
+            kind=active[key+'_stamp']
+            if kind=='negative': c.header.stamp.sec=-1
+            if kind=='boundary': c.header.stamp.nanosec=1000000000
+            if kind=='noncanonical':
+                c.header.stamp.sec-=1; c.header.stamp.nanosec+=1000000000
+            if kind=='zero': c.header.stamp.sec=c.header.stamp.nanosec=0
+            if kind=='stale': c.header.stamp.sec-=5
+            if kind=='future': c.header.stamp.sec+=5
             sent[(key,stamp.sec,stamp.nanosec)]=copy.deepcopy(c)
             pubs[key+'_cmd'].publish(c)
         if active['direct']:
@@ -99,6 +108,30 @@ def run():
             active[key]=True
             wait_for(node,lambda:values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==speed,
                      key+' source recovers')
+            for kind in ('negative','boundary','noncanonical','zero','stale','future'):
+                active[key+'_stamp']=kind
+                wait_for(node,lambda:safe() and values['selected_cmd'].reason=='SOURCE_UNAVAILABLE' and
+                         values['status'].fsm_state==ControlStatus.FAULT,
+                         key+' timestamp rejected: '+kind)
+                assert selector.stack.process.poll() is None
+                active[key+'_stamp']='good'
+                wait_for(node,lambda:values['protected_cmd'].valid and
+                         values['protected_cmd'].target_speed_mps==speed,
+                         key+' timestamp recovery without restart: '+kind)
+        choose(ControlStatus.AUTO,.8)
+        active['manual']=False
+        settle(node,.7)
+        assert values['selected_cmd'].valid and values['selected_cmd'].reason=='TEST_auto'
+        print('PASS: AUTO operates without manual input',flush=True)
+        active['manual']=True
+        for kind in ('negative','boundary','noncanonical'):
+            active['manual_stamp']=kind
+            settle(node,.3)
+            assert selector.stack.process.poll() is None
+            assert values['selected_cmd'].valid and values['selected_cmd'].reason=='TEST_auto'
+            print('PASS: malformed unused manual timestamp does not interrupt AUTO: '+kind,flush=True)
+        active['manual_stamp']='good'
+        choose(ControlStatus.MANUAL,.4)
         active['invalid_manual']=True
         wait_for(node,lambda:safe() and values['selected_cmd'].reason=='INVALID_SOURCE_COMMAND',
                  'invalid manual source is neutralized, no AUTO fallback')
