@@ -20,8 +20,19 @@
 
     # Motion Control PID / Pure Pursuit 공통 도착 판정 설정
     # 실측 wheelbase와 조향각 / 속도 제한은 vehicle.yaml 사용; 중복 기입하지 않음.
-    goal_tolerance_m: 0.3            # TUNE
+    goal_tolerance_m: 0.3            # TUNE; 남은 경로 / 종점 거리, 통과 시 종점 횡방향 허용 거리.
 
     # Motion Control GPS 주행 검사 / 최초 heading 확보 설정 (PID / Pure Pursuit 공통)
     max_cross_track_m: 3.0           # USER_REQUESTED: 경로까지 거리 > 3 m이면 정지.
     heading_bootstrap_timeout_s: 3.0 # GNSS legacy와 동일; AUTO 직진 시작 후 최대 시간.
+
+    # Motion Control 경로 진행 위치 / 세 구간 설정 (현재 map 전용)
+    # MAP_2026-10-15_195100_test.json; provider는 원본 점의 순서를 유지함.
+    # 점 index는 0-based. 경계는 경로를 자르는 종점이 아니라 최근접 위치 검색 구간.
+    route_progress:
+      expected_points: 5066         # 다른 점 개수의 경로에는 이 profile을 적용하지 않음.
+      front_end_index: 980          # 원본 s=98 m; 첫 좌회전 후 직선구간 끝까지 전반.
+      rear_start_index: 4100        # 원본 s=410 m; 두 번째 교차점 진입 전 직선부터 후반.
+      initial_search_m: 10.0        # 출발점부터 초기 위치 검색 범위, m / TUNE.
+      search_back_m: 3.0            # GNSS 흔들림 허용 검색 범위, m / TUNE; 진행 기억은 후퇴하지 않음.
+      search_forward_m: 10.0        # 이전 진행 위치에서 전방 검색 범위, m / TUNE.

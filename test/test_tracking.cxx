@@ -166,3 +166,34 @@ TEST(PathDistance, IndependentOfHeadingAndUsesClampedSegments) {
   EXPECT_FALSE(std::isfinite(cm::distanceToPath(0,0,{{0,0},{0,0}})));
   EXPECT_FALSE(std::isfinite(cm::distanceToPath(0,0,{{0,0},{1,std::numeric_limits<double>::quiet_NaN()}})));
 }
+TEST(GoalGeometry, DenseAndRepeatedTailPointsDoNotShrinkArrivalRadius) {
+  std::vector<cm::Point> dense;
+  for (int i=0;i<=200;++i) dense.push_back({0.1*i,0});
+  for (bool duplicate_tail : {false,true}) {
+    if (duplicate_tail) { dense.push_back(dense.back()); dense.push_back(dense.back()); }
+    const auto s=state(19.75,0);
+    const auto error=cm::pathError(s,dense);
+    ASSERT_TRUE(error.valid); EXPECT_NEAR(error.remaining_path_m,0.25,1e-10);
+    EXPECT_FALSE(error.final_segment); EXPECT_TRUE(cm::goalReached(error,0.3));
+    EXPECT_TRUE(cm::AdaptivePurePursuit({}).compute(s,dense).goal_reached);
+    EXPECT_TRUE(cm::PidLateralController(config()).compute(s,dense,0.1).goal_reached);
+    EXPECT_FALSE(cm::AdaptivePurePursuit({}).compute(state(19.65,0),dense).goal_reached);
+  }
+}
+TEST(GoalGeometry, CloseEndpointOnAnotherBranchDoesNotFinishTheRoute) {
+  const std::vector<cm::Point> loop{{0,0},{5,0},{5,10},{0,10},{0,0.1}};
+  const auto s=state(0,0);
+  const cm::PathMatch first_branch{true,0,0,0};
+  const auto error=cm::pathError(s,loop,&first_branch);
+  EXPECT_NEAR(error.goal_distance_m,0.1,1e-12); EXPECT_GT(error.remaining_path_m,29.0);
+  EXPECT_FALSE(cm::goalReached(error,0.3));
+  EXPECT_FALSE(cm::AdaptivePurePursuit({}).compute(s,loop,first_branch).goal_reached);
+  EXPECT_FALSE(cm::PidLateralController(config()).compute(s,loop,0.1,&first_branch).goal_reached);
+}
+TEST(GoalGeometry, EndPlaneUsesTheFinalTangentWithRepeatedTailPoints) {
+  const auto error=cm::pathError(state(10.2,5.35,std::acos(-1.0)/2),
+                               {{0,0},{10,0},{10,5},{10,5}});
+  ASSERT_TRUE(error.valid); EXPECT_DOUBLE_EQ(error.remaining_path_m,0.0);
+  EXPECT_NEAR(error.goal_forward_m,-0.35,1e-12); EXPECT_NEAR(error.goal_lateral_m,0.2,1e-12);
+  EXPECT_FALSE(cm::goalReached(error,0.3));  // Passage additionally requires a prior AUTO approach.
+}

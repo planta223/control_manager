@@ -44,6 +44,7 @@ def run():
     operation.setdefault('/control/global_path_provider',{'ros__parameters':{}})['ros__parameters']['map_file'] = ''
     operation['/**']['ros__parameters'].update(object_state_enabled=False)
     operation['/control/motion_control']['ros__parameters']['heading_bootstrap_enabled'] = True
+    operation['/control/motion_control']['ros__parameters']['route_progress_enabled'] = False
     control = yaml.safe_load((ROOT/'config/control.yaml').read_text())
     control['/control/motion_control']['ros__parameters']['heading_bootstrap_timeout_s'] = 0.7
     operation_file = LOG/'heading_bootstrap_operation.yaml'; operation_file.write_text(yaml.safe_dump(operation))

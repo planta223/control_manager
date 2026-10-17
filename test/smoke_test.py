@@ -135,7 +135,7 @@ def integrated_fixtures():
         'sensor_interface': {'topics.external_lane': '/test/external_lane'},
         'path_planning': {'map_datum_verified': True},
         'motion_planning': {'cruise_speed_mps': 1.0},
-        'motion_control': {'tracking_mode': 'PURE_PURSUIT'},  # Preserve legacy regression fixture.
+        'motion_control': {'tracking_mode': 'PURE_PURSUIT', 'route_progress_enabled': False},  # Two-point fixture.
         'vehicle_interface': {'operating_limits_verified': True,
                          'vehicle.limits.min_steering_deg': -math.degrees(0.7),
                          'vehicle.limits.max_steering_deg': math.degrees(0.7),

@@ -50,7 +50,7 @@ def run():
         s.header.stamp.sec -= active['state_age']
         path = PathMsg(); path.header.frame_id = 'map'; path.header.stamp = copy.deepcopy(stamp)
         path.header.stamp.sec -= active['path_age']
-        for x in [0., 20.]:
+        for x in ([i/10.0 for i in range(201)] if active['path']=='dense' else [0.,20.]):
             p = PoseStamped(); p.header.frame_id = 'map'; p.pose.position.x = x
             p.pose.position.y = active['y']; p.pose.orientation.w = 1.
             path.poses.append(p)
@@ -100,6 +100,7 @@ def run():
     config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
     config['/control/motion_control']['ros__parameters']['pid']['enabled'] = True
     config['/control/motion_control']['ros__parameters'].update({
+        'route_progress_enabled': False,  # This fixture supplies a two-point route.
         'topics.status': '/control/control_status_fixture',
         'vehicle.limits.min_steering_deg': -math.degrees(0.5),
         'vehicle.limits.max_steering_deg': math.degrees(0.5),
@@ -135,11 +136,24 @@ def run():
     controller = start_controller('PID')
     def restart_controller(mode):
         nonlocal controller
+        saved_control_stamp = active['control_stamp']
+        # Hold PID in stable P-only preview until DDS discovers the complete
+        # command path; otherwise its single zero-I sample can be missed at startup.
+        active['control_stamp'] = 'negative'
         controller.close()
         wait_for(node, lambda: ('motion_control', '/control') not in node.get_node_names_and_namespaces(),
                  'previous Motion Control stopped')
         values.pop('auto_cmd', None)
         controller = start_controller(mode)
+        wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and
+                 not values['auto_cmd'].target_brake and values['protected_cmd'].valid and
+                 not values['protected_cmd'].target_brake,
+                 'restarted '+mode+' command path discovered before PID accumulation')
+        active['control_stamp'] = saved_control_stamp
+
+    def spin_for(seconds):
+        until=time.monotonic()+seconds
+        while time.monotonic()<until: rclpy.spin_once(node,timeout_sec=0.02)
 
     def command_reason(reason):
         return 'auto_cmd' in values and values['auto_cmd'].reason == reason
@@ -269,6 +283,74 @@ def run():
                  'accumulate before path replacement')
         active['y']=-0.25
         wait_reset('path geometry replacement resets I/D',expected=0.15)
+        for mode in ('PID','PURE_PURSUIT'):
+            restart_controller(mode)
+            active.update(state_x=1.0, state_y=0.0, y=0.0, path='dense')
+            pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
+            wait_for(node, lambda: values['status'].mode==ControlStatus.MANUAL,
+                     mode+' MANUAL selected before goal preview')
+            spin_for(0.2)  # Deliver the relayed MANUAL status before moving the synthetic pose.
+            active['state_x']=19.8
+            wait_for(node, lambda: command_reason('GOAL_REACHED'), mode+' goal preview')
+            active['state_x']=1.0
+            wait_for(node, lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake,
+                     mode+' MANUAL preview does not latch AUTO completion')
+            pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+            wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
+                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     mode+' AUTO run selected')
+            spin_for(0.2)
+            active['state_x']=19.8
+            wait_for(node, lambda: command_reason('GOAL_REACHED') and values['protected_cmd'].valid and
+                     values['protected_cmd'].target_brake, mode+' AUTO arrival completes run')
+
+            def stays_completed(label, seconds=0.3):
+                spin_for(seconds)
+                assert command_reason('GOAL_REACHED') and values['auto_cmd'].valid
+                assert values['auto_cmd'].target_brake and values['auto_cmd'].target_speed_mps==0.0
+                assert values['auto_cmd'].target_steer_rad==0.0
+                print('PASS: '+mode+' completion survives '+label,flush=True)
+
+            active['state_x']=19.6
+            stays_completed('GNSS position jitter')
+            active.update(state=False,motion=False,plan=False)
+            stays_completed('all required input timeouts',0.7)
+            active.update(state=True,motion=True,plan=True,y=1.0,state_x=1.0)
+            stays_completed('path replacement')
+            pubs['mode_request'].publish(UInt8(data=ControlStatus.MANUAL))
+            wait_for(node, lambda: values['status'].mode==ControlStatus.MANUAL and
+                     values['protected_cmd'].target_speed_mps==0.4,
+                     mode+' explicit MANUAL remains independent after completion')
+            pubs['mode_request'].publish(UInt8(data=ControlStatus.AUTO))
+            wait_for(node, lambda: values['status'].mode==ControlStatus.AUTO and
+                     values['protected_cmd'].valid and values['protected_cmd'].target_brake,
+                     mode+' returning to AUTO retains completed stop')
+            stays_completed('mode changes')
+            restart_controller(mode)
+            wait_for(node, lambda: 'auto_cmd' in values and values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
+                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     mode+' explicit node restart permits a new run')
+            active.update(state_x=20.35,state_y=0.0,y=0.0)
+            wait_for(node,lambda: not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
+                     not command_reason('GOAL_REACHED'),mode+' behind endpoint without approach is not completion')
+            active['state_x']=19.6
+            wait_for(node,lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
+                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     mode+' approaching dense route endpoint')
+            spin_for(0.3)
+            active.update(state_x=20.35,state_y=0.31)
+            wait_for(node,lambda: not values['auto_cmd'].valid and values['auto_cmd'].target_brake and
+                     not command_reason('GOAL_REACHED'),mode+' passage outside endpoint corridor does not finish')
+            active.update(state_x=19.6,state_y=0.0)
+            wait_for(node,lambda: values['auto_cmd'].valid and not values['auto_cmd'].target_brake and
+                     values['protected_cmd'].valid and not values['protected_cmd'].target_brake,
+                     mode+' valid endpoint approach recovers')
+            spin_for(0.3)
+            active['state_x']=20.35
+            wait_for(node,lambda: command_reason('GOAL_REACHED') and values['protected_cmd'].valid and
+                     values['protected_cmd'].target_brake,mode+' skipped arrival radius completes on endpoint passage')
+            active['state_x']=19.6
+            stays_completed('position jitter after endpoint passage')
         print('ALL TRACKING SMOKE CHECKS PASSED',flush=True)
     finally:
         controller.close(); stack.close(); node.destroy_timer(timer); node.destroy_node()

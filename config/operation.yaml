@@ -98,6 +98,7 @@
     # Motion Control 발행: auto_cmd만 발행.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
+    route_progress_enabled: true  # 현재 map의 전반 / 중반 / 후반 진행 위치 기억; profile은 control.yaml.
     heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED

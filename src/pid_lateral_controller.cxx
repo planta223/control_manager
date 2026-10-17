@@ -16,7 +16,7 @@ void PidLateralController::reset() {
   previous_valid_ = false; integral_m_s_ = 0.0; previous_error_m_ = 0.0;
 }
 TrackingResult PidLateralController::compute(const TrackingState &s,
-                                            const std::vector<Point> &path, double dt_s) {
+                                            const std::vector<Point> &path, double dt_s, const PathMatch *match) {
   TrackingResult out;
   auto fail = [this, &out](const std::string &reason) {
     reset(); out.valid = false; out.steering_rad = 0.0; out.reason = reason; return out;
@@ -27,11 +27,11 @@ TrackingResult PidLateralController::compute(const TrackingState &s,
     return fail("PID_NOT_CONFIGURED");
   if (!std::isfinite(dt_s) || dt_s <= 0.0 || dt_s > config_.max_dt_s)
     return fail("PID_INVALID_DT");
-  const auto error = pathError(s, path);
+  const auto error = pathError(s, path, match);
   if (!error.valid) return fail("INVALID_TRACKING_GEOMETRY");
   out.lateral_error_m = error.lateral_error_m;
   out.heading_error_rad = error.heading_error_rad;
-  if (error.final_segment && error.goal_distance_m <= config_.goal_tolerance_m) {
+  if (goalReached(error,config_.goal_tolerance_m)) {
     reset(); out.valid = true; out.goal_reached = true; out.reason = "GOAL_REACHED"; return out;
   }
   // Forward-only baseline; no steering guesses beyond the last segment or for a U-turn.

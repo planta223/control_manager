@@ -1,4 +1,4 @@
-#include "control_manager/core/lateral_controller.hxx"
+#include "control_manager/core/tracking.hxx"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -15,31 +15,21 @@ AdaptivePurePursuit::AdaptivePurePursuit(PurePursuitConfig config) : config_(con
 }
 LateralResult AdaptivePurePursuit::compute(const TrackingState &s,
                                           const std::vector<Point> &path) const {
-  if (!s.localization_valid || !s.speed_valid || path.size() < 2 ||
-      !std::isfinite(s.x_m) || !std::isfinite(s.y_m) || !std::isfinite(s.yaw_rad) ||
-      !std::isfinite(s.speed_mps) || s.speed_mps < 0.0) return {};
-  for (const auto &p : path)
-    if (!std::isfinite(p.x_m) || !std::isfinite(p.y_m)) return {};
-
-  // Project onto the nearest non-degenerate segment, then advance by arc length.
-  double best = std::numeric_limits<double>::infinity();
-  std::size_t segment = 0;
-  Point projected;
-  for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-    const double dx = path[i + 1].x_m - path[i].x_m;
-    const double dy = path[i + 1].y_m - path[i].y_m;
-    const double length2 = dx * dx + dy * dy;
-    if (length2 <= std::numeric_limits<double>::epsilon()) continue;
-    const double t = std::clamp(((s.x_m - path[i].x_m) * dx +
-                                (s.y_m - path[i].y_m) * dy) / length2, 0.0, 1.0);
-    const Point p{path[i].x_m + t * dx, path[i].y_m + t * dy};
-    const double distance = std::hypot(s.x_m - p.x_m, s.y_m - p.y_m);
-    if (distance < best) { best = distance; segment = i; projected = p; }
-  }
-  if (!std::isfinite(best)) return {};
-  if (segment + 2 == path.size() &&
-      std::hypot(path.back().x_m - s.x_m, path.back().y_m - s.y_m) <= config_.goal_tolerance_m)
-    return {0.0, true, true};
+  return computeImpl(s,path,nullptr);
+}
+LateralResult AdaptivePurePursuit::compute(const TrackingState &s,
+                                          const std::vector<Point> &path, const PathMatch &match) const {
+  return computeImpl(s,path,&match);
+}
+LateralResult AdaptivePurePursuit::computeImpl(const TrackingState &s,
+                                             const std::vector<Point> &path, const PathMatch *match) const {
+  const auto error=pathError(s,path,match);
+  if (!error.valid) return {};
+  if (goalReached(error,config_.goal_tolerance_m)) return {0.0,true,true};
+  const auto segment=error.match.segment;
+  const auto fraction=error.match.fraction;
+  const Point projected{path[segment].x_m+fraction*(path[segment+1].x_m-path[segment].x_m),
+                        path[segment].y_m+fraction*(path[segment+1].y_m-path[segment].y_m)};
   double remaining = std::clamp(config_.lookahead_min_m + config_.lookahead_gain_s * s.speed_mps,
                                 config_.lookahead_min_m, config_.lookahead_max_m);
   Point target = path.back(), start = projected;

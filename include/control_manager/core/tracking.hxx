@@ -22,17 +22,21 @@ struct PidConfig {
 struct PathError {
   bool valid{false}, final_segment{false};
   double lateral_error_m{0.0}, heading_error_rad{0.0};
-  double goal_distance_m{0.0}, goal_forward_m{0.0};
+  double goal_distance_m{0.0}, remaining_path_m{0.0};
+  double goal_forward_m{0.0}, goal_lateral_m{0.0};  // Relative to the final non-degenerate tangent.
+  PathMatch match;
 };
 // Signed correction: path to the left of the vehicle => positive e_y.
-// Tangent comes from the nearest non-degenerate segment in path order.
-PathError pathError(const TrackingState &, const std::vector<Point> &);
+// Tracking tangent comes from the associated non-degenerate segment in path order.
+PathError pathError(const TrackingState &, const std::vector<Point> &, const PathMatch *match = nullptr);
+bool goalReached(const PathError &, double tolerance_m);
 // Position-only distance to the path; infinity means invalid/degenerate geometry.
 double distanceToPath(double x_m, double y_m, const std::vector<Point> &path);
 class PidLateralController {
  public:
   explicit PidLateralController(PidConfig config);
-  TrackingResult compute(const TrackingState &, const std::vector<Point> &, double dt_s);
+  TrackingResult compute(const TrackingState &, const std::vector<Point> &, double dt_s,
+                         const PathMatch *match = nullptr);
   void reset();
  private:
   PidConfig config_;
@@ -48,11 +52,11 @@ class TrackingController {
   // Empty string means implemented selection (not input/config validity).
   std::string selectionError() const;
   TrackingResult compute(const TrackingState &, const std::vector<Point> &, double dt_s,
-                         bool accumulate_pid = true);
+                         bool accumulate_pid = true, const PathMatch *match = nullptr);
   void reset();
  private:
   std::uint8_t requested_{static_cast<std::uint8_t>(TrackingMode::PID)};
   PidLateralController pid_;
-  AdaptivePurePursuit legacy_pp_;  // Existing speed-adaptive algorithm, unchanged.
+  AdaptivePurePursuit legacy_pp_;  // Speed-adaptive lookahead; shared arrival geometry.
 };
 }  // namespace control_manager::core

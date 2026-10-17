@@ -3,6 +3,7 @@
 #include "control_manager/ros_support.hxx"
 #include "control_manager/core/lateral_controller.hxx"
 #include "control_manager/core/tracking.hxx"
+#include "control_manager/core/route_progress.hxx"
 #include "control_manager/core/guidance.hxx"
 #include "control_manager/core/mission.hxx"
 
@@ -109,12 +110,16 @@ class MotionControlNode : public NodeBase {
  private:
   void update();
   std::unique_ptr<core::TrackingController> tracking_;
+  std::unique_ptr<core::RouteProgressTracker> route_progress_;
+  std::size_t route_phase_{0};
   core::VehicleLimits limits_;
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
   std::optional<std::chrono::steady_clock::time_point> heading_bootstrap_start_;
   bool heading_bootstrap_enabled_, have_valid_heading_{false};
-  double heading_bootstrap_timeout_s_, max_cross_track_m_;
+  bool run_completed_{false};  // Explicit AUTO completion; cleared only by node restart.
+  bool goal_approach_seen_{false};
+  double heading_bootstrap_timeout_s_, max_cross_track_m_, goal_tolerance_m_;
   std::shared_ptr<Input<msg::GlobalPose>> pose_;
   std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<msg::MotionPlan>> plan_;

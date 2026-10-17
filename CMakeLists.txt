@@ -21,7 +21,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx src/mission.cxx
-  src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx)
+  src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx src/route_progress.cxx)
 target_include_directories(control_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
@@ -58,6 +58,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_mission control_core)
   ament_add_gtest(test_tracking test/test_tracking.cxx)
   target_link_libraries(test_tracking control_core)
+  ament_add_gtest(test_route_progress test/test_route_progress.cxx)
+  target_link_libraries(test_route_progress control_core)
   ament_add_gtest(test_ingress test/test_ingress.cxx)
   target_link_libraries(test_ingress control_core "${cpp_typesupport_target}")
 endif()

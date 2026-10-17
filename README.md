@@ -383,7 +383,8 @@ SelectedCommand는 기존 VehicleCommand 의미와 `/control/selected_cmd` 토�
 Guidance(GPS/LANE/HYBRID), Vehicle Control(IDLE/MANUAL/AUTO), Localization은 별개입니다.
 `GlobalPose.x_m/y_m/yaw_rad`, `MotionState.speed_mps` 및 각각의 stamp/validity와
 `MotionPlan.reference_path`의 `poses[].pose.position.x/y`, frame/stamp를 그대로 사용합니다.
-Path의 quaternion heading은 사용하지 않고 가장 가까운 유효 선분의 tangent를 계산합니다.
+Path의 quaternion heading은 사용하지 않고 선택된 유효 선분의 tangent를 계산합니다.
+route_progress_enabled=true이면 진행 위치 검색 결과를 PID / Pure Pursuit에 공통으로 전달합니다.
 `MotionPlan.valid/stop_request/target_speed_mps`와 AutoCommand의 VehicleCommand 계약은 유지합니다.
 
 | Tracking 시작 설정 | 구현 / 실제 동작 |
@@ -398,6 +399,19 @@ Pure Pursuit 계열은 PURE_PURSUIT 옵션 하나로 선택합니다.
 Motion Control은 `auto_cmd` 하나만 발행합니다. 조향·목표 속도·제동·유효성·계산 사유는
 VehicleCommand에 포함됩니다. PLAN_STOP은 유효한 speed=0/brake=true 정지 명령이고,
 목표 도달도 유효한 GOAL_REACHED 정지 명령입니다. 입력 불량은 invalid/정지입니다.
+PID / Pure Pursuit 도착 판정은 남은 경로 거리와 실제 종점까지 거리가 모두 goal_tolerance_m 이하일 때입니다.
+마지막 선분 여부를 요구하지 않아 점 간격에 의존하지 않으며, 다른 가지의 종점이 가까운 경우도 배제합니다.
+직전 유효 AUTO 제어에서 종점 전방에 접근한 이력이 있으면 도착 반경을 건너뛴 통과도 완료합니다.
+접근 이력은 남은 경로 / 종점 거리가 max_cross_track_m 이내일 때 기록합니다.
+통과는 남은 경로가 goal_tolerance_m 이내이고 마지막 유효 선분 방향의 종점 수직선을 지났으며,
+종점 횡방향 오차가 goal_tolerance_m 이내일 때만 인정합니다. 기존 경로 이탈 / 입력 유효성 검사도 적용합니다.
+접근 이력은 입력 불량, stop plan, 경로 교체, AUTO 해제로 초기화하며 최초부터 종점 뒤인 입력은 통과로 보지 않습니다.
+AUTO가 선택된 상태에서 종점 도착을 판정하면 주행 완료 상태를 저장합니다.
+이후에는 GNSS 위치 흔들림, 입력 만료, 경로 교체, IDLE/MANUAL/AUTO 전환에도
+auto_cmd의 GOAL_REACHED(speed=0, steer=0, brake=true, valid=true)를 유지합니다.
+완료 상태는 Motion Control 노드 재시작으로만 해제하며 별도 reset topic이나 자동 재출발은 없습니다.
+IDLE/MANUAL에서 계산한 종점 preview는 AUTO 완료를 저장하지 않습니다.
+명시적으로 MANUAL을 선택하면 기존 Control Selector의 수동 명령 선택은 그대로 가능합니다.
 TrackingStatus 토픽과 메시지 생성은 제외했으며 msg/TrackingStatus.msg는 과거 정의로 보관합니다.
 tracking_mode는 read-only 시작 설정이며 변경 후 노드를 재시작합니다.
 명령은 기존 rate_hz(20 Hz)로 발행합니다. 잘못된 tracking_mode 문자열은 시작 오류입니다.
@@ -426,7 +440,7 @@ Motion Control은 PID / Pure Pursuit 계산 후 차량의 실제 최소·최대 
 `dt`는 node timer 사이의 steady-clock 실제 경과 시간입니다. 첫 sample/reset 직후에는 I=D=0이며
 그 다음부터 누적합니다. integral clamp가 최소 anti-windup입니다. NaN/Inf, 계산 overflow, dt<=0 또는
 max_dt_s 초과는 invalid와 reset입니다. forward-only baseline으로 끝점 뒤나 반대 방향 경로는 거부하고,
-끝점 도달은 기존 goal_tolerance_m를 사용합니다. loop/교차점 progress 판정은 구현하지 않았습니다.
+끝점 도달은 기존 goal_tolerance_m를 사용합니다. 교차점 진행 위치는 아래 세 구간 검색으로 관리합니다.
 
 다음 경우 PID 이력을 reset합니다: 노드 재시작, 입력 invalid/stale, stop plan, goal,
 경로 점 좌표 변경, 긴 dt. 같은 경로의 stamp 갱신만으로는 reset하지 않습니다.
@@ -467,10 +481,43 @@ PID를 선택했으면 PID 활성화와 유효 게인 설정도 필요합니다.
 미션 활성화와 독립적이며 MANUAL 명령에는 적용하지 않습니다.
 GNSS는 최초 heading 전에는 레버암 회전 보정을 할 수 없어 초기 odom 위치가 안테나 위치입니다.
 초기 직진의 거리 검사는 그 입력 위치를 사용하며, heading 확보 후 GNSS의 후륜축 보정 위치를 사용합니다.
-진행 위치 기억과 종점 정지 유지 기능은 아직 추가하지 않았습니다.
+진행 위치는 아래 세 구간 검색으로 기억합니다. 종점 정지는 위 주행 완료 상태로 유지합니다.
 
 `test/heading_bootstrap_smoke_test.py`는 외부 GNSS/하드웨어 없이 실제 Sensor Interface부터
 최종 보호까지 연결하여 초기 직진·시간 초과·heading 전환/소실·위치 품질·경로 이탈 경계를 검증합니다.
+
+### 세 구간 / 경로 진행 위치
+
+현재 MAP_2026-10-15_195100_test.json의 경로를 다음 세 구간으로 구분합니다.
+
+| 구간 | 원본 map s 범위 | 의미 |
+|---|---|---|
+| FRONT | 0~98 m | 첫 교차점 좌회전 후 직선구간 끝까지 |
+| MIDDLE | 98~410 m | 큰 루프를 돌아 두 번째 교차점 진입 전 직선 시작까지 |
+| REAR | 410~506.45 m | 두 번째 교차점 진입 전 직선을 포함하여 실제 종점까지 |
+
+경계는 control.yaml의 0-based 점 index 980 / 4100으로 연결합니다. 파일 제공자는 점 순서를 보존하며,
+GNSS datum 재투영으로 거리 값이 조금 달라도 같은 점을 경계로 사용합니다.
+원본 map은 변경하지 않습니다. 다른 경로에서는 점 개수와 경계를 새로 설정해야 합니다.
+expected_points=5066은 점 개수 불일치를 거부하며 동일 개수의 다른 map까지 식별하는 checksum은 아닙니다.
+
+operation.yaml의 route_progress_enabled=true가 기본 운용 설정입니다.
+초기 위치는 FRONT의 출발점부터 10 m 구간에서 찾고, 이후 기억한 진행 거리의 후방 3 m / 전방 10 m에서
+검색합니다. 구간 경계에는 후방 허용 거리만큼 다음 구간을 겹쳐 검색해 연속적으로 전환합니다.
+유효 yaw가 있으면 경로 tangent와 반대 방향인 후보는 제외합니다.
+기억한 진행 거리는 후퇴하지 않으며 위치 흔들림, 입력 만료, PID 이력 reset, 모드 전환으로 초기화하지 않습니다.
+후보가 검색 범위/거리/방향 조건을 만족하지 못하면 정지하며 전체 경로로 자동 재탐색하지 않습니다.
+실제 경로 geometry가 바뀌면 ROUTE_CHANGED_RESTART_REQUIRED로 정지합니다.
+메시지 Header만 갱신되는 것은 경로 교체로 보지 않습니다.
+
+최근접 선분과 투영 비율을 거리 검사, PID 오차, Pure Pursuit 목표점 계산에 공통으로 사용합니다.
+전체 경로를 유지하므로 lookahead는 구간 경계를 넘어 이어지며 FRONT/MIDDLE 끝은 종점이 아닙니다.
+실제 마지막 점 도착에서만 기존 AUTO 주행 완료 처리를 합니다.
+진행 기억의 초기화는 Motion Control 재시작이며, 출발점 부근에서 새 주행을 시작하는 운용을 전제로 합니다.
+중간 위치에서 재시작한 뒤 전체 경로를 검색해 임의의 구간으로 복구하는 기능은 제공하지 않습니다.
+
+route_progress_enabled=false는 기존 전체 경로 최근접 검색입니다. 2점 경로를 사용하는 범용 시험 fixture는
+이 값을 명시적으로 끄고, test_route_progress / route_progress_smoke_test.py에서 진행 기억을 별도로 검증합니다.
 
 ### Tracking parameters
 

@@ -16,6 +16,7 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   config.lookahead_max_m = positive("lookahead_max_m", 6.0);
   config.lookahead_gain_s = nonnegative("lookahead_gain_s", 1.0);
   config.goal_tolerance_m = nonnegative("goal_tolerance_m", 0.3);
+  goal_tolerance_m_=config.goal_tolerance_m;
   core::PidConfig pid;
   pid.enabled = param<bool>("pid.enabled", false);
   pid.kp_lateral = nonnegative("pid.kp_lateral", 0.0);
@@ -32,6 +33,20 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
     (mode == "PURE_PURSUIT" || (pid.enabled &&
      (pid.kp_lateral > 0.0 || pid.ki_lateral > 0.0 || pid.kd_lateral > 0.0 || pid.kp_heading > 0.0)));
   tracking_ = std::make_unique<core::TrackingController>(pid, config);
+  if (param<bool>("route_progress_enabled", false)) {
+    const auto count=param<std::int64_t>("route_progress.expected_points",0);
+    const auto front=param<std::int64_t>("route_progress.front_end_index",0);
+    const auto rear=param<std::int64_t>("route_progress.rear_start_index",0);
+    if (count<4 || front<=0 || rear<=front || rear>=count-1)
+      throw std::invalid_argument("route_progress point-count / phase indices do not define three phases");
+    core::RouteProgressConfig progress;
+    progress.expected_points=static_cast<std::size_t>(count);
+    progress.phase_end_indices={static_cast<std::size_t>(front),static_cast<std::size_t>(rear)};
+    progress.initial_search_m=positive("route_progress.initial_search_m",10.0);
+    progress.search_back_m=positive("route_progress.search_back_m",3.0);
+    progress.search_forward_m=positive("route_progress.search_forward_m",10.0);
+    route_progress_=std::make_unique<core::RouteProgressTracker>(progress);
+  }
   if (mode == "PURE_PURSUIT") tracking_->request(static_cast<std::uint8_t>(core::TrackingMode::PURE_PURSUIT));
   pose_ = input<msg::GlobalPose>("global_pose");
   motion_ = input<msg::MotionState>("motion_state");
@@ -40,8 +55,10 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   subscriptions_.push_back(create_subscription<msg::ControlStatus>(topic("status"), 10,
     [this](msg::ControlStatus::ConstSharedPtr status) {
       if (!control_status_->value || control_status_->value->mode != status->mode ||
-          status->mode != msg::ControlStatus::AUTO || status->fsm_state == msg::ControlStatus::FAULT)
+          status->mode != msg::ControlStatus::AUTO || status->fsm_state == msg::ControlStatus::FAULT) {
         tracking_->reset();
+        goal_approach_seen_=false;
+      }
       control_status_->value = status;
       control_status_->received = std::chrono::steady_clock::now();
     }));
@@ -55,8 +72,10 @@ void MotionControlNode::update() {
   previous_tick_ = tick_time;
   auto stop = [this](const std::string &reason, bool valid = false) {
     tracking_->reset(); previous_path_.clear();
+    goal_approach_seen_=false;
     publisher_->publish(toRos(core::stop(now().nanoseconds(), reason, valid), base_frame_));
   };
+  if (run_completed_) { stop("GOAL_REACHED", true); return; }
   const auto selection_error = tracking_->selectionError();
   if (!selection_error.empty()) { stop(selection_error); return; }
   const auto current_input = [this](const auto &in) {
@@ -99,9 +118,22 @@ void MotionControlNode::update() {
   std::vector<core::Point> path;
   path.reserve(plan.reference_path.poses.size());
   for (const auto &p : plan.reference_path.poses) path.push_back({p.pose.position.x, p.pose.position.y});
-  const double path_distance = core::distanceToPath(state.x_m, state.y_m, path);
-  if (!std::isfinite(path_distance)) { stop("INVALID_TRACKING_GEOMETRY"); return; }
-  if (path_distance > max_cross_track_m_) { stop("PATH_DEVIATION_EXCEEDED"); return; }
+  std::optional<core::PathMatch> route_match;
+  if (route_progress_) {
+    const auto progress=route_progress_->update(state.x_m,state.y_m,
+      pose_->value->valid ? std::optional<double>(state.yaw_rad) : std::nullopt,path,max_cross_track_m_);
+    if (!progress.match.valid) { stop(progress.reason); return; }
+    route_match=progress.match;
+    if (progress.phase!=route_phase_) {
+      route_phase_=progress.phase;
+      RCLCPP_INFO(get_logger(),"Route phase=%s progress=%.2f m",
+        route_phase_==1 ? "MIDDLE" : "REAR",progress.progress_m);
+    }
+  } else {
+    const double path_distance = core::distanceToPath(state.x_m, state.y_m, path);
+    if (!std::isfinite(path_distance)) { stop("INVALID_TRACKING_GEOMETRY"); return; }
+    if (path_distance > max_cross_track_m_) { stop("PATH_DEVIATION_EXCEEDED"); return; }
+  }
   if (!pose_->value->valid) {
     if (have_valid_heading_) { stop("HEADING_UNAVAILABLE_AFTER_ACQUISITION"); return; }
     if (!heading_bootstrap_enabled_) { stop("HEADING_BOOTSTRAP_DISABLED"); return; }
@@ -123,9 +155,12 @@ void MotionControlNode::update() {
   const bool same_path = path.size() == previous_path_.size() &&
     std::equal(path.begin(), path.end(), previous_path_.begin(),
       [](const core::Point &a, const core::Point &b) { return a.x_m == b.x_m && a.y_m == b.y_m; });
-  if (!same_path) tracking_->reset();  // Path changes must not carry integral/derivative history.
+  if (!same_path) {
+    tracking_->reset();  // Path changes must not carry integral/derivative history.
+    goal_approach_seen_=false;
+  }
   previous_path_ = path;
-  // Observe arbitration status only for PID history, never own ControlMode/safety.
+  // During tracking, arbitration status controls PID history; mode/safety stay with their owners.
   // P-only preview during IDLE/MANUAL/FAULT permits existing startup/recovery flow
   // without accumulating windup or a circular FAULT -> invalid AUTO -> FAULT latch.
   const bool accumulate_pid = current_input(control_status_) &&
@@ -133,9 +168,26 @@ void MotionControlNode::update() {
     control_status_->value->mode == msg::ControlStatus::AUTO &&
     control_status_->value->fsm_state >= msg::ControlStatus::READY &&
     control_status_->value->fsm_state <= msg::ControlStatus::STOPPED;
-  const auto result = tracking_->compute(state, path, dt_s, accumulate_pid);
+  const auto error=core::pathError(state,path,route_match ? &*route_match : nullptr);
+  auto result = tracking_->compute(state, path, dt_s, accumulate_pid,
+                                    route_match ? &*route_match : nullptr);
+  // A sample may jump over the arrival radius. Require an observed AUTO approach
+  // on this route, association near the end, and passage inside the end corridor.
+  if (accumulate_pid && goal_approach_seen_ && error.valid &&
+      error.remaining_path_m<=goal_tolerance_m_ && error.goal_forward_m<=0.0 &&
+      std::abs(error.goal_lateral_m)<=goal_tolerance_m_)
+    result={0.0,true,true,error.lateral_error_m,error.heading_error_rad,"GOAL_REACHED"};
+  goal_approach_seen_=accumulate_pid && result.valid && !result.goal_reached && error.valid &&
+    error.goal_forward_m>0.0 && error.remaining_path_m<=max_cross_track_m_ &&
+    error.goal_distance_m<=max_cross_track_m_;
   auto command = core::stop(now().nanoseconds(), result.reason);
-  if (result.valid && result.goal_reached) command = core::stop(now().nanoseconds(), "GOAL_REACHED", true);
+  if (result.valid && result.goal_reached) {
+    // IDLE/MANUAL previews must not finish a run that has not been selected as AUTO.
+    run_completed_ = current_input(control_status_) &&
+      control_status_->value->header.frame_id == base_frame_ &&
+      control_status_->value->mode == msg::ControlStatus::AUTO;
+    command = core::stop(now().nanoseconds(), "GOAL_REACHED", true);
+  }
   else if (result.valid)
     command = {result.steering_rad, plan.target_speed_mps, false, true,
                now().nanoseconds(), result.reason};

@@ -21,7 +21,9 @@ class AdaptivePurePursuit final : public LateralController {
  public:
   explicit AdaptivePurePursuit(PurePursuitConfig config);
   LateralResult compute(const TrackingState &, const std::vector<Point> &) const override;
+  LateralResult compute(const TrackingState &, const std::vector<Point> &, const PathMatch &) const;
  private:
+  LateralResult computeImpl(const TrackingState &, const std::vector<Point> &, const PathMatch *) const;
   PurePursuitConfig config_;
 };
 }  // namespace control_manager::core

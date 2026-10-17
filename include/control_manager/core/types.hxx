@@ -27,6 +27,11 @@ struct TrackingState {
   std::int64_t timestamp_ns{0};
 };
 struct Point { double x_m{0.0}, y_m{0.0}; };
+struct PathMatch {
+  bool valid{false};
+  std::size_t segment{0};
+  double fraction{0.0}, distance_m{0.0};
+};
 struct LanePose {
   double lateral_error_m{0.0}, heading_error_rad{0.0}, confidence{0.0};
   std::int64_t timestamp_ns{0};
