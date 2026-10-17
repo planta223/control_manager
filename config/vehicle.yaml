@@ -10,7 +10,7 @@
       front_axle_from_rear_m: 1.553   # MEASURED
       wheelbase_m: 1.328              # MEASURED: 1.553 - 0.225
       track_width_m: 1.060            # MEASURED
-      wheel_diameter_m: 0.50         # TEMPORARY: user 50 cm; replace after measurement
+      wheel_diameter_m: 0.47         # TEMPORARY: user 50 cm; replace after measurement
       motor_to_wheel_ratio: 1.0      # USER_CONFIRMED: motor RPM / wheel RPM, direct drive
       # Vehicle command limits; degrees / km/h here, rad / m/s internally.
       limits:
