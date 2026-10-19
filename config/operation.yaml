@@ -122,7 +122,7 @@
     # Vehicle Interface 발행: actuator_raw (dry_run=false); 실제 UDP는 외부 trans 담당.
     rate_hz: 50.0                  # 외부 trans는 actuator_raw 수신마다 UDP 송신.
     # 최종 보호·운용 한계 설정
-    dry_run: false                  # true: 로그만 / false: actuator_raw 발행, 외부 trans는 별도 실행
+    dry_run: true                   # true: 로그만 / false: actuator_raw 발행, 외부 trans는 별도 실행
     operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.
     # Motion Control은 vehicle.limits로 제한, 여기서는 범위 밖 명령을 STOP 처리.
     # actuator_raw 조향은 우회전 +. 속도는 vehicle의 바퀴 지름 / 구동비로 RPM 환산.
