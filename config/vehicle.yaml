@@ -16,8 +16,8 @@
       limits:
         min_steering_deg: -24.0      # USER_SPECIFIED: right negative
         max_steering_deg:  24.0      # USER_SPECIFIED: left positive
-        min_speed_kph:    -100       # USER_SPECIFIED: reverse negative
-        max_speed_kph:     100       # USER_SPECIFIED: forward positive
+        min_speed_kph:    -132.89    # USER_SPECIFIED: reverse negative
+        max_speed_kph:     132.89    # USER_SPECIFIED: forward positive
     lidar_mount:
       x_m: 0.559                     # MEASURED: 0.784 - 0.225
       y_m: 0.0                       # ASSUMPTION: centreline, NOT_MEASURED
