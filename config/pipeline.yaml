@@ -69,9 +69,9 @@
 
 /control/vehicle_interface:
   ros__parameters:
-    # 기존 trans 프로토콜: normalized ±1 -> 조향 ±30 deg / 모터 ±1500 RPM.
+    # 기존 trans 프로토콜: normalized ±1 -> 조향 ±24 deg / 모터 ±1500 RPM.
     trans:
-      steering_full_scale_deg: 30.0
+      steering_full_scale_deg: 24
       motor_full_scale_rpm: 1500.0
 
 /control/global_path_provider:
