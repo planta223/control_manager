@@ -89,8 +89,8 @@ GNSS localization, fusion, Lane filtering/path generation, yaw-rate/motion estim
 | topics.lidar = /lidar/points | /control/sensors/lidar | PointCloud2, lidar_enabled=true일 때만 |
 | topics.depth = /camera_dep/depth/image_raw | /control/sensors/depth | Image, depth_enabled=true일 때만 |
 | topics.external_lane = "" (미합의) | /control/lane_observation | lane_enabled=true + 비어 있지 않은 토픽 필요; 입력 SensorDataQoS, 출력 reliable depth 10 |
-| topics.external_motor_feedback = "" | /control/vehicle_feedback의 speed 필드 | adapter 미구현, motor_feedback_enabled=true이면 시작 오류 |
-| topics.external_steering_feedback = "" | /control/vehicle_feedback의 steering 필드 | adapter 미구현, steering_feedback_enabled=true이면 시작 오류 |
+| topics.external_motor_feedback = /motor_feedback | /control/sensors/motor_feedback | encoder_motor/msg/MotorFeedback, motor_feedback_enabled |
+| topics.external_steering_feedback = /steering_feedback | /control/sensors/steering_feedback | encoder_motor/msg/SteeringFeedback, steering_feedback_enabled |
 
 Lane 외부 topic을 추측해 기본 연결하지 않았습니다. 현재 adapter는 **control_manager/msg/LanePose wire type**을
 명시적으로 선택하는 방식이며 타 팀의 실제 message type이 확정되었다는 뜻이 아닙니다.
@@ -107,20 +107,23 @@ Lane의 finite lateral/heading/confidence, confidence [0,1], source timestamp를
 즉 즉시 invalid 메시지를 만드는 방식이 아니며, 현재 기본 만료 상한은 관측 시각으로부터 0.5초입니다.
 낮지만 정상 범위인 confidence는 전달하고 실제 최소 confidence 정책은 planner가 계속 결정합니다.
 
-`VehicleFeedback`는 내부 실제 관측 계약입니다. **VehicleCommand는 목표 명령**, MotionState는 추정 결과이므로
-actual steering을 표현할 메시지로 재사용하지 않았습니다. 외부 계약을 합의하면 sensor_interface의
-`publishFeedback` 경계로 정규화된 측정값을 전달하도록 연결합니다. 현재 unavailable heartbeat timer는
-그때 실제 adapter lifecycle/timeout 처리로 교체해야 합니다.
+모터·조향 feedback은 GNSS처럼 같은 메시지 타입으로 투명하게 relay합니다.
+`MotorFeedback`의 `motor_rpm / motor_rpm_mcu_ms / motor_rpm_valid`,
+`SteeringFeedback`의 `steer_angle / steer_angle_mcu_ms / steer_angle_valid`를 그대로 보존합니다.
+`valid=false`, zero, MCU tick 순환/역행도 변경·필터링하지 않습니다. 콜백마다 전달하므로
+Sensor Interface의 `rate_hz`로 입력을 제한하거나 마지막 값을 주기적으로 재발행하지 않습니다.
+입출력 모두 SensorDataQoS이며 `motor_feedback_enabled` / `steering_feedback_enabled`로
+각 구독·출력을 함께 끕니다. 활성 입력/출력의 빈 이름이나 remap 후 같은 이름은 시작 오류입니다.
 
-외부 실제 모터/구동륜 엔코더와 조향 엔코더는 각각 `topics.external_motor_feedback`,
-`topics.external_steering_feedback`으로 Sensor Interface에 들어오는 구조로 예약했습니다.
-외부 publisher가 내부 `/control/vehicle_feedback`으로 직접 연결되는 구조가 아닙니다.
-외부 메시지 타입, encoder count/RPM 등의 단위, 기어비·영점·부호·road-wheel 변환,
-측정 timestamp와 두 입력의 시간 정합을 합의한 뒤 이 node에서 내부 m/s·rad로 정규화합니다.
-실제 외부 구독·변환은 없으며 encoder enable=true를 거부합니다. 비활성 입력의 토픽 이름은
-미리 설정할 수 있고, 토픽 이름만으로 구독이 활성화되지는 않습니다.
-`vehicle_feedback_enabled=true`일 때만 stamp=0, 두 validity=false인 unavailable 상태를 발행하고,
-WHEEL 운동 추정도 계속 NOT_IMPLEMENTED입니다. GNSS 모드 동작은 바뀌지 않습니다.
+MCU tick은 ROS 시각이 아니며 두 보드의 시계도 독립적입니다. 향후 consumer는
+PC 수신 경과시간·원래 valid·측정시각 진행을 별도로 검증해야 합니다. ROS Header를
+가정하는 기존 `current()` helper를 이 메시지에 그대로 사용할 수 없습니다.
+RPM→m/s, degree→rad, 부호·영점·구동비 보정, 동기화와 WHEEL 추정은 이번 연결 범위에 없습니다.
+
+`VehicleFeedback`는 기존 내부 정규화 계약이며 위 두 raw 입력과 별개입니다.
+`vehicle_feedback_enabled=true`일 때만 stamp=0, 두 validity=false인 unavailable 상태를
+발행합니다. 기본값은 false이며 두 raw 메시지를 여기에 합치지 않습니다.
+Global State Estimator의 GNSS 모드는 유지하고 WHEEL 운동 추정은 계속 NOT_IMPLEMENTED입니다.
 
 **Ingress 제외:** Global Map/Global Path는 reference/planning data로 planner에 직접 연결합니다.
 ManualCommand는 control_selector로 직접 전달합니다.
@@ -614,10 +617,11 @@ mode parameter는 read-only이며 /control/mode_request 구독과 topics.mode_re
 Guidance/Tracking, Pose/Motion source와 센서 활성화 등 read-only parameter 변경은 재시작이 필요합니다.
 활성화 key는 각 파일의 공통 영역에서 한 번 정의하고 consumer가 함께 사용합니다.
 Mission 활성화는 mission.yaml, 다른 센서/Object 활성화는 operation.yaml에서 설정합니다.
-기본 operation은 GNSS만 활성입니다. RGB/LiDAR/IMU/Depth/Lane/encoder와 보조 feedback/Object/Mission은 비활성입니다.
+기본 operation은 GNSS와 모터·조향 raw feedback relay가 활성입니다.
+RGB/LiDAR/IMU/Depth/Lane 및 정규화된 VehicleFeedback/Object/Mission은 비활성입니다.
 원시 센서·Lane relay는 입력과 대응 출력을 함께 끄며, vehicle_feedback은 별도 발행 스위치입니다.
 Lane/Object/Mission 비활성 node는 관측 구독·출력·timer를 만들지 않습니다.
-필수 입력 비활성화와 선택 모드가 모순되면 시작 오류이며, GNSS_IMU/WHEEL/encoder 미구현은 그대로입니다.
+필수 입력 비활성화와 선택 모드가 모순되면 시작 오류이며, GNSS_IMU/WHEEL 추정 미구현은 그대로입니다.
 외부 Lane 연결은 lane_enabled=true와 `pipeline.yaml`의 `topics.external_lane`을 함께 지정합니다.
 Motion Planning은 object_state_enabled/mission_limit_enabled가 true인 입력만 구독하고
 기존 validity/timeout/stop 정책을 적용합니다. false인 입력은 가짜 valid 관측 대신 해당 의존성을 제외하고
@@ -661,6 +665,8 @@ lookahead, timeout, covariance quality gate는 소프트웨어 초기 tuning이�
 ```bash
 cd /workspace
 source /opt/ros/humble/setup.bash
+source /workspace/install/setup.bash
+source /workspace/src/encoder_motor/install/feedback/setup.bash
 mkdir -p src/control_manager/log/{tmp,ros,colcon_home}
 export TMPDIR=/workspace/src/control_manager/log/tmp
 export ROS_LOG_DIR=/workspace/src/control_manager/log/ros

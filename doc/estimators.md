@@ -122,6 +122,8 @@ GNSS absence가 실패 이유가 아니며 유효 feedback fixture를 넣어도 
 |---|---|---|
 | /control/sensors/gnss_odom | sensor_interface | global_state_estimator (선택 모드에 따라) |
 | /control/sensors/imu | sensor_interface (optional) | global_state_estimator (GNSS_IMU 선택 시) |
+| /control/sensors/motor_feedback | sensor_interface (raw relay) | 아직 estimator 소비 미구현; GNSS 모드 유지 |
+| /control/sensors/steering_feedback | sensor_interface (raw relay) | 아직 estimator 소비 미구현; GNSS 모드 유지 |
 | /control/vehicle_feedback | sensor_interface (현재 unavailable) | global_state_estimator (WHEEL) |
 | /control/global_pose | global_state_estimator | planning / tracking |
 | /control/motion_state | global_state_estimator | motion planning / tracking |

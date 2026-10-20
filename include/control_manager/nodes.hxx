@@ -18,11 +18,11 @@ class SensorInterfaceNode : public NodeBase {
   rclcpp::Publisher<msg::VehicleFeedback>::SharedPtr feedback_publisher_;
   std::string base_frame_;
   double input_timeout_s_;
-  // TODO topics.external_motor_feedback / topics.external_steering_feedback callbacks
-  // belong HERE, once motor/steering encoder wire types,
-  // topics, units, calibration and acquisition-time alignment have been agreed.
-  // They must normalize actual feedback and call publishFeedback, not estimate motion.
+  // Encoder feedback, like GNSS, is relayed without normalization. The legacy
+  // normalized VehicleFeedback publisher is independent of these two inputs.
   template<class T> void relay(const std::string &source, const std::string &destination) {
+    if (topic(source).empty() || topic(destination).empty())
+      throw std::invalid_argument(source + " and " + destination + " require nonempty topics");
     auto publisher = output<T>(destination, rclcpp::SensorDataQoS());
     auto subscription = create_subscription<T>(topic(source), rclcpp::SensorDataQoS(),
       [publisher](typename T::ConstSharedPtr value) { publisher->publish(*value); });

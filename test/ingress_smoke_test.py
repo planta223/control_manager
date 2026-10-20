@@ -21,10 +21,10 @@ def rejection_tests():
              (['-p','topics.external_lane:=/test/lane',
                '-r','/test/lane:=/control/lane_pose'], 'different topics'),
              (['-p','topics.gnss:=/control/sensors/gnss_odom'], 'same topic'),
-             (['-p','topics.external_motor_feedback:=/test/motor_encoder'],
-              'encoder adapter not implemented'),
-             (['-p','topics.external_steering_feedback:=/test/steering_encoder'],
-              'encoder adapter not implemented')]
+             (['-p','topics.external_motor_feedback:=/control/sensors/motor_feedback'],
+              'same topic'),
+             (['-p','topics.external_steering_feedback:=/control/sensors/steering_feedback'],
+              'same topic')]
     for args, expected in cases:
         args = list(args)
         if any('topics.external_lane:=' in arg for arg in args): args += ['-p', 'lane_enabled:=true']

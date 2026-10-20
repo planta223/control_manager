@@ -15,8 +15,8 @@
     lidar_enabled: false
     depth_enabled: false
     lane_enabled: false             # 외부 Lane 입력 + lane_observation + lane_pose
-    motor_feedback_enabled: false   # true rejected: encoder adapter NOT_IMPLEMENTED
-    steering_feedback_enabled: false # true rejected: encoder adapter NOT_IMPLEMENTED
+    motor_feedback_enabled: true    # MotorFeedback 구독 + sensor_motor_feedback raw relay
+    steering_feedback_enabled: true # SteeringFeedback 구독 + sensor_steering_feedback raw relay
 
     # Sensor Interface 발행토픽 활성화
     # sensor_*와 lane_observation은 위 구독 활성화와 연동, 별도 중복 스위치 없음.
@@ -41,8 +41,8 @@
     # Sensor Interface 입력 검증 설정
     # input_timeout_s: common source-age admission policy. Lane confidence threshold
     # remains a planner policy; ingress only checks finite confidence in [0, 1].
-    # External motor/steering encoder inputs are reserved in pipeline.yaml.
-    # Adapters/type/unit contracts are TODO: keep encoder enable flags false.
+    # Motor/SteeringFeedback은 GNSS처럼 그대로 전달한다. 이 timeout으로
+    # Header 없는 MCU tick을 ROS 시각으로 해석하거나 valid를 변경하지 않는다.
     input_timeout_s: 0.5
 
 /control/global_state_estimator:

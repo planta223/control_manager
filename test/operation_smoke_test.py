@@ -52,13 +52,20 @@ def activation_graph():
              ('/imu/data', '/control/sensors/imu'), ('/camera/image_raw', '/control/sensors/rgb'),
              ('/lidar/points', '/control/sensors/lidar'),
              ('/camera_dep/depth/image_raw', '/control/sensors/depth'),
-             ('/test/lane', '/control/lane_observation')]
+             ('/test/lane', '/control/lane_observation'),
+             ('/test/motor', '/control/sensors/motor_feedback'),
+             ('/test/steering', '/control/sensors/steering_feedback')]
     for label, extra, expected in [
-            ('gnss_only', (), {0}),
+            ('gnss_feedback', (), {0, 6, 7}),
+            ('gnss_only', ('motor_feedback_enabled:=false',
+                           'steering_feedback_enabled:=false'), {0}),
             ('all_supported', ('imu_enabled:=true', 'rgb_enabled:=true', 'lidar_enabled:=true',
                                'depth_enabled:=true', 'lane_enabled:=true',
-                               'vehicle_feedback_enabled:=true'), set(range(6))),
-            ('all_off', ('gnss_enabled:=false',), set())]:
+                               'vehicle_feedback_enabled:=true'), set(range(8))),
+            ('motor_only', ('gnss_enabled:=false', 'steering_feedback_enabled:=false'), {6}),
+            ('steering_only', ('gnss_enabled:=false', 'motor_feedback_enabled:=false'), {7}),
+            ('all_off', ('gnss_enabled:=false', 'motor_feedback_enabled:=false',
+                         'steering_feedback_enabled:=false'), set())]:
         stack = Stack(command('sensor_interface_node', *wired, *extra), 'operation_' + label)
         try:
             wait_for(node, lambda: ('sensor_interface', '/control') in node.get_node_names_and_namespaces(), label)
@@ -67,8 +74,6 @@ def activation_graph():
                            owns(node, output, 'sensor_interface', True) == (i in expected)
                            for i, (source, output) in enumerate(pairs))
             wait_for(node, matches, 'subscriptions and relay publishers: ' + label)
-            assert not owns(node, '/test/motor', 'sensor_interface')
-            assert not owns(node, '/test/steering', 'sensor_interface')
             assert owns(node, '/control/vehicle_feedback', 'sensor_interface', True) == (label == 'all_supported')
         finally:
             stack.close()
@@ -98,8 +103,8 @@ def rejection_tests():
         ('global_state_estimator', ('motion_mode:=GNSS_IMU',), 'requires imu_enabled'),
         ('global_state_estimator', ('motion_mode:=WHEEL',), 'requires vehicle_feedback_enabled'),
         ('sensor_interface_node', ('lane_enabled:=true',), 'requires a nonempty'),
-        ('sensor_interface_node', ('motor_feedback_enabled:=true',), 'encoder adapter not implemented'),
-        ('sensor_interface_node', ('steering_feedback_enabled:=true',), 'encoder adapter not implemented'),
+        ('sensor_interface_node', ("topics.external_motor_feedback:=''",), 'require nonempty topics'),
+        ('sensor_interface_node', ("topics.external_steering_feedback:=''",), 'require nonempty topics'),
         ('path_planning_node', ('guidance_mode:=LANE',), 'requires lane_enabled'),
         ('path_planning_node', ('guidance_mode:=HYBRID',), 'requires lane_enabled'),
         ('path_planning_node', ('guidance_mode:=NONE',), 'guidance_mode must be'),
@@ -112,7 +117,7 @@ def rejection_tests():
     for executable, params, reason in cases:
         result = subprocess.run(command(executable, *params), env=ENV, capture_output=True, text=True, timeout=8)
         assert result.returncode != 0 and reason in result.stdout + result.stderr, (executable, params, result.stderr)
-    print('PASS: contradictory configuration and unimplemented encoder activation rejected', flush=True)
+    print('PASS: contradictory configuration and empty encoder input topics rejected', flush=True)
 
 
 def planning_dependencies():

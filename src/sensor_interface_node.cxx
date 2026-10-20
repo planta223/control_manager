@@ -1,5 +1,7 @@
 #include "control_manager/nodes.hxx"
 #include "control_manager/ingress.hxx"
+#include <encoder_motor/msg/motor_feedback.hpp>
+#include <encoder_motor/msg/steering_feedback.hpp>
 namespace control_manager {
 SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
   // Single ingress for real-time external observations and actual vehicle feedback.
@@ -12,16 +14,12 @@ SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
   // Raw relay remains transparent: preserve stamp/frame/covariance, no TF guess.
   input_timeout_s_ = positive("input_timeout_s", 0.5);
   base_frame_ = param<std::string>("base_frame", "base_link");
-  // Future raw motor/wheel and steering encoders enter through this node only.
-  // Reserve configurable inputs without guessing a message type or raw conversion.
-  (void)topic("external_motor_feedback");
-  (void)topic("external_steering_feedback");
-  const bool motor_enabled = enabled("motor_feedback_enabled", false);
-  const bool steering_enabled = enabled("steering_feedback_enabled", false);
-  if (motor_enabled || steering_enabled)
-    throw std::invalid_argument(
-      "motor/steering encoder adapter not implemented; keep motor_feedback_enabled and "
-      "steering_feedback_enabled=false until type/unit/calibration/time contracts are agreed");
+  // Encoder observations follow the GNSS raw-relay contract: do not convert
+  // units/signs, renew MCU timestamps, discard invalidity, or combine clocks.
+  if (enabled("motor_feedback_enabled", false))
+    relay<encoder_motor::msg::MotorFeedback>("external_motor_feedback", "sensor_motor_feedback");
+  if (enabled("steering_feedback_enabled", false))
+    relay<encoder_motor::msg::SteeringFeedback>("external_steering_feedback", "sensor_steering_feedback");
   const auto external_lane = topic("external_lane");
   if (enabled("lane_enabled", false)) {
     if (external_lane.empty())
@@ -38,8 +36,8 @@ SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
     subscriptions_.push_back(subscription);
   }
 
-  // No external feedback type/topic/scale is known. Publish explicit unavailable
-  // state with zero stamp/false flags, never synthetic or last-command feedback.
+  // Legacy normalized VehicleFeedback remains unavailable. The raw relays above
+  // do not produce a time-aligned m/s/rad observation or enable WHEEL estimation.
   if (enabled("vehicle_feedback_enabled", true)) {
     feedback_publisher_ = output<msg::VehicleFeedback>("vehicle_feedback");
     tick([this] {

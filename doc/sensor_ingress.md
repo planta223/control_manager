@@ -12,13 +12,14 @@ sensor_interface는 GNSS/IMU/RGB/LiDAR/Depth raw relay였습니다. LanePose는 
 
 `sensor_interface_node` is the single ingress for real-time external observations and vehicle feedback used by control_manager.
 
-단위·부호·timestamp·finite 등 외부/내부 경계를 담당합니다. GNSS/IMU fusion, Lane estimation,
-yaw-rate 계산, planning, tracking, actuator 송신은 이 계층에서 하지 않습니다.
+센서/엔코더 raw 입력은 같은 타입·값으로 relay하고 Lane 입력은 timestamp/finite를 검증합니다.
+GNSS/IMU fusion, 엔코더 단위·부호 보정, Lane estimation, yaw-rate 계산, planning,
+tracking, actuator 송신은 이 계층에서 하지 않습니다.
 
 ## 3. 최종 데이터 흐름
 
 ```text
-External GNSS / IMU / Lane AI / future Motor-Steering feedback
+External GNSS / IMU / Lane AI / encoder_motor Motor-Steering feedback
                             |
                     sensor_interface
            +----------------+----------------+
@@ -44,10 +45,12 @@ External GNSS / IMU / Lane AI / future Motor-Steering feedback
 | lidar: /lidar/points | /control/sensors/lidar | sensor_msgs/PointCloud2 |
 | depth: /camera_dep/depth/image_raw | /control/sensors/depth | sensor_msgs/Image; depth_enabled |
 | external_lane: empty default | /control/lane_observation | lane_enabled=true and configured LanePose topic required |
-| external_motor_feedback / external_steering_feedback: reserved inputs | /control/vehicle_feedback | Adapter not implemented; enabling either encoder is rejected |
+| external_motor_feedback: /motor_feedback | /control/sensors/motor_feedback | encoder_motor/msg/MotorFeedback; motor_feedback_enabled |
+| external_steering_feedback: /steering_feedback | /control/sensors/steering_feedback | encoder_motor/msg/SteeringFeedback; steering_feedback_enabled |
 
-Raw relay는 SensorDataQoS를 유지합니다. Lane 입력도 SensorDataQoS로 reliable/best-effort source를
-받을 수 있고 내부 Lane/feedback 출력은 reliable depth 10입니다. source와 output이 remap 후 같으면
+센서/엔코더 raw relay는 입력·출력 모두 SensorDataQoS를 유지합니다. Lane 입력도 SensorDataQoS로
+reliable/best-effort source를 받을 수 있고 내부 Lane/기존 VehicleFeedback 출력은 reliable depth 10입니다.
+활성 raw 입력/출력이 빈 이름이거나 source와 output이 remap 후 같으면
 시작 오류로 loop를 차단합니다. 외부 Lane topic default를 실제 팀 계약처럼 임의로 지정하지 않았습니다.
 
 ## 6. LanePose 흐름과 validation
@@ -71,18 +74,31 @@ global_state_estimator의 motion_mode=GNSS도 같은 내부 GNSS topic을 사용
 
 ## 8. Motor/steering 흐름
 
-Future hardware callbacks → sensor_interface::publishFeedback → 내부 VehicleFeedback → global_state_estimator(motion_mode=WHEEL).
-실제 모터/구동륜 엔코더와 조향 엔코더는 Sensor Interface의 외부 입력입니다.
-`pipeline.yaml`에 `topics.external_motor_feedback`과 `topics.external_steering_feedback`을 예약하고,
-standalone 실행에도 동일한 빈 기본값을 제공합니다. 내부 vehicle_feedback 발행자는 Sensor Interface입니다.
-외부 topic/type/scale·calibration·측정시각 정합은 미확정이라 구독 자체를 만들지 않았습니다.
-활성화는 operation.yaml의 motor_feedback_enabled/steering_feedback_enabled가 담당합니다.
-토픽 이름만 지정하고 비활성화할 수 있으며, enable=true는 adapter 미구현 시작 오류로 거부합니다.
-향후 raw 값을 내부 speed_mps/steering_angle_rad로 정규화한 뒤 publishFeedback에 전달합니다.
-vehicle_feedback_enabled=true일 때만 unavailable heartbeat를 발행하고 WHEEL NOT_IMPLEMENTED는 유지합니다.
-현재 ingress의 unavailable heartbeat는 source stamp=0 / 두 validity=false입니다. 가짜 측정이나
-목표 명령 기반 feedback을 만들지 않습니다. WHEEL output도 계속 NOT_IMPLEMENTED/invalid입니다.
-실제 adapter 구현 시 unavailable timer를 적절한 callback/timeout lifecycle로 교체해야 합니다.
+```text
+encoder_motor /motor_feedback
+  → Sensor Interface → /control/sensors/motor_feedback (MotorFeedback 그대로)
+encoder_motor /steering_feedback
+  → Sensor Interface → /control/sensors/steering_feedback (SteeringFeedback 그대로)
+```
+
+`MotorFeedback`는 motor_rpm(int32), motor_rpm_mcu_ms(uint32), motor_rpm_valid(bool),
+`SteeringFeedback`는 steer_angle(float32, degree), steer_angle_mcu_ms(uint32),
+steer_angle_valid(bool)이다. 메시지 타입은 encoder_motor 패키지에서 생성한다.
+위 외부/내부 토픽은 pipeline.yaml과 standalone 기본값이 같다. operation.yaml의
+motor_feedback_enabled/steering_feedback_enabled는 각각 구독과 relay 출력을 함께 켠다.
+기본 operation은 둘 다 true이며 standalone에서 설정 파일 없이 실행하면 false이다.
+
+callback에서 원본 메시지를 그대로 전달한다. 값, 부호, 단위, MCU tick과 valid를 변경하지
+않으며 valid=false도 전달한다. timeout 처리나 캐시 재발행/20Hz 제한 timer를 추가하지 않는다.
+encoder_motor가 만든 유효성은 센서 건강/보정 검증을 뜻하지 않는다. 두 보드의 MCU tick은
+서로 및 ROS 시각과 독립적이며, 0/순환/역행도 그대로 전달한다. 향후 consumer가 실제 입력의
+유효성/수신 경과시간/시각 진행을 판단해야 한다. Header를 요구하는 current()는 직접 적용 불가하다.
+
+RPM→m/s, degree→rad, 부호·영점·구동비 보정, 두 입력의 동기화와 상태 추정은 후속 작업이다.
+이번 raw relay는 기존 정규화된 VehicleFeedback을 생성하지 않는다.
+vehicle_feedback_enabled=true일 때만 종전의 stamp=0 / validity=false unavailable heartbeat를
+발행하며 기본값은 false이다. WHEEL 추정은 계속 NOT_IMPLEMENTED/invalid이다.
+Global State Estimator의 기본 GNSS 모드는 유지한다.
 
 ## 9. 제외 입력과 이유
 

@@ -52,7 +52,8 @@ flowchart TD
   LO --> LE[lane_state_estimator]
   LE --> LS[LanePose]
   LS --> P
-  FB[future motor / steering feedback contract TODO] -.-> SI
+  FB[encoder_motor MotorFeedback / SteeringFeedback] --> SI
+  SI --> RF[sensors/motor_feedback / steering_feedback: raw relay]
   SI --> VF[internal VehicleFeedback: unavailable]
   VF --> E
   QG[operation.yaml: guidance_mode, 재시작 필요] -.-> P
@@ -147,7 +148,8 @@ Guidance는 시작 설정과 ReferencePath 유무를 표시하며 별도 상태 
 Control 요청과 node가 보낸 상태 표시는 분리합니다. 상태가 만료되면 STALE/UNKNOWN을 표시합니다.
 Optional sensor runtime toggle은 없습니다. config 활성 여부와 수신 age를 표시하더라도
 그것이 fusion/detection의 성공이나 센서 물리 정상 여부를 뜻하지 않습니다.
-센서 health/실제 외부 actuator feedback 계약은 미확정입니다. 내부 VehicleFeedback은 현재 invalid입니다.
+모터·조향 원본 feedback은 Sensor Interface가 relay하지만 센서 health/보정/상태 추정 성공을
+뜻하지 않습니다. 내부 정규화된 VehicleFeedback은 현재 invalid이며 WHEEL 추정은 미구현입니다.
 
 ## BEFORE RQT ↔ ROS topics (실제 존재하는 연결만)
 

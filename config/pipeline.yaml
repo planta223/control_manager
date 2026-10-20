@@ -13,10 +13,10 @@
       external_lane: ""            # lane_enabled=true일 때 필수; 토픽·wire 계약 합의 필요.
       # Adapter input type: control_manager/msg/LanePose; confirm external wire type with Lane team.
       # Supplied values: lateral_error_m, heading_error_rad, confidence, header.stamp.
-      # 외부 Wheel Feedback: 실제 모터·조향 엔코더 발행, Sensor Interface 입력으로 예약
-      # topic/type/단위/보정/측정시각 계약과 adapter는 미구현; 해당 enable=true이면 시작 오류.
-      external_motor_feedback: ""    # 모터/구동륜 엔코더 원본 입력
-      external_steering_feedback: "" # 조향 엔코더 원본 입력
+      # encoder_motor의 통합 메시지를 GNSS처럼 그대로 relay한다.
+      # 단위·부호·MCU tick·valid 보존. 정규화/합성/WHEEL 추정은 별도 작업.
+      external_motor_feedback: /motor_feedback       # encoder_motor/msg/MotorFeedback
+      external_steering_feedback: /steering_feedback # encoder_motor/msg/SteeringFeedback
 
       # Global Path Provider 발행 토픽: 기존 최종 지도 파일을 읽어 발행, Path Planning이 구독
       # map_file=""이면 파일 제공자 비활성; 대신 외부 nav_msgs/Path 발행자를 연결 가능.
@@ -35,8 +35,10 @@
       sensor_rgb: /control/sensors/rgb
       sensor_depth: /control/sensors/depth
       sensor_lidar: /control/sensors/lidar
+      sensor_motor_feedback: /control/sensors/motor_feedback
+      sensor_steering_feedback: /control/sensors/steering_feedback
       lane_observation: /control/lane_observation
-      vehicle_feedback: /control/vehicle_feedback # INTERNAL, invalid until hardware adapter exists
+      vehicle_feedback: /control/vehicle_feedback # Legacy normalized contract; raw relay와 별개, 현재 invalid
 
       # Global State Estimator 발행 토픽 (/control/global_state_estimator)
       global_pose: /control/global_pose
@@ -71,7 +73,7 @@
   ros__parameters:
     # 기존 trans 프로토콜: normalized ±1 -> 조향 ±24 deg / 모터 ±1500 RPM.
     trans:
-      steering_full_scale_deg: 24
+      steering_full_scale_deg: 24.0
       motor_full_scale_rpm: 1500.0
 
 /control/global_path_provider:
