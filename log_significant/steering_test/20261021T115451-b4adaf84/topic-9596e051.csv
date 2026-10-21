@@ -1,0 +1,2 @@
+source_stamp_ns,received_ros_ns,received_monotonic_ns,motor_rpm,motor_rpm_mcu_ms,motor_rpm_valid
+,1792583709566136385,354306353977660,0,0,False
