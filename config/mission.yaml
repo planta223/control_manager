@@ -8,7 +8,7 @@
 
     # Motion Planning / Mission 공통 운용속도. 내부 메시지는 m/s로 변환.
     # 2026-10-18 등속 테스트 요청값; 수정 가능. 실측 차량 한계와는 별개.
-    cruise_speed_kph: 10.0
+    cruise_speed_kph: 20.0
 
 /control/mission_based_limit:
   ros__parameters:

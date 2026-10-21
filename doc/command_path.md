@@ -59,7 +59,7 @@ Selector 상태가 일시적으로 오래되어도 이미 인식한 pause를 임
 재개 상태 발행 이후에 측정된 위치/속도를 먼저 기다리며 정지 중 캐시된 측정으로 진행 위치를 갱신하지 않습니다.
 Selector도 재개 수락 이후 생성된 AUTO 명령만 선택하여 정지 전 명령이 다시 출력되는 것을 막습니다.
 최초 출발에서 유효 yaw를 한 번도 얻지 못한 경우에만 HEADING_BOOTSTRAP_ACTIVE로
-조향 0 직진을 허용한다. 직진 명령 시작부터 heading_bootstrap_timeout_s(현재 3초)를 적용한다.
+조향 0 직진을 허용한다. 직진 명령 시작부터 heading_bootstrap_timeout_s(현재 10초)를 적용한다.
 한 번 yaw를 확보한 뒤에는 pause/resume으로 직진 유예를 다시 부여하지 않는다.
 
 의도적인 정지(AUTO pause 또는 유효 MotionPlan.stop_request/속도 0)가 yaw 유효 상태에서

@@ -34,7 +34,7 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   pid.max_dt_s = positive("pid.max_dt_s", 0.5);
   pid.goal_tolerance_m = config.goal_tolerance_m;
   max_cross_track_m_ = positive("max_cross_track_m", 3.0);
-  heading_bootstrap_timeout_s_ = positive("heading_bootstrap_timeout_s", 3.0);
+  heading_bootstrap_timeout_s_ = positive("heading_bootstrap_timeout_s", 10.0);
   core::StoppedHeadingConfig heading_memory;
   heading_memory.enabled = param<bool>("stopped_heading.enabled", true);
   heading_memory.stop_speed_mps = nonnegative("stopped_heading.stop_speed_mps", 0.1);
