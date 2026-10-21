@@ -64,11 +64,13 @@
 
       # Motion Control 발행 토픽 (/control/motion_control)
       auto_cmd: /control/auto_cmd
+      # actual PP target/match/lookahead, observation only.
+      pp_diagnostic: /control/pp_diagnostic
 
       # Control Selector 발행 토픽 (/control/control_selector)
       selected_cmd: /control/selected_cmd
       status: /control/status
-      # 고규범 신규 로직 (2026-10-21): GNSS measured stop, separate from command FSM.
+      # GNSS measured stop, separate from command FSM.
       stop_status: /control/stop_status
 
       # Vehicle Interface 발행 토픽 (/control/vehicle_interface): 외부 trans 입력

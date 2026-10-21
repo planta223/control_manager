@@ -99,7 +99,7 @@ def run():
                                 capture_output=True, text=True, timeout=8)
         assert result.returncode != 0 and 'tracking_mode must be' in result.stdout + result.stderr
     print('PASS: removed ADAPTIVE_PURE_PURSUIT and invalid startup modes rejected', flush=True)
-    # 고규범 수정 (2026-10-21): config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
+    # config = yaml.safe_load((ROOT/'config/operation.yaml').read_text())
     config = yaml.safe_load((ROOT/'config/modes/test.yaml').read_text())
     config['/control/motion_control']['ros__parameters']['pid']['enabled'] = True
     config['/control/motion_control']['ros__parameters'].update({
@@ -309,7 +309,7 @@ def run():
                      values['selected_cmd'].valid and not values['selected_cmd'].target_brake,
                      mode+' AUTO run selected')
             spin_for(0.2)
-            # 고규범 신규 검증 (2026-10-21): goal completion retains the last tracking command.
+            # goal completion retains the last tracking command.
             steering_before_goal = values['auto_cmd'].target_steer_rad
             active['state_x']=19.8
             wait_for(node, lambda: command_reason('GOAL_REACHED') and values['selected_cmd'].valid and
@@ -319,7 +319,7 @@ def run():
                 spin_for(seconds)
                 assert command_reason('GOAL_REACHED') and values['auto_cmd'].valid
                 assert values['auto_cmd'].target_brake and values['auto_cmd'].target_speed_mps==0.0
-                # 고규범 수정: assert values['auto_cmd'].target_steer_rad==0.0
+                # assert values['auto_cmd'].target_steer_rad==0.0
                 assert abs(values['auto_cmd'].target_steer_rad - steering_before_goal) < 1e-6
                 print('PASS: '+mode+' completion survives '+label,flush=True)
 

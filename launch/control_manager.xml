@@ -15,12 +15,12 @@
   <arg name="vehicle_file" default="$(find-pkg-share control_manager)/config/vehicle.yaml"/>
   <arg name="map_file" default=""
        description="Global map JSON path override; empty keeps the selected mode map_file"/>
-  <!-- 고규범 신규 로직 (2026-10-21): measured stop observation shared with manual tests. -->
+  <!-- measured stop observation shared with manual tests. -->
   <arg name="stop_speed_mps" default="0.1"/>
   <arg name="stop_hold_s" default="0.5"/>
   <arg name="stop_log_root" default="/workspace/log/vehicle_stop"/>
   <node pkg="vehicle_stop" exec="stop_monitor" name="stop_monitor" namespace="/control" output="screen">
-    <!-- 고규범 수정: fixed /control/actuator_raw, /gnss/odom and /control/stop_status
+    <!-- fixed /control/actuator_raw, /gnss/odom and /control/stop_status
          are replaced by common pipeline/operation wiring. -->
     <param from="$(var pipeline_file)"/>
     <param from="$(var operation_file)"/>

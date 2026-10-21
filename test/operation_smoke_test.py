@@ -24,8 +24,8 @@ def command(executable, *params):
     args = [str(get_package_prefix('control_manager') + '/lib/control_manager/' + executable),
             '--ros-args', '-r', '__ns:=/control']
     for filename in ('vehicle.yaml', 'pipeline.yaml', 'mission.yaml', 'control.yaml', 'operation.yaml'):
-        # 고규범 수정 (2026-10-21): args += ['--params-file', str(ROOT / 'config' / filename)]
-        # 고규범 신규 검증: operation.yaml moved to modes/test.yaml; keep fixture startup current.
+        # args += ['--params-file', str(ROOT / 'config' / filename)]
+        # operation.yaml moved to modes/test.yaml; keep fixture startup current.
         path = ROOT / 'config/modes/test.yaml' if filename == 'operation.yaml' else ROOT / 'config' / filename
         args += ['--params-file', str(path)]
     name = executable[:-5] if executable.endswith('_node') else executable

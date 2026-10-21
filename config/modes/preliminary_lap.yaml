@@ -105,7 +105,18 @@
     rate_hz: 50.0                  # 제어 계산·명령 발행 주기; 센서 입력 주기와 독립.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
-    route_progress_enabled: false # 예선 지도용 점 개수·구간 경계 확정 후 활성화.
+    # route_progress_enabled: false
+    # MAP_preliminary 5032-point route; prevent crossing into a later branch.
+    # FRONT/MIDDLE/REAR are association search gates at approximate arc-length thirds,
+    # not competition task_sections. Map changes require a matching profile/restart.
+    route_progress_enabled: true
+    route_progress:
+      expected_points: 5032
+      front_end_index: 1677
+      rear_start_index: 3354
+      initial_search_m: 10.0
+      search_back_m: 3.0
+      search_forward_m: 10.0
     heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
     # 정지 후 재개는 control.yaml의 stopped_heading 정책 사용. 직진 bootstrap은 최초 확보 전만 허용.
     pid:

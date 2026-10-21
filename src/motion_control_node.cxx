@@ -16,6 +16,12 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   config.lookahead_max_m = positive("lookahead_max_m", 6.0);
   config.lookahead_gain_s = nonnegative("lookahead_gain_s", 1.0);
   config.goal_tolerance_m = nonnegative("goal_tolerance_m", 0.3);
+  // mission bend preview, not a change to physical steering limits.
+  config.curvature_lookahead_enabled = param<bool>("pp.curvature_lookahead_enabled", true);
+  config.curvature_error_m = positive("pp.curvature_error_m", 0.15);
+  config.curvature_preview_m = positive("pp.curvature_preview_m", 6.0);
+  config.curvature_sample_m = positive("pp.curvature_sample_m", 1.0);
+  config.minimum_lookahead_time_s = nonnegative("pp.minimum_lookahead_time_s", 0.6);
   goal_tolerance_m_=config.goal_tolerance_m;
   core::PidConfig pid;
   pid.enabled = param<bool>("pid.enabled", false);
@@ -70,6 +76,7 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
       control_status_->received = std::chrono::steady_clock::now();
     }));
   publisher_ = output<msg::VehicleCommand>("auto_cmd");
+  pp_diagnostic_publisher_ = output<msg::PurePursuitDiagnostic>("pp_diagnostic");
   previous_tick_ = std::chrono::steady_clock::now();
   tick([this] { update(); });
 }
@@ -80,9 +87,12 @@ void MotionControlNode::update() {
   auto stop = [this](const std::string &reason, bool valid = false) {
     tracking_->reset(); previous_path_.clear();
     goal_approach_seen_=false;
-    // 고규범 수정 (2026-10-21): previous zero-steering stop retained as a comment.
+    // paused/invalid paths must not leave a stale valid target in the viewer.
+    core::TrackingResult diagnostic; diagnostic.reason=reason;
+    publishPpDiagnostic(diagnostic);
+    // previous zero-steering stop retained as a comment.
     // publisher_->publish(toRos(core::stop(now().nanoseconds(), reason, valid), base_frame_));
-    // 고규범 신규 로직: do not recenter during any automatic stopping path.
+    // do not recenter during any automatic stopping path.
     publisher_->publish(toRos(stop_steering_.apply(core::stop(now().nanoseconds(), reason, valid)), base_frame_));
   };
   if (run_completed_) { stop("GOAL_REACHED", true); return; }
@@ -210,8 +220,10 @@ void MotionControlNode::update() {
     tracking_->reset(); previous_path_.clear();
     const core::Command straight{0.0, plan.target_speed_mps, false, true,
                                 now().nanoseconds(), "HEADING_BOOTSTRAP_ACTIVE"};
-    // 고규범 수정 (2026-10-21): publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
-    // 고규범 신규 로직: bootstrap output also participates in last-command memory.
+    core::TrackingResult diagnostic; diagnostic.reason="HEADING_BOOTSTRAP_ACTIVE";
+    publishPpDiagnostic(diagnostic); // bootstrap is not a PP target solution.
+    // publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
+    // bootstrap output also participates in last-command memory.
     publisher_->publish(toRos(stop_steering_.apply(core::limitAutomaticCommand(straight, limits_)), base_frame_));
     return;  // Never run PID / Pure Pursuit using an unavailable yaw.
   }
@@ -255,9 +267,34 @@ void MotionControlNode::update() {
     command = {result.steering_rad, plan.target_speed_mps, false, true,
                now().nanoseconds(), held_heading ? "HEADING_HOLD_ACTIVE:" + result.reason : result.reason};
   command = core::limitAutomaticCommand(command, limits_);
+  publishPpDiagnostic(result,&state,held_heading); // same state/match/heading source.
   // MotionPlan target speed capped at the vehicle limit. No speed PID or reverse tracking.
-  // 고규범 수정 (2026-10-21): publisher_->publish(toRos(command, base_frame_));
-  // 고규범 신규 로직: latch normal output and reuse it on goal/protection stops.
+  // publisher_->publish(toRos(command, base_frame_));
+  // latch normal output and reuse it on goal/protection stops.
   publisher_->publish(toRos(stop_steering_.apply(command), base_frame_));
+}
+void MotionControlNode::publishPpDiagnostic(const core::TrackingResult &result,const core::TrackingState *state,
+                                           bool heading_held) {
+  // typed observation for logging/overlay and gain tuning.
+  msg::PurePursuitDiagnostic msg;
+  msg.header=header(frame_);
+  if (pose_->value) msg.pose_stamp=pose_->value->header.stamp;
+  if (motion_->value) msg.motion_stamp=motion_->value->header.stamp;
+  msg.valid=result.pp.valid && result.valid && !result.goal_reached;
+  msg.reason=result.reason;
+  if (state) {msg.speed_mps=state->speed_mps;msg.used_yaw_rad=state->yaw_rad;}
+  msg.heading_held=heading_held;
+  if (msg.valid) {
+    msg.matched_segment=static_cast<std::uint32_t>(result.pp.match.segment);
+    msg.matched_fraction=result.pp.match.fraction;
+    msg.lateral_error_m=result.lateral_error_m;msg.heading_error_rad=result.heading_error_rad;
+    msg.target_x_m=result.pp.target.x_m;msg.target_y_m=result.pp.target.y_m;
+    msg.speed_lookahead_m=result.pp.speed_lookahead_m;
+    msg.effective_lookahead_m=result.pp.effective_lookahead_m;
+    msg.preview_curvature_per_m=result.pp.preview_curvature_per_m;
+    msg.minimum_lookahead_m=result.pp.minimum_lookahead_m;
+    msg.steering_rad=result.steering_rad;
+  }
+  pp_diagnostic_publisher_->publish(msg);
 }
 }  // namespace control_manager

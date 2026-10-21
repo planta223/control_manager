@@ -129,14 +129,14 @@ TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
   raw=cm::actuatorRaw(c,cfg);
   EXPECT_FLOAT_EQ(raw[0],-1.0F); EXPECT_FLOAT_EQ(raw[1],-1.0F);
   c.target_brake=true;
-  // 고규범 수정 (2026-10-21): EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
   EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{-1,0,1}));
   c=command(); c.valid=false;
-  // 고규범 수정: EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
   EXPECT_NEAR(cm::actuatorRaw(c,cfg)[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);
   EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],0); EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[2],1);
   c=command(); c.target_speed_mps=std::numeric_limits<double>::quiet_NaN();
-  // 고규범 수정: EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
   EXPECT_NEAR(cm::actuatorRaw(c,cfg)[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);
   EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],0); EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[2],1);
   EXPECT_EQ(cm::actuatorRaw(command(),{}),(std::array<float,3>{0,0,1}));
@@ -147,7 +147,7 @@ TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
     EXPECT_FALSE(cm::validActuatorConversion(invalid));
   }
 }
-// 고규범 신규 검증 (2026-10-21): safety stops must retain actual last protected steering.
+// safety stops must retain actual last protected steering.
 TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedValues) {
   cm::StopSteeringHold memory;
   EXPECT_DOUBLE_EQ(memory.apply(cm::stop(now_ns,"STARTUP")).target_steer_rad,0.0);
@@ -168,7 +168,7 @@ TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedVal
   EXPECT_DOUBLE_EQ(memory.apply(cm::protectActuatorCommand(c,now_ns,config())).target_steer_rad,0.1);
   EXPECT_DOUBLE_EQ(memory.apply(braking).target_steer_rad,0.1);
 }
-// 고규범 신규 검증 (2026-10-21): numerical conversion failure must not recenter either.
+// numerical conversion failure must not recenter either.
 TEST(StopSteering, ConversionOverflowKeepsSteering) {
   const cm::ActuatorConversionConfig cfg{std::numeric_limits<double>::min(), 1.0, 30.0, 1500.0};
   auto c=command();

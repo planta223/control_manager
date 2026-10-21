@@ -11,6 +11,7 @@ struct TrackingResult {
   bool valid{false}, goal_reached{false};
   double lateral_error_m{0.0}, heading_error_rad{0.0};
   std::string reason;
+  PurePursuitDiagnostic pp{};  // computed target geometry for analysis.
 };
 struct PidConfig {
   // Disabled placeholders. Gains and output bound require bench/vehicle tuning.

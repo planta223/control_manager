@@ -14,13 +14,14 @@ find_package(builtin_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(encoder_motor REQUIRED)
-# 고규범 수정 (2026-10-21): common observation messages, independent of manual input.
+# common observation messages, independent of manual input.
 find_package(vehicle_stop REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MissionMap.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
   "msg/PauseRequest.msg" "msg/TrafficLight.msg"
+  "msg/PurePursuitDiagnostic.msg" # tuning/overlay geometry.
   DEPENDENCIES std_msgs nav_msgs builtin_interfaces)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
@@ -33,7 +34,7 @@ function(add_control_node executable class_name)
   add_executable(${executable} src/main.cxx src/${executable}.cxx)
   target_compile_definitions(${executable} PRIVATE CONTROL_MANAGER_NODE_CLASS=${class_name})
   target_link_libraries(${executable} control_core "${cpp_typesupport_target}")
-  # 고규범 수정 (2026-10-21): nodes.hxx contains the shared CommandEvent publisher.
+  # nodes.hxx contains the shared CommandEvent publisher.
   # ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
   ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
   install(TARGETS ${executable} RUNTIME DESTINATION lib/${PROJECT_NAME})
@@ -65,6 +66,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_mission control_core)
   ament_add_gtest(test_tracking test/test_tracking.cxx)
   target_link_libraries(test_tracking control_core)
+  # curvature-aware PP geometry and response horizon.
+  ament_add_gtest(test_mission_pure_pursuit test/test_mission_pure_pursuit.cxx)
+  target_link_libraries(test_mission_pure_pursuit control_core)
   ament_add_gtest(test_route_progress test/test_route_progress.cxx)
   target_link_libraries(test_route_progress control_core)
   ament_add_gtest(test_ingress test/test_ingress.cxx)
@@ -76,9 +80,10 @@ install(TARGETS control_core EXPORT control_coreTargets ARCHIVE DESTINATION lib 
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
-install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc/estimators.md doc/command_path.md doc/terminal_console.md DESTINATION share/${PROJECT_NAME}/doc)
+# install the mission PP geometry/tuning report as well.
+install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc/estimators.md doc/command_path.md doc/terminal_console.md doc/mission_pure_pursuit.md DESTINATION share/${PROJECT_NAME}/doc)
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
-# 고규범 수정 (2026-10-21): shared CommandEvent appears in installed node headers.
+# shared CommandEvent appears in installed node headers.
 # ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
 ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
 ament_package()

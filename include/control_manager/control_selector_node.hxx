@@ -5,7 +5,7 @@ class ControlSelectorNode : public NodeBase {
  public: ControlSelectorNode();
  private:
   void update();
-  core::StopSteeringHold stop_steering_;  // 고규범 수정 (2026-10-21): selected output hold.
+  core::StopSteeringHold stop_steering_;  // selected output hold.
   core::ControlMode mode_{core::ControlMode::IDLE};
   bool paused_;
   std::int64_t last_pause_request_ns_{0};

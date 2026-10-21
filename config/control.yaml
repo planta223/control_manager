@@ -17,6 +17,17 @@
     lookahead_min_m: 2.0             # TUNE / NOT field validated
     lookahead_max_m: 6.0             # TUNE
     lookahead_gain_s: 1.0            # Ld = clamp(min + gain * speed, min, max)
+    # retain the PP steering equation; shorten lookahead at bends.
+    # Ld = clamp(min(Ld_speed, sqrt(8*curvature_error_m/abs(kappa_preview))), Ld_floor, max).
+    # Ld_floor = min(Ld_speed, max(min, speed*minimum_lookahead_time_s)).
+    # Fixed preview/sample distances avoid speed-dependent curvature feedback and point-density bias.
+    # These are software tuning candidates, NOT field-validated bounds on cross-track error.
+    pp:
+      curvature_lookahead_enabled: true # false reproduces the previous speed-only horizon.
+      curvature_error_m: 0.15
+      curvature_preview_m: 6.0
+      curvature_sample_m: 1.0
+      minimum_lookahead_time_s: 0.6 # speed-dependent floor, bounded by the speed-only horizon.
 
     # Motion Control PID / Pure Pursuit 공통 도착 판정 설정
     # 실측 wheelbase와 조향각 / 속도 제한은 vehicle.yaml 사용; 중복 기입하지 않음.

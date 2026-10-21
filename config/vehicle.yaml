@@ -14,6 +14,8 @@
       motor_to_wheel_ratio: 1.0      # USER_CONFIRMED: motor RPM / wheel RPM, direct drive
       # Vehicle command limits; degrees / km/h here, rad / m/s internally.
       limits:
+        # ±24 deg is TEMPORARY, not a measured physical maximum.
+        # User expects larger actual steering angles; update from measurement when confirmed.
         min_steering_deg: -24.0      # USER_SPECIFIED: right negative
         max_steering_deg:  24.0      # USER_SPECIFIED: left positive
         min_speed_kph:    -132.89    # USER_SPECIFIED: reverse negative

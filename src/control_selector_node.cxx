@@ -40,10 +40,10 @@ void ControlSelectorNode::update() {
     return toCore(*in->value);
   };
   const bool paused = mode_ == core::ControlMode::AUTO && paused_;
-  // 고규범 수정 (2026-10-21): previous arbitration output did not preserve stop steering.
+  // previous arbitration output did not preserve stop steering.
   // const auto selected = paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
   //   : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds());
-  // 고규범 신규 로직: pause/stale/invalid paths retain the last selected steering command.
+  // pause/stale/invalid paths retain the last selected steering command.
   const auto selected = stop_steering_.apply(paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
     : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds()));
   selected_publisher_->publish(toRos(selected, frame_));

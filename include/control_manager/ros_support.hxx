@@ -23,6 +23,7 @@
 #include "control_manager/msg/vehicle_command.hpp"
 #include "control_manager/msg/control_status.hpp"
 #include "control_manager/msg/pause_request.hpp"
+#include "control_manager/msg/pure_pursuit_diagnostic.hpp"
 
 namespace control_manager {
 // Central defaults; all topic names may be overridden with topics.<key> parameters.
@@ -49,8 +50,9 @@ inline const std::map<std::string, std::string> kTopics{
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
   {"actuator_raw", "/control/actuator_raw"},
   {"status", "/control/status"},
-  {"stop_status", "/control/stop_status"},  // 고규범 수정 (2026-10-21): measured state.
+  {"stop_status", "/control/stop_status"},  // measured state.
   {"pause_request", "/control/pause_request"},
+  {"pp_diagnostic", "/control/pp_diagnostic"},  // exact target geometry.
 };
 template<class T> struct Input {
   typename T::ConstSharedPtr value;

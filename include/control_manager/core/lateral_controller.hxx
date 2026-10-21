@@ -2,9 +2,18 @@
 #include "control_manager/core/types.hxx"
 
 namespace control_manager::core {
+// actual target geometry for tuning and map overlays.
+struct PurePursuitDiagnostic {
+  bool valid{false};
+  Point target;
+  PathMatch match;
+  double speed_lookahead_m{0.0}, effective_lookahead_m{0.0}, preview_curvature_per_m{0.0};
+  double minimum_lookahead_m{0.0};
+};
 struct LateralResult {
   double steering_rad{0.0};
   bool valid{false}, goal_reached{false};
+  PurePursuitDiagnostic pp{};
 };
 class LateralController {
  public:
@@ -15,6 +24,10 @@ struct PurePursuitConfig {
   double wheelbase_m{1.328};
   double lookahead_min_m{2.0}, lookahead_max_m{6.0}, lookahead_gain_s{1.0};
   double goal_tolerance_m{0.3};
+  // fixed preview avoids speed/curvature reference cycles.
+  bool curvature_lookahead_enabled{true};
+  double curvature_error_m{0.15}, curvature_preview_m{6.0}, curvature_sample_m{1.0};
+  double minimum_lookahead_time_s{0.6};  // Model-tested software candidate; actuator delay is unmeasured.
 };
 // Forward-only baseline. No actuator calibration, rate limiter, or loop progress tracking.
 class AdaptivePurePursuit final : public LateralController {

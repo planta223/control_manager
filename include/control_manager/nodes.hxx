@@ -1,5 +1,5 @@
 #pragma once
-#include "vehicle_stop/msg/command_event.hpp"  // 고규범 수정 (2026-10-21).
+#include "vehicle_stop/msg/command_event.hpp"
 #include <optional>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include "control_manager/ros_support.hxx"
@@ -108,7 +108,11 @@ class MotionControlNode : public NodeBase {
  public: MotionControlNode();
  private:
   void update();
-  core::StopSteeringHold stop_steering_;  // 고규범 수정 (2026-10-21): last command hold.
+  // expose geometry without changing the command contract.
+  void publishPpDiagnostic(const core::TrackingResult &, const core::TrackingState *state = nullptr,
+                           bool heading_held = false);
+  rclcpp::Publisher<msg::PurePursuitDiagnostic>::SharedPtr pp_diagnostic_publisher_;
+  core::StopSteeringHold stop_steering_;  // last command hold.
   std::unique_ptr<core::TrackingController> tracking_;
   std::unique_ptr<core::RouteProgressTracker> route_progress_;
   std::size_t route_phase_{0};
@@ -136,12 +140,12 @@ class VehicleInterfaceNode : public NodeBase {
  public: VehicleInterfaceNode();
  private:
   void update();
-  core::StopSteeringHold stop_steering_;  // 고규범 수정: authoritative protected output hold.
+  core::StopSteeringHold stop_steering_;  // authoritative protected output hold.
   core::ActuatorProtectionConfig config_;
   core::ActuatorConversionConfig conversion_;
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr actuator_publisher_;
-  // 고규범 신규 로직 (2026-10-21): only real actuator_raw publications get COMMAND events.
+  // only real actuator_raw publications get COMMAND events.
   rclcpp::Publisher<vehicle_stop::msg::CommandEvent>::SharedPtr command_event_publisher_;
   std::string frame_;
 };

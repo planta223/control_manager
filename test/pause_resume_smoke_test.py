@@ -88,8 +88,8 @@ def run():
         return (reason('PURE_PURSUIT_ACTIVE') or reason('PURE_PURSUIT_ACTIVE_LIMITED')) and values['auto_cmd'].valid and \
             values['selected_cmd'].valid and not values['selected_cmd'].target_brake
 
-    # 고규범 수정 (2026-10-21): previous checks required raw == [0.,0.,1.].
-    # 고규범 신규 검증: stop requires motor=0/brake=1; steering retains the previous output.
+    # previous checks required raw == [0.,0.,1.].
+    # stop requires motor=0/brake=1; steering retains the previous output.
     def paused():
         return 'status' in values and values['status'].paused and \
             values['status'].fsm_state == ControlStatus.STOPPED and \
@@ -97,8 +97,8 @@ def run():
             'raw' in values and list(values['raw'].data)[1:] == [0.,1.]
 
     def pause():
-        # 고규범 수정 (2026-10-21): state['speed'] = 0. was previously set before requesting pause.
-        # 고규범 신규 검증: capture the actual last output, then assert pause preserves it.
+        # state['speed'] = 0. was previously set before requesting pause.
+        # capture the actual last output, then assert pause preserves it.
         held_steering = values['raw'].data[0]
         request(True)
         wait_for(node, lambda: paused() and abs(values['raw'].data[0] - held_steering) < 1e-6,

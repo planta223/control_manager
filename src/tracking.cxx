@@ -30,9 +30,15 @@ TrackingResult TrackingController::compute(const TrackingState &s, const std::ve
   const auto error = pathError(s, path, match);
   if (!error.valid) { out.reason = "INVALID_TRACKING_GEOMETRY"; return out; }
   const auto result = match ? legacy_pp_.compute(s,path,*match) : legacy_pp_.compute(s,path);
+  // original return retained; new return also carries diagnostic geometry.
+  // return {result.steering_rad, result.valid, result.goal_reached,
+  //         error.lateral_error_m, error.heading_error_rad,
+  //         result.valid ? (result.goal_reached ? "GOAL_REACHED" : "PURE_PURSUIT_ACTIVE")
+  //                      : "PURE_PURSUIT_COMPUTE_FAILED"};
+  // propagate the actual PP target without recomputing it in observers.
   return {result.steering_rad, result.valid, result.goal_reached,
           error.lateral_error_m, error.heading_error_rad,
           result.valid ? (result.goal_reached ? "GOAL_REACHED" : "PURE_PURSUIT_ACTIVE")
-                       : "PURE_PURSUIT_COMPUTE_FAILED"};
+                       : "PURE_PURSUIT_COMPUTE_FAILED",result.pp};  // expose geometry.
 }
 }  // namespace control_manager::core

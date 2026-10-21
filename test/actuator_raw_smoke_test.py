@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""고규범 수정 (2026-10-21): 24-degree scale fixture and stop hold.
+"""24-degree scale fixture and stop hold.
 Vehicle Interface -> existing trans encoders; no UDP sender or hardware starts."""
 import math
 import struct
@@ -67,17 +67,17 @@ def run():
         active.update(steer=math.radians(12), speed=-10/3.6)
         assert expect([-.5, -speed_raw, 0], 'left steering and reverse match existing trans') == (-12, -7, 0)
         active.update(steer=0., speed=0., brake=True)
-        # 고규범 수정 (2026-10-21): assert expect([0, 0, 1], 'brake encodes misc bit 7') == (0, 0, 128)
+        # assert expect([0, 0, 1], 'brake encodes misc bit 7') == (0, 0, 128)
         assert expect([-.5, 0, 1], 'brake holds prior left steering and misc bit 7') == (-12, 0, 128)
         active.update(steer=-math.radians(12), speed=10/3.6, brake=False, valid=True)
         expect([.5, speed_raw, 0], 'brake release returns to normal command')
         active.update(valid=False)
-        # 고규범 수정: expect([0, 0, 1], 'invalid selected command outputs stop')
+        # expect([0, 0, 1], 'invalid selected command outputs stop')
         expect([.5, 0, 1], 'invalid selected command holds prior right steering')
         active.update(valid=True)
         expect([.5, speed_raw, 0], 'normal command recovers')
         active.update(steer=math.radians(31))
-        # 고규범 수정: expect([0, 0, 1], 'vehicle steering limit is checked before conversion')
+        # expect([0, 0, 1], 'vehicle steering limit is checked before conversion')
         expect([.5, 0, 1], 'out-of-range steering cannot replace prior valid steering')
         active.update(steer=-math.radians(12))
         launch('vehicle.wheel_diameter_m:=1.0')

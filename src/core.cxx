@@ -8,13 +8,13 @@ bool fresh(std::int64_t stamp, std::int64_t now, double timeout_s) {
          static_cast<double>(now - stamp) / 1e9 <= timeout_s;
 }
 Command stop(std::int64_t now, const std::string &reason, bool valid) {
-  // 고규범 수정 (2026-10-21): previous factory result retained below for reference.
+  // previous factory result retained below for reference.
   // return {0.0, 0.0, true, valid, now, reason};
-  // 고규범 수정: this neutral factory must pass through each node's StopSteeringHold.
+  // this neutral factory must pass through each node's StopSteeringHold.
   return {0.0, 0.0, true, valid, now, reason};
 }
 Command StopSteeringHold::apply(Command command) {
-  // 고규범 신규 로직 (2026-10-21): remember only finite, valid, non-braking output.
+  // remember only finite, valid, non-braking output.
   if (command.valid && !command.target_brake && std::isfinite(command.target_steer_rad) &&
       std::isfinite(command.target_speed_mps)) {
     last_steer_rad_ = command.target_steer_rad;
@@ -69,11 +69,11 @@ bool validActuatorConversion(const ActuatorConversionConfig &cfg) {
   return true;
 }
 std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfig &cfg) {
-  // 고규범 수정 (2026-10-21): previous brake conversion forced steering to zero.
+  // previous brake conversion forced steering to zero.
   // if (!c.valid || c.target_brake || !validActuatorConversion(cfg) ||
   //     !std::isfinite(c.target_steer_rad) || !std::isfinite(c.target_speed_mps))
   //   return {0.0F, 0.0F, 1.0F};
-  // 고규범 신규 로직: preserve the angle resolved by StopSteeringHold during braking.
+  // preserve the angle resolved by StopSteeringHold during braking.
   if (!validActuatorConversion(cfg) || !std::isfinite(c.target_steer_rad))
     return {0.0F, 0.0F, 1.0F};
   const double pi = std::acos(-1.0);
@@ -84,8 +84,8 @@ std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfi
   const double motor_rpm = c.target_speed_mps * 60.0 / (pi * cfg.wheel_diameter_m) *
                            cfg.motor_to_wheel_ratio;
   const double speed = motor_rpm / cfg.motor_full_scale_rpm;
-  // 고규범 수정 (2026-10-21): if (!std::isfinite(steering) || !std::isfinite(speed)) return {0.0F, 0.0F, 1.0F};
-  // 고규범 신규 로직: conversion overflow also brakes without recentering the held angle.
+  // if (!std::isfinite(steering) || !std::isfinite(speed)) return {0.0F, 0.0F, 1.0F};
+  // conversion overflow also brakes without recentering the held angle.
   if (!std::isfinite(steering) || !std::isfinite(speed)) return {steering_raw, 0.0F, 1.0F};
   return {static_cast<float>(std::clamp(steering, -1.0, 1.0)),
           static_cast<float>(std::clamp(speed, -1.0, 1.0)), 0.0F};
