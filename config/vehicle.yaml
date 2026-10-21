@@ -14,10 +14,10 @@
       motor_to_wheel_ratio: 1.0      # USER_CONFIRMED: motor RPM / wheel RPM, direct drive
       # Vehicle command limits; degrees / km/h here, rad / m/s internally.
       limits:
-        # ±24 deg is TEMPORARY, not a measured physical maximum.
-        # User expects larger actual steering angles; update from measurement when confirmed.
-        min_steering_deg: -24.0      # USER_SPECIFIED: right negative
-        max_steering_deg:  24.0      # USER_SPECIFIED: left positive
+        # GPS 원선회 기반 좌우 공통 등가 조향각. 중간값은 선형으로 가정.
+        # 기계 끝단과 별도이며, PC UDP는 float32 degree로 ±17.01까지 전송.
+        min_steering_deg: -17.01    # right negative
+        max_steering_deg:  17.01    # left positive
         min_speed_kph:    -132.89    # USER_SPECIFIED: reverse negative
         max_speed_kph:     132.89    # USER_SPECIFIED: forward positive
     lidar_mount:
