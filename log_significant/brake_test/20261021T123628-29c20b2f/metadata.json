@@ -1,0 +1,83 @@
+{
+  "node": "brake_test_recorder",
+  "topics": [
+    "/vehicle/brake_test",
+    "/gnss/odom",
+    "/control/global_pose",
+    "/control/motion_state",
+    "/control/pp_diagnostic",
+    "/control/auto_cmd",
+    "/control/selected_cmd",
+    "/control/actuator_raw",
+    "/control/status",
+    "/control/stop_status",
+    "/vehicle/stop_status",
+    "/vehicle/command_events",
+    "/motor_feedback",
+    "/steering_feedback"
+  ],
+  "reference_path_topic": "/control/reference_path",
+  "record_queue_size": 4096,
+  "ROS_DOMAIN_ID": "0",
+  "docker_image_id": "sha256:45f927a726b9a5b95bf1bfb42bbc4432363cda550f6a164f673a42ca60cb6778",
+  "container_id": "371157a5d644bbba780ad5efe01c1ce8fdc1f632573cdf4ce9b4e7e9832834c0",
+  "source_sha256": {
+    "recorder_node.py": "d2af271058cb7568ca432f629a6fa800b138f70b9dc28eed3f4ed7287a448e52",
+    "path_monitor.py": "77bd890183b340f3b57b013185421d59aab764f239ef8ad35172e2c14bd117d5",
+    "run_recorder.py": "bb2b4b285d0491a05bc3732b2a3f04d18b2b517cbeb180b3f260d9965800caee",
+    "stop_observation.py": "a988d20aeaf88e5fe38929d51f0210fc0fa3168dc8d0144c73fa42bf2d008577"
+  },
+  "created_at": "2026-10-21T12:36:28.567418+00:00",
+  "nonfinite_policy": "JSON null; source validity is preserved",
+  "clock": "source_stamp_ns and received_ros_ns: ROS time; received_monotonic_ns: local monotonic",
+  "complete": true,
+  "snapshots": [
+    {
+      "source": "/workspace/src/manual_control/manual_control/brake_test_logic.py",
+      "file": "config/0-brake_test_logic.py",
+      "sha256": "0b7b2ba506fc6112678781c41b2a0af35f985204028345b7d8abbc9d8b841a01"
+    },
+    {
+      "source": "/workspace/src/manual_control/manual_control/brake_test_node.py",
+      "file": "config/1-brake_test_node.py",
+      "sha256": "c3adc2256c2ff2d928c6e26007acf2ec7c2a7bb77be9657c148a2dc5413d9343"
+    },
+    {
+      "source": "/workspace/src/manual_control/manual_control/brake_report.py",
+      "file": "config/2-brake_report.py",
+      "sha256": "a423c0d03f706ac3063e9c7663636101df47007e4a2c1aa0a82f7bcea225d4b2"
+    },
+    {
+      "source": "/workspace/src/manual_control/launch/brake_test_support.launch.py",
+      "file": "config/3-brake_test_support.launch.py",
+      "sha256": "9b379cb5bdd7cac3b67991018a299873d96a6106c747e558358ac8189b21bc8e"
+    }
+  ],
+  "snapshot_errors": [],
+  "written": 13324,
+  "dropped": 0,
+  "errors": [],
+  "pending": 0,
+  "files": {
+    "topic-d10b05d3.csv": {
+      "topic": "/steering_feedback",
+      "type": "encoder_motor/msg/SteeringFeedback"
+    },
+    "topic-5a85527a.csv": {
+      "topic": "/gnss/odom",
+      "type": "nav_msgs/msg/Odometry"
+    },
+    "topic-325707a8.csv": {
+      "topic": "/vehicle/stop_status",
+      "type": "vehicle_recorder/msg/StopStatus"
+    },
+    "topic-19790bc4.csv": {
+      "topic": "/vehicle/command_events",
+      "type": "vehicle_recorder/msg/CommandEvent"
+    },
+    "topic-1ed6bd5a.csv": {
+      "topic": "/vehicle/brake_test",
+      "type": "std_msgs/msg/String"
+    }
+  }
+}

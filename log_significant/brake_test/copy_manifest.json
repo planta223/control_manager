@@ -1,0 +1,208 @@
+{
+  "copied_at_kst": "2026-10-22T04:37:28.669139+09:00",
+  "verification": "All source files copied with relative paths preserved and SHA-256 hashes matched.",
+  "records": [
+    {
+      "test": "10km/h",
+      "source": "main/log/vehicle_recorder/braking/20261021T123628-29c20b2f",
+      "destination": "20261021T123628-29c20b2f",
+      "files": [
+        {
+          "path": "config/0-brake_test_logic.py",
+          "bytes": 4605,
+          "sha256": "0b7b2ba506fc6112678781c41b2a0af35f985204028345b7d8abbc9d8b841a01"
+        },
+        {
+          "path": "config/1-brake_test_node.py",
+          "bytes": 10726,
+          "sha256": "c3adc2256c2ff2d928c6e26007acf2ec7c2a7bb77be9657c148a2dc5413d9343"
+        },
+        {
+          "path": "config/2-brake_report.py",
+          "bytes": 2391,
+          "sha256": "a423c0d03f706ac3063e9c7663636101df47007e4a2c1aa0a82f7bcea225d4b2"
+        },
+        {
+          "path": "config/3-brake_test_support.launch.py",
+          "bytes": 1828,
+          "sha256": "9b379cb5bdd7cac3b67991018a299873d96a6106c747e558358ac8189b21bc8e"
+        },
+        {
+          "path": "messages.jsonl",
+          "bytes": 7316847,
+          "sha256": "cfb379184321ca7962ea3cd7318b42e334e2e86e61e4e52994e0214a57e739e9"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 2965,
+          "sha256": "3a84584f58ef7e2d84e24c9fc4f002f27634c593b428216e8ef9f23522e21603"
+        },
+        {
+          "path": "topic-19790bc4.csv",
+          "bytes": 649398,
+          "sha256": "eba35eb7c83c8c28f91f334abb5d2c6553cd57cf3742dfec5e89542fd06516e7"
+        },
+        {
+          "path": "topic-1ed6bd5a.csv",
+          "bytes": 106588,
+          "sha256": "51915861f03ae6a119969fbd09d974978ff0522a85072aea58a1f77dd12b9068"
+        },
+        {
+          "path": "topic-325707a8.csv",
+          "bytes": 877556,
+          "sha256": "c3b8511190fb1615228a9f6a1b11c1b06ea8c4663906580010c36089d6761953"
+        },
+        {
+          "path": "topic-5a85527a.csv",
+          "bytes": 819032,
+          "sha256": "9fbf3b584dfdca7aeaf1c79889c87bc93e3cbb7818502ffffcb31a1f442c670a"
+        },
+        {
+          "path": "topic-d10b05d3.csv",
+          "bytes": 231479,
+          "sha256": "7120260797c00abe23b2e5e987f53906d39cdb0d197e76e6f05d133bea7f4f63"
+        }
+      ],
+      "file_count": 11,
+      "bytes": 10023415
+    },
+    {
+      "test": "20km/h",
+      "source": "main/log/vehicle_recorder/braking/20261021T124850-ec2f774f",
+      "destination": "20261021T124850-ec2f774f",
+      "files": [
+        {
+          "path": "README.md",
+          "bytes": 2918,
+          "sha256": "99361786803844f635692c7ea3c05050242ded88e4f8534562ab8851155e7b36"
+        },
+        {
+          "path": "config/0-brake_test_logic.py",
+          "bytes": 4606,
+          "sha256": "62cbb99a995bfa9437dd1eba54b9b5336bee9fdedd5f172319be86d447b4c525"
+        },
+        {
+          "path": "config/1-brake_test_node.py",
+          "bytes": 10727,
+          "sha256": "0c8f78b14b4231d340669efda2c8e484486717e3b39fd1c2113bb6ee10e717cb"
+        },
+        {
+          "path": "config/2-brake_report.py",
+          "bytes": 2391,
+          "sha256": "a423c0d03f706ac3063e9c7663636101df47007e4a2c1aa0a82f7bcea225d4b2"
+        },
+        {
+          "path": "config/3-brake_test_support.launch.py",
+          "bytes": 1828,
+          "sha256": "9b379cb5bdd7cac3b67991018a299873d96a6106c747e558358ac8189b21bc8e"
+        },
+        {
+          "path": "messages.jsonl",
+          "bytes": 9080404,
+          "sha256": "b374afc656c5982e5e4c2d791465261fa435b7e46771afd36c0ac1a79c38aa9e"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 2965,
+          "sha256": "8f17e0409809b566327bf5851e6823ee43c827e9bb4776550c538f9f0aff4dff"
+        },
+        {
+          "path": "topic-19790bc4.csv",
+          "bytes": 920931,
+          "sha256": "99bbbe8faed905b97d6f37018b71b07cc06d121c772b96307d834221434d68bf"
+        },
+        {
+          "path": "topic-1ed6bd5a.csv",
+          "bytes": 150435,
+          "sha256": "3f23139db1b5ca46e57ea96a68b07e8bc3134e87f48db5ccaf58bcd1db65d7ae"
+        },
+        {
+          "path": "topic-325707a8.csv",
+          "bytes": 1023894,
+          "sha256": "8498543d4e93acf198576f70805b8b1fdd6e782dde70f40f2c3710ae266e4e71"
+        },
+        {
+          "path": "topic-5a85527a.csv",
+          "bytes": 995831,
+          "sha256": "7998013d3da2b62b90ad43f2dee6474c1b188dba46e082c70998e09bff1bc87f"
+        },
+        {
+          "path": "topic-d10b05d3.csv",
+          "bytes": 268177,
+          "sha256": "58006fca6854f81512eba3f7647ce4688535dcf1cbe8e13ef59c2888dbb5f03d"
+        }
+      ],
+      "file_count": 12,
+      "bytes": 12465107
+    },
+    {
+      "test": "30km/h",
+      "source": "main/log/vehicle_recorder/braking/20261021T130403-80ac952d",
+      "destination": "20261021T130403-80ac952d",
+      "files": [
+        {
+          "path": "README.md",
+          "bytes": 3083,
+          "sha256": "01ccb2ce313fc41e9423ff1b0691d6ed26acd91fc3b7bc66b1c1deb6e357d094"
+        },
+        {
+          "path": "config/0-brake_test_logic.py",
+          "bytes": 4606,
+          "sha256": "62cbb99a995bfa9437dd1eba54b9b5336bee9fdedd5f172319be86d447b4c525"
+        },
+        {
+          "path": "config/1-brake_test_node.py",
+          "bytes": 10727,
+          "sha256": "0c8f78b14b4231d340669efda2c8e484486717e3b39fd1c2113bb6ee10e717cb"
+        },
+        {
+          "path": "config/2-brake_report.py",
+          "bytes": 2391,
+          "sha256": "a423c0d03f706ac3063e9c7663636101df47007e4a2c1aa0a82f7bcea225d4b2"
+        },
+        {
+          "path": "config/3-brake_test_support.launch.py",
+          "bytes": 1828,
+          "sha256": "9b379cb5bdd7cac3b67991018a299873d96a6106c747e558358ac8189b21bc8e"
+        },
+        {
+          "path": "messages.jsonl",
+          "bytes": 9159301,
+          "sha256": "ae6d45a81aeabf4af24282fe1e0cb0b72c7e32a4c94f467408e1acc0e595954c"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 2965,
+          "sha256": "2b231a5eef69f680a126e945bb4ce7df2c314a8acf3a0494b4b7287683269293"
+        },
+        {
+          "path": "topic-19790bc4.csv",
+          "bytes": 1020434,
+          "sha256": "81c4736af0a1426ae26c4c370e411295c3348661f94ab79d38a87d9ded15c442"
+        },
+        {
+          "path": "topic-1ed6bd5a.csv",
+          "bytes": 167533,
+          "sha256": "70ff29889c59187cf2ff1ac570e94c0a1f36b7e56a909ed11cee335f6acdd34c"
+        },
+        {
+          "path": "topic-325707a8.csv",
+          "bytes": 1025184,
+          "sha256": "5c79d7717b57da439783bf3454f7961dc2973baee1c3cb2fa2bcb558cb2d11a4"
+        },
+        {
+          "path": "topic-5a85527a.csv",
+          "bytes": 902754,
+          "sha256": "0988644fe93a31c14fd8ec0f4bc4f28641d98a5dd23074977db3e14ae27b6e9d"
+        },
+        {
+          "path": "topic-d10b05d3.csv",
+          "bytes": 253937,
+          "sha256": "959039f697ee4da04ae5b9f28ab6d17facda3333cdbae7f5072627ceb2702175"
+        }
+      ],
+      "file_count": 12,
+      "bytes": 12554743
+    }
+  ]
+}
