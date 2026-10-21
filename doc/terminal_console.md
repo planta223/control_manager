@@ -36,7 +36,7 @@ AUTO 운용만 지원하며 외부 센서와 trans 송신기는 자동 실행하
 속도 0 / brake=true를 확인한다. dry_run=true이면 이 정지 명령 확인 후 launch를 종료한다.
 <!-- 실제 출력 모드에서는 추가로 유효하고 최신인 MotionState 속도가 기본 0.1 m/s 이하로
 0.5초 유지되는지 확인한다. 확인할 수 없으면 메뉴와 제어 노드를 유지하고 종료 대기를 표시한다. -->
-실제 출력 모드에서는 공용 vehicle_stop의 `/control/stop_status`를 사용한다.
+실제 출력 모드에서는 공용 vehicle_recorder의 `/control/stop_status`를 사용한다.
 서로 다른 유효 GNSS 샘플의 `|v| <= 0.1 m/s`가 0.5초 지속되어야 정지를 확정하고,
 시작/확정 샘플 시각을 각각 보존한다. 센서가 무효·끊김이면 확인하지 않는다.
 종료 요청 후 새 샘플이 있어야 하며, 이미 연속 정지 중이었다면 기존 구간 시작 시각을 유지한다.
@@ -60,7 +60,7 @@ main의 bind mount에 의해 호스트의 `main/log/control_console/`에 보존�
 - config/: 실제 사용한 YAML 사본과 지도(사용 시).
 - source-changes.patch, control_console.py: 미커밋 변경과 메뉴 코드 사본.
 - console-error.log: 메뉴 자체의 예외가 발생했을 때의 상세 기록.
-- stop_observation/: 공용 관측 노드의 GNSS samples.csv·정지 events.jsonl·설정 metadata.json.
+- 주행 시계열은 별도 `vehicle_recorder`의 기록 폴더에 저장한다. 정지 관측 노드는 파일을 쓰지 않는다.
 
 ROS 로그 레벨은 낮추지 않는다. 화면 출력만 분리하며 로그를 /dev/null로 버리지 않는다.
 launch 출력은 파일로 직접 연결하여 메뉴가 로그를 읽거나 화면을 갱신하는 속도와 분리한다.

@@ -12,7 +12,7 @@ AUTO는 `operation.yaml`의 `start_paused: true`에 따라 일시정지 상태�
 정지·일시정지·도착·입력 이상 시 마지막 유효 조향 지령을 유지합니다.
 Motion Control / Selector / Vehicle Interface에 각각 지령 이력을 두고,
 최종 보호를 통과한 출력 이력이 실제 actuator 조향 유지의 기준입니다. 초기 이력이 없을 때만 0입니다.
-공용 `vehicle_stop` 관측 노드가 명령 발행·UDP 전송 시각과 GNSS 실측 정지를 별도로 제공합니다.
+공용 `vehicle_recorder` 관측 노드가 명령 발행·UDP 전송 시각과 GNSS 실측 정지를 별도로 제공합니다.
 결과 토픽은 `/control/stop_status`, 기본 기준은 `|v| <= 0.1 m/s`가 새 GNSS 샘플에서 0.5초 지속입니다.
 관측 노드는 명령을 생성하거나 송신하지 않습니다. 수동제어에서도 같은 패키지를 따로 실행할 수 있습니다.
 긴 정지 후 heading만 미확보이면 명시적 재개당 최대 3초 직진으로 확보하며 실패 시 정지합니다.

@@ -14,7 +14,7 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   (void)topic("stop_status");  // expose common observer wiring to console discovery.
   if (!dry_run) actuator_publisher_ = output<std_msgs::msg::Float32MultiArray>("actuator_raw", rclcpp::QoS(1));
   // publish a timestamped observation alongside raw commands.
-  if (!dry_run) command_event_publisher_ = create_publisher<vehicle_stop::msg::CommandEvent>(
+  if (!dry_run) command_event_publisher_ = create_publisher<vehicle_recorder::msg::CommandEvent>(
     param<std::string>("command_events_topic", "/vehicle/command_events"), 100);
   RCLCPP_INFO(get_logger(), "%s", dry_run ?
     "[DRY_RUN] actuator protection active; actuator_raw disabled" :
@@ -35,10 +35,10 @@ void VehicleInterfaceNode::update() {
     std_msgs::msg::Float32MultiArray raw;
     raw.data.assign(values.begin(), values.end());
     // publication time is separate from trans's actual socket send time.
-    vehicle_stop::msg::CommandEvent event;
+    vehicle_recorder::msg::CommandEvent event;
     event.header = header(frame_);
     event.command_topic = actuator_publisher_->get_topic_name();
-    event.stage = vehicle_stop::msg::CommandEvent::COMMAND;
+    event.stage = vehicle_recorder::msg::CommandEvent::COMMAND;
     event.steering_raw = values[0]; event.speed_raw = values[1]; event.brake = values[2] != 0.0F;
     actuator_publisher_->publish(raw);
     command_event_publisher_->publish(event);

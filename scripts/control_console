@@ -27,7 +27,7 @@ from rcl_interfaces.srv import GetParameters
 import yaml
 
 from control_manager.msg import ControlStatus, MotionState, PauseRequest, VehicleCommand
-from vehicle_stop.msg import StopStatus  # shared measured-stop observer.
+from vehicle_recorder.msg import StopStatus  # shared measured-stop observer.
 
 MODES = ('test', 'brake_inspection', 'preliminary_lap', 'final_lap')
 CONTROL_NODES = {'global_path_provider', 'sensor_interface', 'global_state_estimator',
@@ -320,9 +320,8 @@ def prepare(args, journal):
     journal.snapshot('source_mode.yaml', operation)
     command = ['ros2', 'launch', 'control_manager', 'control_manager.xml', 'mode:=' + args.mode,
                'operation_file:=' + str(resolved)]
-    # one detector and one run folder for console and monitor.
-    command += ['stop_speed_mps:=' + str(args.stop_speed_mps), 'stop_hold_s:=' + str(args.stop_hold_s),
-                'stop_log_root:=' + str(journal.path / 'stop_observation')]
+    # Stop observation is independent of the optional recording process.
+    command += ['stop_speed_mps:=' + str(args.stop_speed_mps), 'stop_hold_s:=' + str(args.stop_hold_s)]
     for name, filename in files.items():
         command.append(name + '_file:=' + journal.snapshot(name + '.yaml', filename))
     if args.map_file:

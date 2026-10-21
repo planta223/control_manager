@@ -15,7 +15,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(encoder_motor REQUIRED)
 # common observation messages, independent of manual input.
-find_package(vehicle_stop REQUIRED)
+find_package(vehicle_recorder REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
@@ -36,7 +36,7 @@ function(add_control_node executable class_name)
   target_link_libraries(${executable} control_core "${cpp_typesupport_target}")
   # nodes.hxx contains the shared CommandEvent publisher.
   # ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
-  ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
+  ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_recorder)
   install(TARGETS ${executable} RUNTIME DESTINATION lib/${PROJECT_NAME})
 endfunction()
 add_control_node(sensor_interface_node SensorInterfaceNode)
@@ -85,5 +85,5 @@ install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
 # shared CommandEvent appears in installed node headers.
 # ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
-ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
+ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_recorder)
 ament_package()

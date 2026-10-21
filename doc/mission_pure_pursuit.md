@@ -10,8 +10,9 @@ Pure Pursuit 조향식과 실제 목표점까지의 현 길이 분모는 유지�
 `config/vehicle.yaml`의 수치는 실측 전까지 유지했다. PP 식은 이 각도를 상수로 사용하지 않는다.
 조향 제한은 기존처럼 차량 설정에서 읽어 최종 명령에 적용한다.
 
-이번 변경은 횡제어와 그 진단이다. 최고속도 제한 아래에서 곡률·제동거리에 따라 목표속도를
-낮추는 종방향 계획, 신호·정지선 미션, dashboard overlay/저장 UI는 추가하지 않았다.
+PP 변경 자체는 횡제어와 그 진단이다. 최고속도 제한 아래에서 곡률·제동거리에 따라 목표속도를
+낮추는 종방향 계획과 신호·정지선 미션은 아직 추가하지 않았다. 후속 관측 구성에서는
+`monitor_1021`의 표시 전용 dashboard overlay와 별도 `vehicle_recorder` 기록을 사용한다.
 학교 시험맵 `MAP_test.json`도 이번 작업 시점에는 없어 생성하거나 예선맵으로 대체하지 않았다.
 
 ## 계산
@@ -71,7 +72,7 @@ PID, 정지·일시정지, 입력 불량, heading bootstrap, 도착 상태는 �
 유효하지 않은 target 좌표를 지도에 표시하면 안 된다.
 
 이 토픽은 실제 사용한 목표점을 다시 계산하지 않고 관측하도록 만든 기반이다.
-overlay를 연결할 때는 `reference_path`·`global_pose`·이 토픽을 같은 map frame으로 표시하고,
+`monitor_1021`은 `reference_path`·`global_pose`·이 토픽을 같은 map frame으로 표시한다. 분석 시에는
 `motion_state`·`auto_cmd`·`selected_cmd`·최종 송신값과 함께 시각을 보존하면 된다.
 진단 한 토픽만으로 전체 위치 궤적이나 최종 액추에이터 응답을 복원할 수는 없다.
 

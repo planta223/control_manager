@@ -1,5 +1,5 @@
 #pragma once
-#include "vehicle_stop/msg/command_event.hpp"
+#include "vehicle_recorder/msg/command_event.hpp"
 #include <optional>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include "control_manager/ros_support.hxx"
@@ -146,7 +146,7 @@ class VehicleInterfaceNode : public NodeBase {
   std::shared_ptr<Input<msg::VehicleCommand>> selected_;
   rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr actuator_publisher_;
   // only real actuator_raw publications get COMMAND events.
-  rclcpp::Publisher<vehicle_stop::msg::CommandEvent>::SharedPtr command_event_publisher_;
+  rclcpp::Publisher<vehicle_recorder::msg::CommandEvent>::SharedPtr command_event_publisher_;
   std::string frame_;
 };
 }  // namespace control_manager
