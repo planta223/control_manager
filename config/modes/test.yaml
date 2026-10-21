@@ -10,20 +10,21 @@
     # Sensor Interface 구독토픽 활성화 (공통 key: 내부 소비 노드도 같은 값을 확인)
     # false이면 해당 subscription과 대응 relay publisher를 생성하지 않음.
     gnss_enabled: true
-    imu_enabled: false
-    rgb_enabled: false
-    lidar_enabled: false
-    depth_enabled: false
-    lane_enabled: false             # 외부 Lane 입력 + lane_observation + lane_pose
+    imu_enabled: false              # 미구현: IMU 융합/제어 활용. 현재 raw relay만 존재.
+    depth_enabled: false            # 미구현: depth 기반 판단. 현재 raw relay만 존재.
+    lane_enabled: false             # 미구현: LANE/HYBRID 경로 생성. 관측 전달만 존재.
+    cone_enabled: false             # 타입·필드 미정; perception_types.cone 확정 후 활성화.
+    obstacle_enabled: false         # 선택 구현, 타입·필드 미정; perception_types.obstacle 확정 후 활성화.
+    traffic_enabled: false           # 이 모드에서는 신호 결과를 사용하지 않음.
     motor_feedback_enabled: true    # MotorFeedback 구독 + sensor_motor_feedback raw relay
     steering_feedback_enabled: true # SteeringFeedback 구독 + sensor_steering_feedback raw relay
 
     # Sensor Interface 발행토픽 활성화
     # sensor_*와 lane_observation은 위 구독 활성화와 연동, 별도 중복 스위치 없음.
     # 예를들어 gnss_enabled = true 이면 sensor_gnss_enabled = true 이다.
-    vehicle_feedback_enabled: false # true이면 현재는 stamp=0 / invalid heartbeat만 발행
 
-    # Object Manager 구독·발행토픽 활성화 (false = NONE, 센서 구독/출력/timer 없음)
+    # Object Manager 결과 해석·집계 미구현. false = 입력 구독/출력/timer 없음.
+    # 위 결과 수신·relay 스위치와 독립; 집계 미구현 상태에서 true로 변경하지 않음.
     object_state_enabled: false     # Motion Planning / Mission도 같은 key로 의존성 조절
 
     # Mission 노드·구간 정책 활성화와 상수는 mission.yaml에서 설정.

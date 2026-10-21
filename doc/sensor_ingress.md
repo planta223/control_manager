@@ -3,6 +3,43 @@
 현재 estimator 통합 사항은 [estimators.md](estimators.md)가 기준입니다.
 후반 command path의 현재 책임과 연결은 [command_path.md](command_path.md)를 참조합니다.
 
+## 2026-10-21 인식 결과 입력 변경
+
+`/control/vehicle_feedback`도 제거했다. 실제 값 변환 없이 invalid heartbeat만 발행하던
+내부 확장용 토픽이므로 GNSS 기반 네 모드에는 필요하지 않다. 메시지/활성화 설정과
+WHEEL의 해당 구독을 제거했다. `/motor_feedback`, `/steering_feedback`의 원본 relay는 유지하며,
+WHEEL은 입력 구독 없이 기존 NOT_IMPLEMENTED/invalid 상태를 명시한다.
+
+현재 pipeline과 4개 modes YAML에서는 원시 RGB/LiDAR 입력/relay를 제거했다.
+IMU·depth·lane은 미구현 용도를 주석으로 표시하고 비활성으로 유지한다.
+기존 raw relay/관측 전달이 존재해도 IMU 융합·depth 판단·LANE/HYBRID 주행은 미구현이다.
+
+| 외부 토픽 | 내부 relay | 활성화 설정 | ROS 타입 설정 |
+|---|---|---|---|
+| /sensors/detectCone | /control/sensors/cone | cone_enabled | perception_types.cone (미정, 빈 값) |
+| /sensors/detectObstacle | /control/sensors/obstacle | obstacle_enabled | perception_types.obstacle (미정, 빈 값) |
+| /sensors/detectTraffic | /control/sensors/traffic | traffic_enabled | perception_types.traffic = control_manager/msg/TrafficLight |
+
+Sensor Interface가 활성화된 결과만 같은 타입으로 relay한다. 원본 timestamp·valid·필드는
+변경하지 않는다. 입력·출력 모두 SensorDataQoS로 reliable/best-effort 발행자를 수신한다.
+타입은 외부 발행자와 정확히 일치하고 해당 메시지 패키지가 실행 환경에 설치되어야 한다.
+활성화했는데 타입이 비어 있거나 잘못됐으면 시작 오류로 알린다.
+false이면 결과 subscription과 relay publisher를 모두 만들지 않는다.
+
+test: 세 입력 모두 false. brake_inspection: cone 필수 예정이나 타입 확정 전까지 false.
+preliminary_lap/final_lap: traffic만 true. obstacle은 선택 구현이므로 false이다.
+cone/obstacle 타입 확정 후 pipeline.yaml의 perception_types에 `패키지/msg/타입`을 넣고,
+필요한 modes YAML의 해당 enabled를 true로 바꾼다. 임의 필드를 추가하지 않았다.
+
+TrafficLight.msg는 modes/README.md의 traffic_id/status/timestamp/valid/color_confidence 계약을 따른다.
+같은 필드여도 다른 패키지 이름의 메시지는 별개 타입이므로, 팀원이 외부 패키지를 사용하면
+perception_types.traffic도 그 타입으로 변경해야 한다.
+
+이번 변경은 결과 수신 경로까지다. 결과를 ObjectState로 검증·변환하고 목표 신호 선택,
+현시 계산, 콘 제동 지점 판단을 수행하는 adapter/mission은 미구현이다.
+따라서 4개 모드의 object_state_enabled는 false로 유지한다. 원시 RGB/depth는 Object Manager가
+더 이상 구독하지 않는다. 아래 raw RGB/LiDAR 및 VehicleFeedback 흐름·과거 시험 수치는 이전 구현 이력이다.
+
 ## 1. 기존 역할
 
 sensor_interface는 GNSS/IMU/RGB/LiDAR/Depth raw relay였습니다. LanePose는 외부에서 planner로

@@ -12,14 +12,11 @@ namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
  public: SensorInterfaceNode();
  private:
+  void perceptionRelay(const std::string &key);
   void laneCallback(msg::LanePose::ConstSharedPtr sample);
-  void publishFeedback(const msg::VehicleFeedback &sample);
   rclcpp::Publisher<msg::LanePose>::SharedPtr lane_publisher_;
-  rclcpp::Publisher<msg::VehicleFeedback>::SharedPtr feedback_publisher_;
-  std::string base_frame_;
   double input_timeout_s_;
-  // Encoder feedback, like GNSS, is relayed without normalization. The legacy
-  // normalized VehicleFeedback publisher is independent of these two inputs.
+  // Encoder feedback, like GNSS, is relayed without normalization.
   template<class T> void relay(const std::string &source, const std::string &destination) {
     if (topic(source).empty() || topic(destination).empty())
       throw std::invalid_argument(source + " and " + destination + " require nonempty topics");
@@ -39,7 +36,6 @@ class GlobalStateEstimatorNode : public NodeBase {
   msg::MotionState estimateMotion();
   std::shared_ptr<Input<nav_msgs::msg::Odometry>> gnss_;
   std::shared_ptr<Input<sensor_msgs::msg::Imu>> imu_;
-  std::shared_ptr<Input<msg::VehicleFeedback>> feedback_;
   rclcpp::Publisher<msg::GlobalPose>::SharedPtr pose_publisher_;
   rclcpp::Publisher<msg::MotionState>::SharedPtr motion_publisher_;
   core::PoseMode pose_mode_;

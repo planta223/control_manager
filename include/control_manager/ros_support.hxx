@@ -12,11 +12,9 @@
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include "control_manager/core/types.hxx"
 #include "control_manager/msg/global_pose.hpp"
 #include "control_manager/msg/motion_state.hpp"
-#include "control_manager/msg/vehicle_feedback.hpp"
 #include "control_manager/msg/lane_pose.hpp"
 #include "control_manager/msg/object_state.hpp"
 #include "control_manager/msg/mission_limit.hpp"
@@ -29,18 +27,20 @@
 namespace control_manager {
 // Central defaults; all topic names may be overridden with topics.<key> parameters.
 inline const std::map<std::string, std::string> kTopics{
-  {"gnss", "/gnss/odom"}, {"imu", "/imu/data"}, {"rgb", "/camera/image_raw"},
-  {"depth", "/camera_dep/depth/image_raw"}, {"lidar", "/lidar/points"},
+  {"gnss", "/gnss/odom"}, {"imu", "/imu/data"},
+  {"depth", "/camera_dep/depth/image_raw"},
+  {"detect_cone", "/sensors/detectCone"}, {"detect_obstacle", "/sensors/detectObstacle"},
+  {"detect_traffic", "/sensors/detectTraffic"},
   {"sensor_gnss", "/control/sensors/gnss_odom"}, {"sensor_imu", "/control/sensors/imu"},
-  {"sensor_rgb", "/control/sensors/rgb"}, {"sensor_depth", "/control/sensors/depth"},
-  {"sensor_lidar", "/control/sensors/lidar"},
+  {"sensor_depth", "/control/sensors/depth"},
+  {"sensor_cone", "/control/sensors/cone"}, {"sensor_obstacle", "/control/sensors/obstacle"},
+  {"sensor_traffic", "/control/sensors/traffic"},
   {"external_lane", ""},  // No agreed external Lane topic; explicitly configure the adapter.
   {"external_motor_feedback", "/motor_feedback"},
   {"external_steering_feedback", "/steering_feedback"},
   {"sensor_motor_feedback", "/control/sensors/motor_feedback"},
   {"sensor_steering_feedback", "/control/sensors/steering_feedback"},
   {"lane_observation", "/control/lane_observation"},
-  {"vehicle_feedback", "/control/vehicle_feedback"},
   {"global_pose", "/control/global_pose"}, {"motion_state", "/control/motion_state"}, {"lane_pose", "/control/lane_pose"},
   {"object_state", "/control/object_state"}, {"global_path", "/control/global_path"},
   {"reference_path", "/control/reference_path"}, {"mission_limit", "/control/mission_limit"},
@@ -91,6 +91,12 @@ class NodeBase : public rclcpp::Node {
   std::string topic(const std::string &key) {
     const auto name = "topics." + key;
     return has_parameter(name) ? get_parameter(name).as_string() : param(name, kTopics.at(key));
+  }
+  std::string perceptionType(const std::string &key) {
+    auto type = param<std::string>("perception_types." + key,
+      key == "traffic" ? "control_manager/msg/TrafficLight" : "");
+    if (type.empty()) throw std::invalid_argument(key + "_enabled requires nonempty perception_types." + key);
+    return type;
   }
   template<class T> std::shared_ptr<Input<T>> input(const std::string &key,
                                                     rclcpp::QoS qos = rclcpp::QoS(10)) {

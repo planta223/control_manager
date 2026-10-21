@@ -33,11 +33,7 @@ GlobalStateEstimatorNode::GlobalStateEstimatorNode() : NodeBase("global_state_es
       throw std::invalid_argument("GNSS_IMU mode requires imu_enabled=true (algorithm still NOT_IMPLEMENTED)");
     imu_ = input<sensor_msgs::msg::Imu>("sensor_imu", rclcpp::SensorDataQoS());
   }
-  if (motion_mode_ == core::MotionMode::WHEEL) {
-    if (!enabled("vehicle_feedback_enabled", true))
-      throw std::invalid_argument("WHEEL mode requires vehicle_feedback_enabled=true (algorithm still NOT_IMPLEMENTED)");
-    feedback_ = input<msg::VehicleFeedback>("vehicle_feedback");
-  }
+  // WHEEL is reserved/unimplemented; no placeholder feedback subscription.
   pose_publisher_ = output<msg::GlobalPose>("global_pose");
   motion_publisher_ = output<msg::MotionState>("motion_state");
   if (pose_mode_ == core::PoseMode::GNSS_IMU || motion_mode_ == core::MotionMode::GNSS_IMU)
@@ -116,8 +112,8 @@ msg::MotionState GlobalStateEstimatorNode::estimateMotion() {
     return out;
   }
   if (motion_mode_ == core::MotionMode::WHEEL) {
-    // Only internal feedback belongs here, never GNSS as a fallback requirement.
-    // TODO verified actual feedback calibration/freshness/alignment, then v/L*tan(delta)
+    // TODO verified motor/steering calibration, source time and alignment, then v/L*tan(delta).
+    // Raw encoder relays are available, but no estimator adapter is implemented.
     // using wheelbase_m_ from vehicle.yaml. No WHEEL algorithm exists yet.
     out.reason = "WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED";
     return out;

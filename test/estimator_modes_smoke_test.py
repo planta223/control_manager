@@ -8,7 +8,7 @@ import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
-from control_manager.msg import GlobalPose, MotionState, VehicleFeedback, LanePose
+from control_manager.msg import GlobalPose, MotionState, LanePose
 from smoke_test import ENV, observe, wait_for
 from state_split_smoke_test import start, settle
 
@@ -18,12 +18,10 @@ def run_mode(pose_mode, motion_mode):
     values = observe(node)
     pubs = {key: node.create_publisher(cls, topic, qos) for key,cls,topic,qos in [
         ('gnss',Odometry,'/control/sensors/gnss_odom',qos_profile_sensor_data),
-        ('imu',Imu,'/control/sensors/imu',qos_profile_sensor_data),
-        ('feedback',VehicleFeedback,'/control/vehicle_feedback',10)]}
+        ('imu',Imu,'/control/sensors/imu',qos_profile_sensor_data)]}
     needs_gnss = pose_mode != 'NONE' or motion_mode in {'GNSS','GNSS_IMU'}
     needs_imu = pose_mode == 'GNSS_IMU' or motion_mode == 'GNSS_IMU'
-    needs_feedback = motion_mode == 'WHEEL'
-    state = {'gnss': needs_gnss, 'imu': needs_imu, 'feedback': needs_feedback, 'poison': False}
+    state = {'gnss': needs_gnss, 'imu': needs_imu, 'poison': False}
     def publish():
         stamp = node.get_clock().now().to_msg()
         if state['gnss']:
@@ -37,13 +35,6 @@ def run_mode(pose_mode, motion_mode):
             if state['poison']:
                 imu.header.stamp.sec-=10; imu.angular_velocity.z=float('nan')
             pubs['imu'].publish(imu)
-        if state['feedback']:
-            fb=VehicleFeedback(speed_mps=1.,steering_angle_rad=.1,speed_valid=True,steering_valid=True)
-            fb.header.frame_id='base_link'; fb.header.stamp=copy.deepcopy(stamp)
-            if state['poison']:
-                fb.header.stamp.sec-=10; fb.speed_valid=False; fb.steering_valid=False
-                fb.speed_mps=float('nan'); fb.steering_angle_rad=float('inf')
-            pubs['feedback'].publish(fb)
     timer=node.create_timer(.05,publish)
     stack=start('global_state_estimator','modes_'+pose_mode+'_'+motion_mode,
                 'pose_mode:='+pose_mode,'motion_mode:='+motion_mode)
@@ -66,11 +57,11 @@ def run_mode(pose_mode, motion_mode):
                        for i in node.get_subscriptions_info_by_topic(topic))
         wait_for(node,lambda: subscribed('/control/sensors/gnss_odom')==needs_gnss and
                  subscribed('/control/sensors/imu')==needs_imu and
-                 subscribed('/control/vehicle_feedback')==needs_feedback,
+                 not subscribed('/control/vehicle_feedback'),
                  'only selected source dependencies subscribed: '+pose_mode+'/'+motion_mode)
         assert not subscribed('/gnss/odom') and not subscribed('/imu/data')
-        # Poison unused sensor/feedback inputs. No output may inherit their invalidity.
-        state.update(imu=True,feedback=True,poison=True)
+        # Poison unused IMU input. No output may inherit their invalidity.
+        state.update(imu=True,poison=True)
         settle(node,.7)
         assert match()
         assert values['global_pose'].valid==(pose_mode=='GNSS')

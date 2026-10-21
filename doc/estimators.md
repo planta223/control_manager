@@ -15,11 +15,11 @@ C++ class만 GlobalStateEstimatorNode / LanePoseEstimatorNode 표기를 사용�
 - LanePose: lane-relative lateral error(m)·heading error(rad)·confidence·source Header.
 
 ```text
-GNSS / IMU / actual VehicleFeedback        External Lane AI
+GNSS / IMU                               External Lane AI
                   \                         /
                         sensor_interface
                       /                 \
-        internal GNSS/IMU/feedback    lane_observation
+        internal GNSS/IMU            lane_observation
                     |                       |
           global_state_estimator     lane_state_estimator
               /          \                 |
@@ -59,7 +59,7 @@ Vehicle Control / Guidance / Tracking 모드는 operation.yaml의 시작 설정�
 | GlobalPose | NONE | 없음 | POSE_DISABLED |
 | MotionState | GNSS | sensors/gnss_odom | GNSS speed; yaw_rate_valid=false |
 | MotionState | GNSS_IMU | sensors/gnss_odom + sensors/imu | GNSS_IMU_NOT_IMPLEMENTED |
-| MotionState | WHEEL | vehicle_feedback | WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED |
+| MotionState | WHEEL | 없음 (입력 adapter 미구현) | WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED |
 | MotionState | NONE | 없음 | MOTION_DISABLED |
 
 NONE은 정상 disabled configuration이며 오류 로그를 내지 않습니다. disabled 출력은 Header frame만 설정하고
@@ -95,8 +95,9 @@ GNSS stamp의 sec<0 또는 nanosec>=1e9는 시간 변환 전에 거부합니다.
 ```
 
 이 조합은 정상 기동합니다. GlobalPose는 POSE_DISABLED이고 GNSS 입력을 요구하지 않습니다.
-MotionState는 내부 VehicleFeedback만의 확장 지점이며 현재 WHEEL 자체가 미구현이므로 invalid입니다.
-GNSS absence가 실패 이유가 아니며 유효 feedback fixture를 넣어도 가짜 yaw-rate/speed를 만들지 않습니다.
+현재 WHEEL 자체가 미구현이므로 MotionState는 invalid입니다. 확장용 VehicleFeedback 토픽은
+제거했으며 원시 motor/steering relay의 단위·시간 정합 adapter는 추후 구현이 필요합니다.
+GNSS absence가 실패 이유가 아니며 가짜 yaw-rate/speed를 만들지 않습니다.
 미래 bicycle model의 wheelbase는 vehicle.yaml에서 읽고 실제 측정 단위/시간·보정 계약 뒤에만 사용해야 합니다.
 
 ## 7. 제거된 기존 이름 (이행 기록에만 사용)
@@ -124,7 +125,6 @@ GNSS absence가 실패 이유가 아니며 유효 feedback fixture를 넣어도 
 | /control/sensors/imu | sensor_interface (optional) | global_state_estimator (GNSS_IMU 선택 시) |
 | /control/sensors/motor_feedback | sensor_interface (raw relay) | 아직 estimator 소비 미구현; GNSS 모드 유지 |
 | /control/sensors/steering_feedback | sensor_interface (raw relay) | 아직 estimator 소비 미구현; GNSS 모드 유지 |
-| /control/vehicle_feedback | sensor_interface (현재 unavailable) | global_state_estimator (WHEEL) |
 | /control/global_pose | global_state_estimator | planning / tracking |
 | /control/motion_state | global_state_estimator | motion planning / tracking |
 | /control/lane_observation | sensor_interface | lane_state_estimator |

@@ -7,9 +7,9 @@ import subprocess
 import time
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Imu, Image, PointCloud2
+from sensor_msgs.msg import Imu, Image
 from nav_msgs.msg import Odometry
-from control_manager.msg import LanePose, VehicleFeedback, MotionState
+from control_manager.msg import LanePose, MotionState
 from smoke_test import ROOT, ENV, Stack, observe, wait_for
 from state_split_smoke_test import settle, start
 
@@ -46,8 +46,6 @@ def run():
     counts = {'lane': 0}
     raw = [('gnss',Odometry,'/gnss/odom','/control/sensors/gnss_odom'),
            ('imu',Imu,'/imu/data','/control/sensors/imu'),
-           ('rgb',Image,'/camera/image_raw','/control/sensors/rgb'),
-           ('lidar',PointCloud2,'/lidar/points','/control/sensors/lidar'),
            ('depth',Image,'/camera_dep/depth/image_raw','/control/sensors/depth')]
     pubs = {key:node.create_publisher(cls,external,qos_profile_sensor_data)
             for key,cls,external,internal in raw}
@@ -60,8 +58,6 @@ def run():
     def lane_receive(msg):
         values['lane'] = msg; counts['lane'] += 1
     node.create_subscription(LanePose,'/control/lane_pose',lane_receive,10)
-    node.create_subscription(VehicleFeedback,'/control/vehicle_feedback',
-                             lambda m:values.__setitem__('feedback',m),10)
     node.create_subscription(MotionState,'/test/wheel_motion_state',
                              lambda m:values.__setitem__('wheel_motion',m),10)
     state = {'lane':'good','raw':True,'lane_send':True}
@@ -79,10 +75,8 @@ def run():
             if key=='imu':
                 msg.orientation.w = 1.; msg.angular_velocity.z = .12
                 msg.angular_velocity_covariance[8] = .08
-            if key in ['rgb','depth']:
+            if key=='depth':
                 msg.height=1; msg.width=2; msg.encoding='mono8'; msg.step=2; msg.data=[12,34]
-            if key=='lidar':
-                msg.height=1; msg.width=1; msg.point_step=4; msg.row_step=4; msg.data=[1,2,3,4]
             if state['raw']:
                 sent[(key,stamp.sec,stamp.nanosec)] = msg; pubs[key].publish(msg)
         lane = LanePose(lateral_error_m=-.2,heading_error_rad=.7,confidence=.9)
@@ -106,15 +100,13 @@ def run():
     # No external contract is enabled implicitly by default.
     default=start('sensor_interface','ingress_default')
     try:
-        wait_for(node,lambda:'feedback' in values,'default ingress announces unavailable internal feedback')
         settle(node,.7)
         assert counts['lane']==0
         external_subs=node.get_subscriptions_info_by_topic('/test/external_lane')
         assert all(s.node_name!='sensor_interface' for s in external_subs)
-        fb=values['feedback']
-        assert not fb.speed_valid and not fb.steering_valid
-        assert fb.header.stamp.sec==fb.header.stamp.nanosec==0
-        print('PASS: no guessed external Lane/feedback subscription; unavailable stamp stays zero',flush=True)
+        assert not node.get_publishers_info_by_topic('/control/vehicle_feedback')
+        assert not node.get_subscriptions_info_by_topic('/control/vehicle_feedback')
+        print('PASS: no guessed external Lane or placeholder feedback endpoints',flush=True)
     finally: default.close()
     values.clear()
     wheel=Stack(['ros2','run','control_manager','global_state_estimator','--ros-args',
@@ -148,7 +140,7 @@ def run():
                  'planner consumes ingress Lane; no path algorithm introduced')
         wait_for(node,lambda:'wheel_motion' in values and
                  values['wheel_motion'].reason=='WHEEL_FEEDBACK_CONTRACT_NOT_IMPLEMENTED',
-                 'WHEEL interface connected but estimator remains unsupported')
+                 'WHEEL remains unsupported without placeholder feedback')
         assert not values['wheel_motion'].speed_valid and not values['wheel_motion'].yaw_rate_valid
         assert values['wheel_motion'].header.stamp.sec==values['wheel_motion'].header.stamp.nanosec==0
         def subscribers(topic):
@@ -157,9 +149,8 @@ def run():
         def publishers(topic):
             return {i.node_name for i in node.get_publishers_info_by_topic(topic)
                     if i.node_namespace=='/control'}
-        wait_for(node,lambda:'wheel_motion_fixture' in subscribers('/control/vehicle_feedback'),
-                 'internal feedback subscriber graph discovered')
-        assert publishers('/control/vehicle_feedback')=={'sensor_interface'}
+        assert not subscribers('/control/vehicle_feedback')
+        assert not publishers('/control/vehicle_feedback')
         assert publishers('/control/lane_pose')=={'lane_state_estimator'}
         assert publishers('/control/lane_observation')=={'sensor_interface'}
         assert subscribers('/control/lane_observation')=={'lane_state_estimator'}

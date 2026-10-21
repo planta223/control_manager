@@ -6,17 +6,20 @@
     topics:
       # 외부 토픽: 센서 노드 / 외부 Lane AI가 발행, Sensor Interface가 구독
       gnss: /gnss/odom                # Existing GNSS default, SensorDataQoS
-      imu: /imu/data
-      rgb: /camera/image_raw
-      depth: /camera_dep/depth/image_raw
-      lidar: /lidar/points
-      external_lane: ""            # lane_enabled=true일 때 필수; 토픽·wire 계약 합의 필요.
+      imu: /imu/data                 # 미구현: raw relay만 존재, IMU 융합/제어 활용 미구현.
+      depth: /camera_dep/depth/image_raw # 미구현: raw relay만 존재, 거리 판단 미구현.
+      external_lane: ""            # 미구현: 외부 계약·LANE/HYBRID 경로 생성 미구현.
       # Adapter input type: control_manager/msg/LanePose; confirm external wire type with Lane team.
       # Supplied values: lateral_error_m, heading_error_rad, confidence, header.stamp.
       # encoder_motor의 통합 메시지를 GNSS처럼 그대로 relay한다.
       # 단위·부호·MCU tick·valid 보존. 정규화/합성/WHEEL 추정은 별도 작업.
       external_motor_feedback: /motor_feedback       # encoder_motor/msg/MotorFeedback
       external_steering_feedback: /steering_feedback # encoder_motor/msg/SteeringFeedback
+
+      # 외부 인식 결과: Sensor Interface가 수신. 원시 RGB/LiDAR는 구독하지 않음.
+      detect_cone: /sensors/detectCone
+      detect_obstacle: /sensors/detectObstacle
+      detect_traffic: /sensors/detectTraffic
 
       # Global Path Provider 발행 토픽: 기존 최종 지도 파일을 읽어 발행, Path Planning이 구독
       # map_file=""이면 파일 제공자 비활성; 대신 외부 nav_msgs/Path 발행자를 연결 가능.
@@ -30,22 +33,22 @@
       pause_request: /control/pause_request # PauseRequest; Control Selector의 AUTO 일시정지/재개 입력
 
       # Sensor Interface 발행 토픽 (/control/sensor_interface)
+      sensor_imu: /control/sensors/imu # 미구현: IMU 융합 미구현, relay만 존재.
+      sensor_depth: /control/sensors/depth # 미구현: depth 기반 판단 미구현.
+      lane_observation: /control/lane_observation # 미구현: Lane 경로 생성 미구현.
+      sensor_cone: /control/sensors/cone #구현 예정
+      sensor_obstacle: /control/sensors/obstacle # 구현 미정
+      sensor_traffic: /control/sensors/traffic # 구현 예정
       sensor_gnss: /control/sensors/gnss_odom
-      sensor_imu: /control/sensors/imu
-      sensor_rgb: /control/sensors/rgb
-      sensor_depth: /control/sensors/depth
-      sensor_lidar: /control/sensors/lidar
       sensor_motor_feedback: /control/sensors/motor_feedback
       sensor_steering_feedback: /control/sensors/steering_feedback
-      lane_observation: /control/lane_observation
-      vehicle_feedback: /control/vehicle_feedback # Legacy normalized contract; raw relay와 별개, 현재 invalid
 
       # Global State Estimator 발행 토픽 (/control/global_state_estimator)
       global_pose: /control/global_pose
       motion_state: /control/motion_state
 
       # Lane State Estimator 발행 토픽 (/control/lane_state_estimator)
-      lane_pose: /control/lane_pose
+      lane_pose: /control/lane_pose # 미구현: Lane 제어 미구현, 관측 전달만 존재.
 
       # Object Manager 발행 토픽 (/control/object_manager)
       object_state: /control/object_state
@@ -68,6 +71,13 @@
 
       # Vehicle Interface 발행 토픽 (/control/vehicle_interface): 외부 trans 입력
       actuator_raw: /control/actuator_raw # Float32MultiArray [steering, speed, brake]; 우회전/전진 +
+
+    # 외부 발행자와 동일한 ROS 타입이 필요. 빈 타입은 해당 enabled=false 유지.
+    # Cone/Obstacle 필드는 README에서 미정이므로 임의 메시지를 만들지 않음.
+    perception_types:
+      cone: ""
+      obstacle: ""
+      traffic: control_manager/msg/TrafficLight
 
 /control/vehicle_interface:
   ros__parameters:

@@ -49,21 +49,20 @@ def activation_graph():
              'topics.external_motor_feedback:=/test/motor',
              'topics.external_steering_feedback:=/test/steering')
     pairs = [('/gnss/odom', '/control/sensors/gnss_odom'),
-             ('/imu/data', '/control/sensors/imu'), ('/camera/image_raw', '/control/sensors/rgb'),
-             ('/lidar/points', '/control/sensors/lidar'),
+             ('/imu/data', '/control/sensors/imu'),
+             ('/sensors/detectTraffic', '/control/sensors/traffic'),
              ('/camera_dep/depth/image_raw', '/control/sensors/depth'),
              ('/test/lane', '/control/lane_observation'),
              ('/test/motor', '/control/sensors/motor_feedback'),
              ('/test/steering', '/control/sensors/steering_feedback')]
     for label, extra, expected in [
-            ('gnss_feedback', (), {0, 6, 7}),
+            ('gnss_feedback', (), {0, 5, 6}),
             ('gnss_only', ('motor_feedback_enabled:=false',
                            'steering_feedback_enabled:=false'), {0}),
-            ('all_supported', ('imu_enabled:=true', 'rgb_enabled:=true', 'lidar_enabled:=true',
-                               'depth_enabled:=true', 'lane_enabled:=true',
-                               'vehicle_feedback_enabled:=true'), set(range(8))),
-            ('motor_only', ('gnss_enabled:=false', 'steering_feedback_enabled:=false'), {6}),
-            ('steering_only', ('gnss_enabled:=false', 'motor_feedback_enabled:=false'), {7}),
+            ('all_supported', ('imu_enabled:=true', 'traffic_enabled:=true',
+                               'depth_enabled:=true', 'lane_enabled:=true'), set(range(7))),
+            ('motor_only', ('gnss_enabled:=false', 'steering_feedback_enabled:=false'), {5}),
+            ('steering_only', ('gnss_enabled:=false', 'motor_feedback_enabled:=false'), {6}),
             ('all_off', ('gnss_enabled:=false', 'motor_feedback_enabled:=false',
                          'steering_feedback_enabled:=false'), set())]:
         stack = Stack(command('sensor_interface_node', *wired, *extra), 'operation_' + label)
@@ -74,7 +73,7 @@ def activation_graph():
                            owns(node, output, 'sensor_interface', True) == (i in expected)
                            for i, (source, output) in enumerate(pairs))
             wait_for(node, matches, 'subscriptions and relay publishers: ' + label)
-            assert owns(node, '/control/vehicle_feedback', 'sensor_interface', True) == (label == 'all_supported')
+            assert not owns(node, '/control/vehicle_feedback', 'sensor_interface', True)
         finally:
             stack.close()
             wait_for(node, lambda: ('sensor_interface', '/control') not in node.get_node_names_and_namespaces(), 'ingress stopped')
@@ -101,7 +100,6 @@ def rejection_tests():
     cases = [
         ('global_state_estimator', ('gnss_enabled:=false',), 'requires gnss_enabled'),
         ('global_state_estimator', ('motion_mode:=GNSS_IMU',), 'requires imu_enabled'),
-        ('global_state_estimator', ('motion_mode:=WHEEL',), 'requires vehicle_feedback_enabled'),
         ('sensor_interface_node', ('lane_enabled:=true',), 'requires a nonempty'),
         ('sensor_interface_node', ("topics.external_motor_feedback:=''",), 'require nonempty topics'),
         ('sensor_interface_node', ("topics.external_steering_feedback:=''",), 'require nonempty topics'),

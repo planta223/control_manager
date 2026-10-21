@@ -7,13 +7,13 @@ SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
   // Single ingress for real-time external observations and actual vehicle feedback.
   // Map/Path and operator/manual commands have separate owners.
   if (enabled("gnss_enabled", true)) relay<nav_msgs::msg::Odometry>("gnss", "sensor_gnss");
-  if (enabled("rgb_enabled", true)) relay<sensor_msgs::msg::Image>("rgb", "sensor_rgb");
-  if (enabled("lidar_enabled", true)) relay<sensor_msgs::msg::PointCloud2>("lidar", "sensor_lidar");
+  for (const auto &key : {"cone", "obstacle", "traffic"})
+    if (enabled(std::string(key) + "_enabled", false)) perceptionRelay(key);
+  // 미구현: IMU 융합 / depth 판단 / Lane 경로 생성. 아래는 기존 입력 전달만 수행.
   if (param<bool>("imu_enabled", false)) relay<sensor_msgs::msg::Imu>("imu", "sensor_imu");
   if (param<bool>("depth_enabled", false)) relay<sensor_msgs::msg::Image>("depth", "sensor_depth");
   // Raw relay remains transparent: preserve stamp/frame/covariance, no TF guess.
   input_timeout_s_ = positive("input_timeout_s", 0.5);
-  base_frame_ = param<std::string>("base_frame", "base_link");
   // Encoder observations follow the GNSS raw-relay contract: do not convert
   // units/signs, renew MCU timestamps, discard invalidity, or combine clocks.
   if (enabled("motor_feedback_enabled", false))
@@ -35,17 +35,20 @@ SensorInterfaceNode::SensorInterfaceNode() : NodeBase("sensor_interface") {
       throw std::invalid_argument("external_lane, lane_observation and lane_pose must resolve to different topics");
     subscriptions_.push_back(subscription);
   }
-
-  // Legacy normalized VehicleFeedback remains unavailable. The raw relays above
-  // do not produce a time-aligned m/s/rad observation or enable WHEEL estimation.
-  if (enabled("vehicle_feedback_enabled", true)) {
-    feedback_publisher_ = output<msg::VehicleFeedback>("vehicle_feedback");
-    tick([this] {
-      msg::VehicleFeedback unavailable;
-      unavailable.header.frame_id = base_frame_;
-      publishFeedback(unavailable);
-    });
-  }
+}
+void SensorInterfaceNode::perceptionRelay(const std::string &key) {
+  const auto source = topic("detect_" + key), destination = topic("sensor_" + key);
+  if (source.empty() || destination.empty())
+    throw std::invalid_argument(key + " requires nonempty input/output topics");
+  const auto type = perceptionType(key);
+  auto publisher = create_generic_publisher(destination, type, rclcpp::SensorDataQoS());
+  auto subscription = create_generic_subscription(source, type, rclcpp::SensorDataQoS(),
+    [publisher](std::shared_ptr<rclcpp::SerializedMessage> sample) { publisher->publish(*sample); });
+  if (std::string(subscription->get_topic_name()) == publisher->get_topic_name())
+    throw std::invalid_argument("perception input and output resolve to the same topic: " + key);
+  // Preserve the complete result, including the source timestamp and valid=false.
+  // Parsing/mission decisions belong to the later Object Manager adapter.
+  subscriptions_.push_back(subscription);
 }
 void SensorInterfaceNode::laneCallback(msg::LanePose::ConstSharedPtr sample) {
   if (!ingress::admissibleLane(*sample, now().nanoseconds(), input_timeout_s_)) {
@@ -56,10 +59,5 @@ void SensorInterfaceNode::laneCallback(msg::LanePose::ConstSharedPtr sample) {
     return;
   }
   lane_publisher_->publish(*sample);  // Exact values, source timestamp and frame.
-}
-void SensorInterfaceNode::publishFeedback(const msg::VehicleFeedback &sample) {
-  feedback_publisher_->publish(ingress::checkedFeedback(sample, now().nanoseconds(),
-                                                       input_timeout_s_, base_frame_));
-  // No yaw-rate, filtering, fusion, reference path or estimated motion here.
 }
 }  // namespace control_manager

@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(encoder_motor REQUIRED)
@@ -17,8 +18,8 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
   "msg/MissionLimit.msg" "msg/MissionMap.msg" "msg/MotionPlan.msg" "msg/VehicleCommand.msg" "msg/ControlStatus.msg"
-  "msg/VehicleFeedback.msg" "msg/PauseRequest.msg"
-  DEPENDENCIES std_msgs nav_msgs)
+  "msg/PauseRequest.msg" "msg/TrafficLight.msg"
+  DEPENDENCIES std_msgs nav_msgs builtin_interfaces)
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx src/mission.cxx
