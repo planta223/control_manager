@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    # Stable wiring / coordinate-frame contract. Runtime choices live in operation.yaml.
+    # Stable wiring / coordinate-frame contract. Runtime choices live in modes/*.yaml.
     map_frame: map
     base_frame: base_link
     topics:
@@ -78,7 +78,8 @@
 
 /control/global_path_provider:
   ros__parameters:
-    # 외부 파일 입력: gps-final-map v1, 후륜축 중심 경로. 프로젝트/배경 지도 JSON은 불가.
-    map_file: /home/baqu4/Workspaces/2026WS/main/decision/script/map_generator/test/review/maps/MAP_2026-10-15_195100_test.json
+    # 공통 설정은 특정 지도를 선택하지 않음. modes/*.yaml 또는 launch map_file에서 지정.
+    # 입력: gps-final-map v1, 후륜축 중심 경로. 빈 값이면 파일 제공자 비활성.
+    map_file: ""
     # 외부 GNSS의 GetParameters를 읽기 전용 조회; 실제 datum과 frame으로 위경도 재투영.
     gnss_node: /gnss_node

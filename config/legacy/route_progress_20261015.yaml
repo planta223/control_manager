@@ -1,0 +1,11 @@
+# Reference only; not loaded by the default launch.
+# MAP_2026-10-15_195100_test.json 전용. 다른 지도의 프로필로 재사용하지 않음.
+/control/motion_control:
+  ros__parameters:
+    route_progress:
+      expected_points: 5066
+      front_end_index: 980
+      rear_start_index: 4100
+      initial_search_m: 10.0
+      search_back_m: 3.0
+      search_forward_m: 10.0

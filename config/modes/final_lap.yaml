@@ -1,0 +1,133 @@
+/**:
+  ros__parameters:
+    # Startup choices / software policy / bench tuning, NOT measured vehicle limits.
+    # Parameters are read-only after startup; 변경 후 해당 노드를 재시작.
+    rate_hz: 20.0
+    state_timeout_s: 0.5
+    command_timeout_s: 0.5
+    input_timeout_s: 0.5
+
+    # Sensor Interface 구독토픽 활성화 (공통 key: 내부 소비 노드도 같은 값을 확인)
+    # false이면 해당 subscription과 대응 relay publisher를 생성하지 않음.
+    gnss_enabled: true
+    imu_enabled: false
+    rgb_enabled: false
+    lidar_enabled: false
+    depth_enabled: false
+    lane_enabled: false             # 외부 Lane 입력 + lane_observation + lane_pose
+    motor_feedback_enabled: true    # MotorFeedback 구독 + sensor_motor_feedback raw relay
+    steering_feedback_enabled: true # SteeringFeedback 구독 + sensor_steering_feedback raw relay
+
+    # Sensor Interface 발행토픽 활성화
+    # sensor_*와 lane_observation은 위 구독 활성화와 연동, 별도 중복 스위치 없음.
+    # 예를들어 gnss_enabled = true 이면 sensor_gnss_enabled = true 이다.
+    vehicle_feedback_enabled: false # true이면 현재는 stamp=0 / invalid heartbeat만 발행
+
+    # Object Manager 구독·발행토픽 활성화 (false = NONE, 센서 구독/출력/timer 없음)
+    object_state_enabled: false     # Motion Planning / Mission도 같은 key로 의존성 조절
+
+    # Mission 노드·구간 정책 활성화와 상수는 mission.yaml에서 설정.
+
+    # Path Planning / Global Path Provider 공통 Guidance Mode 설정
+    # 시작 시 고정, 변경 후 재시작; 별도 모드 요청 토픽 없음.
+    guidance_mode: GPS              # GPS / LANE / HYBRID (LANE/HYBRID NOT_IMPLEMENTED)
+    # Global Path Provider 입력·발행 활성화
+    # GPS/HYBRID + map_file 비어있지 않을 때만 활성; LANE은 조회/발행/timer 없음.
+    # GNSS datum 확인 후 1회 latched 발행. 원점 변경 시 재발행하며
+    # 조회 실패/좌표계 불일치 시 기존 경로를 빈 경로로 철회.
+
+/control/global_path_provider:
+  ros__parameters:
+    # 본선 파일 준비 필요. 파일이 없을 때 다른 지도로 대체하지 않음.
+    map_file: /workspace/decision/script/map_generator/test/review/maps/MAP_final.json
+
+/control/sensor_interface:
+  ros__parameters:
+    # Sensor Interface 입력 검증 설정
+    # input_timeout_s: common source-age admission policy. Lane confidence threshold
+    # remains a planner policy; ingress only checks finite confidence in [0, 1].
+    # Motor/SteeringFeedback은 GNSS처럼 그대로 전달한다. 이 timeout으로
+    # Header 없는 MCU tick을 ROS 시각으로 해석하거나 valid를 변경하지 않는다.
+    input_timeout_s: 0.5
+
+/control/global_state_estimator:
+  ros__parameters:
+    # Global State Estimator 구독: 선택 모드가 요구하는 활성 입력만 구독, 모순이면 시작 오류.
+    # Global State Estimator 발행: global_pose / motion_state 항상 발행 (NONE은 invalid).
+    # Global Pose Mode 설정
+    pose_mode: GNSS                 # GNSS / GNSS_IMU (TODO) / NONE
+    # Motion Mode 설정
+    motion_mode: GNSS               # GNSS / GNSS_IMU (TODO) / WHEEL (TODO) / NONE
+    # Global State Estimator 품질 검증 설정
+    max_position_std_m: 3.0           # USER_REQUESTED: sqrt(cov_x + cov_y), m
+    max_yaw_variance_rad2: 0.25       # TUNE
+    # vehicle.wheelbase_m comes from vehicle.yaml, used only by future WHEEL estimator.
+    max_speed_variance_m2ps2: 1.0      # TUNE; rejects GNSS unobserved 1e12
+
+/control/lane_state_estimator:
+  ros__parameters:
+    # Lane State Estimator 구독·발행: 공통 lane_enabled에 연동, false이면 둘 다 생성하지 않음.
+    state_timeout_s: 0.5            # Observation source freshness; no filtering/geometry
+
+/control/path_planning:
+  ros__parameters:
+    # Path Planning 구독: GPS=global_pose+global_path, LANE=lane_pose, HYBRID=세 입력.
+    # LANE/HYBRID는 공통 lane_enabled=true 필요. 선택 모드의 입력만 구독.
+    # Path Planning 발행: reference_path만 발행. 입력 불량/미구현 모드는 빈 경로.
+    # Guidance Mode는 위 공통 guidance_mode 사용; 파일 제공자와 같은 설정 공유.
+    lane_min_confidence: 0.5         # Software admission policy, NOT field calibrated
+    map_datum_verified: true         # 파일 제공자가 GNSS 실제 datum으로 재투영한 경로 사용.
+    # 별도 외부 Path 제공자로 교체하면 그 제공자의 datum 정합성을 확인해야 함.
+    lane_correction_enabled: false   # true rejected until correction is implemented
+
+/control/mission_based_limit:
+  ros__parameters:
+    # Mission Based Limit 구독·발행: mission.yaml의 공통 mission_limit_enabled에 연동.
+    # 구간 정책 활성 시 global_pose + mission_map 추가 구독.
+    # Mission 상수는 mission.yaml; 현재 다른 노드의 모드/센서 활성화를 변경하지 않음.
+    # 구간 판단 설정·기존 ObjectState freshness도 mission.yaml 사용.
+    rate_hz: 20.0
+
+/control/motion_planning:
+  ros__parameters:
+    # Motion Planning 구독: reference_path / motion_state 필수.
+    # object_state / mission_limit은 공통 활성화 key가 true일 때만 구독·검증.
+    # 비활성 입력은 reason에 명시하며 가짜 valid ObjectState/MissionLimit을 만들지 않음.
+    # Motion Planning 발행: motion_plan 항상 발행. Mission 비활성 시 cruise speed 사용.
+    # 등속 목표는 mission.yaml의 공통 cruise_speed_kph 사용.
+    input_timeout_s: 0.5
+
+/control/motion_control:
+  ros__parameters:
+    # Motion Control 구독: global_pose / motion_state / motion_plan / status.
+    # Motion Control 발행: auto_cmd만 발행.
+    rate_hz: 50.0                  # 제어 계산·명령 발행 주기; 센서 입력 주기와 독립.
+    # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
+    tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
+    route_progress_enabled: false # 본선 지도용 점 개수·구간 경계 확정 후 활성화.
+    heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
+    # 명시적 일시정지→재개 시에도 heading만 미확보이면 같은 제한 시간으로 직진.
+    pid:
+      enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
+    # PID 게인 / Pure Pursuit lookahead / 공통 도착 허용 거리는 control.yaml에서 설정.
+    # PURE_PURSUIT은 속도에 따라 lookahead가 변하는 속도 적응형.
+
+/control/control_selector:
+  ros__parameters:
+    # Control Selector 구독: auto_cmd / manual_cmd / pause_request.
+    # Control Selector 발행: selected_cmd / status 항상 발행.
+    rate_hz: 50.0                  # Motion Control / Vehicle Interface와 동일한 명령 주기.
+    # Vehicle Control Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
+    mode: AUTO                      # IDLE / MANUAL / AUTO
+    start_paused: true              # AUTO 시작 시 정지 유지; pause_request.pause=false로 출발/재개.
+    
+/control/vehicle_interface:
+  ros__parameters:
+    # Vehicle Interface 구독: selected_cmd 항상 유지 (보호 입력 비활성화 없음).
+    # Vehicle Interface 발행: actuator_raw (dry_run=false); 실제 UDP는 외부 trans 담당.
+    rate_hz: 50.0                  # 외부 trans는 actuator_raw 수신마다 UDP 송신.
+    # 최종 보호·운용 한계 설정
+    dry_run: true                   # true: 로그만 / false: actuator_raw 발행, 외부 trans는 별도 실행
+    operating_limits_verified: true # vehicle.yaml의 사용자 지정 조향각 / 속도 범위 사용.
+    # Motion Control은 vehicle.limits로 제한, 여기서는 범위 밖 명령을 STOP 처리.
+    # actuator_raw 조향은 우회전 +. 속도는 vehicle의 바퀴 지름 / 구동비로 RPM 환산.

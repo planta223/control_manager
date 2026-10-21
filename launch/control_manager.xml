@@ -1,14 +1,20 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="pipeline_file" default="$(find-pkg-share control_manager)/config/pipeline.yaml"/>
-  <arg name="params_file" default="$(find-pkg-share control_manager)/config/operation.yaml"
+  <arg name="mode" default="test" description="Competition operation configuration">
+    <choice value="test"/>
+    <choice value="brake_inspection"/>
+    <choice value="preliminary_lap"/>
+    <choice value="final_lap"/>
+  </arg>
+  <arg name="params_file" default="$(find-pkg-share control_manager)/config/modes/$(var mode).yaml"
        description="Compatibility alias for operation_file; prefer operation_file for new invocations"/>
   <arg name="operation_file" default="$(var params_file)"/>
   <arg name="mission_file" default="$(find-pkg-share control_manager)/config/mission.yaml"/>
   <arg name="control_file" default="$(find-pkg-share control_manager)/config/control.yaml"/>
   <arg name="vehicle_file" default="$(find-pkg-share control_manager)/config/vehicle.yaml"/>
   <arg name="map_file" default=""
-       description="Global map JSON path override; empty keeps pipeline.yaml map_file"/>
+       description="Global map JSON path override; empty keeps the selected mode map_file"/>
   <node pkg="control_manager" exec="global_path_provider" name="global_path_provider" namespace="/control" output="screen">
     <param from="$(var vehicle_file)"/>
     <param from="$(var pipeline_file)"/>

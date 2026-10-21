@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+"""Terminal operator for control_manager; child output is preserved, never discarded."""
+import argparse
+from datetime import datetime
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import termios
+import time
+import traceback
+import tty
+import uuid
+
+from ament_index_python.packages import get_package_share_directory
+import rclpy
+from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
+from rcl_interfaces.srv import GetParameters
+import yaml
+
+from control_manager.msg import ControlStatus, MotionState, PauseRequest, VehicleCommand
+
+MODES = ('test', 'brake_inspection', 'preliminary_lap', 'final_lap')
+CONTROL_NODES = {'global_path_provider', 'sensor_interface', 'global_state_estimator',
+                 'lane_state_estimator', 'path_planning', 'object_manager',
+                 'mission_based_limit', 'motion_planning', 'motion_control',
+                 'control_selector', 'vehicle_interface'}
+
+
+class Terminal:
+    def __enter__(self):
+        self.fd = sys.stdin.fileno()
+        self.interactive = sys.stdin.isatty() and sys.stdout.isatty()
+        self.previous = termios.tcgetattr(self.fd) if self.interactive else None
+        if self.interactive:
+            tty.setcbreak(self.fd)
+            sys.stdout.write('\033[?25l')
+            sys.stdout.flush()
+        self.last_screen = None
+        return self
+
+    def key(self, timeout=0.0):
+        try:
+            if select.select([self.fd], [], [], timeout)[0]:
+                data = os.read(self.fd, 1)
+                return data.decode('utf-8', errors='ignore') if data else 'EOF'
+        except OSError:
+            return 'EOF'
+        return None
+
+    def show(self, text):
+        if text != self.last_screen:
+            prefix = '\033[2J\033[H' if self.interactive else '\n'
+            try:
+                sys.stdout.write(prefix + text + '\n')
+                sys.stdout.flush()
+            except OSError:
+                pass  # A disconnected terminal still needs the normal stop procedure.
+            self.last_screen = text
+
+    def __exit__(self, *args):
+        if self.previous is not None:
+            try:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self.previous)
+                sys.stdout.write('\033[?25h\n')
+                sys.stdout.flush()
+            except (OSError, termios.error):
+                pass
+
+
+class Journal:
+    def __init__(self, root, mode):
+        self.path = root / (datetime.now().strftime('%Y%m%dT%H%M%S') + '-' + mode + '-' + uuid.uuid4().hex[:8])
+        self.path.mkdir(parents=True)
+        self.stream = (self.path / 'events.jsonl').open('a', buffering=1)
+        self.metadata = {'mode': mode, 'created_at': datetime.now().astimezone().isoformat(),
+                         'docker_image_id': os.environ.get('CONTROL_IMAGE_ID'),
+                         'container_id': os.environ.get('CONTROL_CONTAINER_ID', os.environ.get('HOSTNAME')),
+                         'ROS_DOMAIN_ID': os.environ.get('ROS_DOMAIN_ID', '0')}
+
+    def event(self, name, **values):
+        self.stream.write(json.dumps({'event': name, 'time': datetime.now().astimezone().isoformat(),
+                                      **values}, ensure_ascii=False, allow_nan=False) + '\n')
+
+    def save_metadata(self):
+        (self.path / 'metadata.json').write_text(json.dumps(self.metadata, ensure_ascii=False, indent=2) + '\n')
+
+    def snapshot(self, label, filename):
+        source = Path(filename).resolve()
+        destination = self.path / 'config' / label
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return str(destination)
+
+
+def stamp_ns(stamp):
+    if stamp.sec < 0 or not 0 <= stamp.nanosec < 1_000_000_000:
+        return 0
+    return stamp.sec * 1_000_000_000 + stamp.nanosec
+
+
+class Operator(Node):
+    def __init__(self, args, journal):
+        super().__init__('control_console_' + str(os.getpid()))
+        self.args, self.journal = args, journal
+        self.samples = {}
+        self.pending = None
+        self.message = '준비 중'
+        self.exit_ready = False
+        self.stop_since = None
+        self.last_status_key = None
+
+    def wait(self, predicate, timeout, process=None):
+        deadline = time.monotonic() + timeout
+        while rclpy.ok() and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if process is not None and process.poll() is not None:
+                raise RuntimeError('launch가 준비 중 종료됐습니다. launch.log를 확인하세요.')
+            if self.args.interrupted:
+                raise RuntimeError('시작이 취소됐습니다.')
+            if predicate():
+                return
+        raise RuntimeError('제어 노드 응답 시간이 초과됐습니다.')
+
+    def parameters(self, name, keys, process):
+        client = self.create_client(GetParameters, '/control/' + name + '/get_parameters')
+        try:
+            self.wait(client.service_is_ready, self.args.startup_timeout, process)
+            future = client.call_async(GetParameters.Request(names=keys))
+            self.wait(future.done, self.args.startup_timeout, process)
+            response = future.result()
+            if response is None or len(response.values) != len(keys):
+                raise RuntimeError(name + ' 설정을 읽지 못했습니다.')
+            values = {}
+            for key, value in zip(keys, response.values):
+                if value.type == 1:
+                    values[key] = value.bool_value
+                elif value.type == 4:
+                    values[key] = value.string_value
+                else:
+                    raise RuntimeError(name + ': 지원하지 않는 설정 타입 ' + key)
+            return values
+        finally:
+            self.destroy_client(client)
+
+    def configure(self, process):
+        self.wait(lambda: CONTROL_NODES <= {name for name, ns in self.get_node_names_and_namespaces()
+                                           if ns == '/control'}, self.args.startup_timeout, process)
+        settings = self.parameters('control_selector',
+            ['mode', 'start_paused', 'base_frame', 'topics.status', 'topics.selected_cmd', 'topics.pause_request'], process)
+        if settings['mode'] != 'AUTO' or not settings['start_paused']:
+            raise RuntimeError('터미널 운용은 AUTO / start_paused=true 설정이 필요합니다.')
+        self.base_frame = settings['base_frame']
+        self.dry_run = self.parameters('vehicle_interface', ['dry_run'], process)['dry_run']
+        motion_topic = self.parameters('global_state_estimator', ['topics.motion_state'], process)['topics.motion_state']
+        self.publisher = self.create_publisher(PauseRequest, settings['topics.pause_request'], 10)
+        for key, topic, message_type in [('status', settings['topics.status'], ControlStatus),
+                                          ('selected', settings['topics.selected_cmd'], VehicleCommand),
+                                          ('motion', motion_topic, MotionState)]:
+            self.create_subscription(message_type, topic,
+                                     lambda msg, name=key: self.receive(name, msg), 10)
+        self.journal.metadata.update(selector=settings, dry_run=self.dry_run, motion_topic=motion_topic)
+        self.journal.save_metadata()
+        self.wait(lambda: self.fresh('status') and self.fresh('selected'), self.args.startup_timeout, process)
+        self.message = '일시정지 상태로 준비됐습니다.'
+
+    def receive(self, name, msg):
+        self.samples[name] = (msg, time.monotonic())
+        if name == 'status':
+            key = (msg.mode, msg.paused, msg.fsm_state, msg.reason, msg.resume_sequence)
+            if key != self.last_status_key:
+                self.last_status_key = key
+                self.journal.event('control_status', mode=msg.mode, paused=msg.paused,
+                                   fsm_state=msg.fsm_state, reason=msg.reason, resume_sequence=msg.resume_sequence)
+
+    def fresh(self, name, after_ns=0):
+        if name not in self.samples:
+            return None
+        msg, received = self.samples[name]
+        stamp = stamp_ns(msg.header.stamp)
+        age = (self.get_clock().now().nanoseconds - stamp) / 1e9
+        if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != self.base_frame
+                or not 0 <= age <= self.args.status_timeout
+                or time.monotonic() - received > self.args.status_timeout):
+            return None
+        return msg
+
+    def request(self, pause, exiting=False):
+        if self.pending and self.pending['exit']:
+            return
+        status = self.fresh('status')
+        if not exiting and (status is None or status.mode != ControlStatus.AUTO):
+            self.message = '제어 상태 응답을 확인한 뒤 다시 조작하세요.'
+            return
+        self.pending = {'pause': pause, 'exit': exiting, 'first_ns': self.get_clock().now().nanoseconds,
+                        'started': time.monotonic(), 'last_sent': 0.0, 'ack': False,
+                        'sequence': status.resume_sequence if status else None,
+                        'was_paused': status.paused if status else None}
+        self.stop_since = None
+        self.message = '종료를 위한 정지 요청 중' if exiting else ('일시정지 요청 중' if pause else '출발·재개 요청 중')
+        self.journal.event('request', pause=pause, exiting=exiting, stamp_ns=self.pending['first_ns'])
+
+    def update_request(self):
+        action = self.pending
+        if action is None:
+            return
+        now = time.monotonic()
+        if not action['ack'] and now - action['last_sent'] >= 0.1:
+            msg = PauseRequest()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = self.base_frame
+            msg.pause = action['pause']
+            self.publisher.publish(msg)
+            action['last_sent'] = now
+        status = self.fresh('status', action['first_ns'])
+        selected = self.fresh('selected', action['first_ns'])
+        ack = status is not None and status.mode == ControlStatus.AUTO and status.paused == action['pause']
+        if ack and not action['pause'] and action['was_paused']:
+            ack = status.resume_sequence > action['sequence']
+        if ack and action['pause']:
+            ack = (selected is not None and selected.valid and selected.target_brake
+                   and math.isfinite(selected.target_speed_mps) and selected.target_speed_mps == 0.0)
+        if ack and not action['ack']:
+            action['ack'] = True
+            self.journal.event('acknowledged', pause=action['pause'], exiting=action['exit'])
+        if action['ack']:
+            if not action['exit']:
+                self.message = '일시정지가 수락됐습니다.' if action['pause'] else '출발·재개가 수락됐습니다. 진행 조건을 확인합니다.'
+                self.pending = None
+            elif self.dry_run and ack:
+                self.journal.event('exit_ready', verification='dry_run_stop_command')
+                self.exit_ready = True
+            else:
+                motion = self.fresh('motion', action['first_ns'])
+                stopped = (ack and motion is not None and motion.speed_valid
+                           and math.isfinite(motion.speed_mps)
+                           and abs(motion.speed_mps) <= self.args.stop_speed_mps)
+                self.stop_since = (self.stop_since if self.stop_since is not None else now) if stopped else None
+                self.message = '종료 대기: 정지 명령 유지 및 실측 정지 확인 중'
+                if self.stop_since is not None and now - self.stop_since >= self.args.stop_hold_s:
+                    self.journal.event('exit_ready', verification='measured_stop', speed_mps=motion.speed_mps)
+                    self.exit_ready = True
+        elif now - action['started'] > self.args.request_timeout:
+            if action['exit']:
+                self.message = '종료 대기: 정지 응답 없음. 제어 노드와 로그를 확인하세요.'
+            else:
+                self.journal.event('request_timeout', pause=action['pause'])
+                self.message = '요청 응답 시간이 초과됐습니다. 현재 상태를 확인하세요.'
+                self.pending = None
+
+    def screen(self, mode, map_file):
+        status = self.fresh('status')
+        motion = self.fresh('motion')
+        if status is None:
+            state = '상태 응답 대기 / 끊김'
+        elif status.paused:
+            state = '일시정지'
+        elif status.fsm_state == ControlStatus.DRIVING:
+            state = '진행 명령 출력 중'
+        elif status.fsm_state == ControlStatus.FAULT:
+            state = '진행 조건 미충족'
+        else:
+            state = '재개 상태 / 정지 명령'
+        speed = (f'{motion.speed_mps * 3.6:.1f} km/h' if motion is not None and motion.speed_valid
+                 and math.isfinite(motion.speed_mps) else '관측 없음')
+        return (f'control_manager | 모드: {mode}\n'
+                f'제어 상태: {state}\n실측 속도: {speed}\n'
+                f'출력: {"DRY RUN" if self.dry_run else "실제 출력"}\n'
+                f'지도: {Path(map_file).name if map_file else "미지정 (외부 경로 입력 가능)"}\n\n'
+                '[1] 출발/재개  [2] 일시정지  [3] 종료\n'
+                f'{self.message}\n\n로그: {self.journal.path / "launch.log"}')
+
+
+def prepare(args, journal):
+    share = Path(get_package_share_directory('control_manager'))
+    names = ('vehicle', 'pipeline', 'mission', 'control')
+    files = {name: Path(getattr(args, name + '_file') or share / 'config' / (name + '.yaml')) for name in names}
+    operation = Path(args.operation_file or share / 'config/modes' / (args.mode + '.yaml'))
+    data = yaml.safe_load(operation.read_text())
+    # Always begin paused without editing the user's mode YAML.
+    data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['start_paused'] = True
+    resolved = journal.path / 'config' / 'operation.yaml'
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
+    provider = data.get('/control/global_path_provider', {}).get('ros__parameters', {})
+    map_file = args.map_file or provider.get('map_file', '')
+    if not map_file:
+        common_provider = yaml.safe_load(files['pipeline'].read_text()).get('/control/global_path_provider', {})
+        map_file = provider.get('map_file', common_provider.get('ros__parameters', {}).get('map_file', ''))
+    journal.snapshot('source_mode.yaml', operation)
+    command = ['ros2', 'launch', 'control_manager', 'control_manager.xml', 'mode:=' + args.mode,
+               'operation_file:=' + str(resolved)]
+    for name, filename in files.items():
+        command.append(name + '_file:=' + journal.snapshot(name + '.yaml', filename))
+    if args.map_file:
+        command.append('map_file:=' + args.map_file)
+    journal.metadata.update(command=command, map_file=map_file,
+                            console_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+    journal.save_metadata()
+    if map_file:
+        if not Path(map_file).is_file():
+            raise RuntimeError('지도 파일이 없습니다: ' + map_file)
+        journal.snapshot('map.json', map_file)
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        journal.metadata['commit'] = subprocess.check_output(
+            ['git', '-C', str(repo), 'rev-parse', 'HEAD'], stderr=subprocess.DEVNULL, text=True, timeout=2).strip()
+        diff = subprocess.check_output(['git', '-C', str(repo), 'diff', '--binary'], stderr=subprocess.DEVNULL, timeout=2)
+        (journal.path / 'source-changes.patch').write_bytes(diff)
+    except (OSError, subprocess.SubprocessError):
+        journal.metadata['commit'] = None
+    shutil.copy2(Path(__file__).resolve(), journal.path / 'control_console.py')
+    journal.save_metadata()
+    return command, map_file
+
+
+def main():
+    parser = argparse.ArgumentParser(description='모드 선택 및 출발·일시정지·종료 터미널 메뉴')
+    parser.add_argument('--mode', choices=MODES)
+    for name in ('map', 'operation', 'pipeline', 'mission', 'control', 'vehicle'):
+        parser.add_argument('--' + name + '-file')
+    parser.add_argument('--log-root', type=Path, default=Path(os.environ.get('CONTROL_LOG_ROOT',
+                        '/workspace/log/control_console' if Path('/workspace').is_dir() else 'log/control_console')))
+    parser.add_argument('--startup-timeout', type=float, default=15.0)
+    parser.add_argument('--request-timeout', type=float, default=3.0)
+    parser.add_argument('--status-timeout', type=float, default=0.5)
+    parser.add_argument('--stop-speed-mps', type=float, default=0.1)
+    parser.add_argument('--stop-hold-s', type=float, default=0.5)
+    args = parser.parse_args()
+    for name in ('startup_timeout', 'request_timeout', 'status_timeout', 'stop_speed_mps', 'stop_hold_s'):
+        if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
+            parser.error(name + ' must be finite and positive')
+    args.interrupted = False
+    def interrupted(signum, frame):
+        args.interrupted = True
+    old_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    journal = operator = process = child_output = lock = None
+    result = 0
+    try:
+        with Terminal() as terminal:
+            if args.mode is None:
+                terminal.show('주행 모드 선택\n\n[1] test\n[2] brake_inspection\n[3] preliminary_lap\n[4] final_lap\n[q] 취소')
+                while args.mode is None:
+                    key = terminal.key(0.1)
+                    if key in ('q', 'Q', 'EOF', '\x04') or args.interrupted:
+                        return 0
+                    if key in ('1', '2', '3', '4'):
+                        args.mode = MODES[int(key) - 1]
+            args.log_root = args.log_root.resolve()
+            args.log_root.mkdir(parents=True, exist_ok=True)
+            lock = (args.log_root / ('domain-' + os.environ.get('ROS_DOMAIN_ID', '0') + '.lock')).open('a')
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError('같은 ROS 도메인의 터미널 메뉴가 이미 실행 중입니다.')
+            journal = Journal(args.log_root, args.mode)
+            command, map_file = prepare(args, journal)
+            terminal.show(f'{args.mode} 준비 중\n로그: {journal.path / "launch.log"}')
+            os.environ['ROS_LOG_DIR'] = str(journal.path / 'ros_console')
+            rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+            operator = Operator(args, journal)
+            end = time.monotonic() + 0.6
+            while time.monotonic() < end:
+                rclpy.spin_once(operator, timeout_sec=0.05)
+            if any(ns == '/control' and name in CONTROL_NODES for name, ns in operator.get_node_names_and_namespaces()):
+                raise RuntimeError('control_manager가 이미 실행 중입니다. 기존 실행과 중복 시작하지 않습니다.')
+            child_output = (journal.path / 'launch.log').open('ab', buffering=0)
+            env = dict(os.environ, ROS_LOG_DIR=str(journal.path / 'ros'), PYTHONUNBUFFERED='1')
+            process = subprocess.Popen(command, stdout=child_output, stderr=subprocess.STDOUT,
+                                       env=env, start_new_session=True)
+            journal.metadata['launch_pid'] = process.pid
+            journal.save_metadata()
+            journal.event('launch_started', pid=process.pid)
+            operator.configure(process)
+            next_draw = 0.0
+            while rclpy.ok() and not operator.exit_ready:
+                if process.poll() is not None:
+                    raise RuntimeError('launch가 종료됐습니다. 저장된 로그를 확인하세요.')
+                rclpy.spin_once(operator, timeout_sec=0.03)
+                key = terminal.key()
+                if key in ('3', 'q', 'Q', 'EOF', '\x04') or args.interrupted:
+                    operator.request(True, exiting=True)
+                    args.interrupted = False
+                elif key in ('1', 'r', 'R'):
+                    operator.request(False)
+                elif key in ('2', 'p', 'P'):
+                    operator.request(True)
+                operator.update_request()
+                if time.monotonic() >= next_draw:
+                    terminal.show(operator.screen(args.mode, map_file))
+                    next_draw = time.monotonic() + 0.2
+            if not operator.exit_ready:
+                raise RuntimeError('ROS 통신이 종료됐습니다. 실제 정지 확인 완료 상태는 아닙니다.')
+            journal.event('shutdown_requested')
+    except Exception as exc:
+        result = 1
+        if journal:
+            (journal.path / 'console-error.log').write_text(traceback.format_exc())
+            journal.event('error', message=str(exc))
+        print('오류: ' + str(exc), flush=True)
+    finally:
+        if process is not None and process.poll() is None:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=12)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+        if child_output:
+            child_output.close()
+        if operator:
+            operator.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+        if journal:
+            journal.metadata.update(exit_code=result, launch_returncode=process.returncode if process else None)
+            journal.save_metadata()
+            journal.event('console_closed', exit_code=result)
+            journal.stream.close()
+            print('로그 저장: ' + str(journal.path), flush=True)
+        if lock:
+            lock.close()
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+    return result
+
+
+if __name__ == '__main__':
+    sys.exit(main())
