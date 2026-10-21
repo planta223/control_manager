@@ -7,6 +7,7 @@
 #include "control_manager/core/route_progress.hxx"
 #include "control_manager/core/guidance.hxx"
 #include "control_manager/core/mission.hxx"
+#include "control_manager/core/stopped_heading.hxx"
 
 namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
@@ -113,8 +114,9 @@ class MotionControlNode : public NodeBase {
   std::vector<core::Point> previous_path_;
   std::chrono::steady_clock::time_point previous_tick_;
   std::optional<std::chrono::steady_clock::time_point> heading_bootstrap_start_;
+  std::unique_ptr<core::StoppedHeadingMemory> stopped_heading_;
   bool heading_bootstrap_enabled_, have_valid_heading_{false};
-  bool paused_{false}, resume_bootstrap_allowed_{false};
+  bool paused_{false};
   std::uint64_t resume_sequence_{0};
   std::int64_t resume_after_ns_{0};
   bool run_completed_{false};  // Explicit AUTO completion; cleared only by node restart.

@@ -68,7 +68,11 @@ core::MissionDecision MissionBasedLimitNode::sectionLimit() {
   std::vector<core::Point> path;
   path.reserve(map.path.poses.size());
   for (const auto &p : map.path.poses) path.push_back({p.pose.position.x, p.pose.position.y});
-  return core::evaluateMission(toCore(*pose_->value), path, map.stations_m, sections, mission_config_);
+  auto position = toCore(*pose_->value);
+  // Section association uses XY/covariance only. A stationary yaw expiry must
+  // not invalidate a fresh position or prevent a mission from releasing a stop.
+  position.valid = pose_->value->valid || pose_->value->position_valid;
+  return core::evaluateMission(position, path, map.stations_m, sections, mission_config_);
 }
 void MissionBasedLimitNode::update() {
   msg::MissionLimit limit;

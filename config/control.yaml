@@ -24,7 +24,15 @@
 
     # Motion Control GPS 주행 검사 / 최초 heading 확보 설정 (PID / Pure Pursuit 공통)
     max_cross_track_m: 3.0           # USER_REQUESTED: 경로까지 거리 > 3 m이면 정지.
-    heading_bootstrap_timeout_s: 3.0 # 최초 출발 / 명시적 재개 각각의 heading 확보 직진 최대 시간.
+    heading_bootstrap_timeout_s: 3.0 # 유효 yaw를 한 번도 얻지 못한 최초 출발의 직진 최대 시간.
+
+    # 의도적인 정지 후 재출발: 마지막 유효 yaw로 PP/PID를 계산. 실측·보정 전 software policy.
+    stopped_heading:
+      enabled: true
+      stop_speed_mps: 0.1           # 유효 실측 속도가 이 값 이하일 때 정지 yaw를 고정.
+      reacquire_speed_mps: 0.7      # GNSS min_speed_for_cog와 맞출 것. 새 유효 yaw 우선.
+      max_distance_m: 1.0          # 정지 위치에서 이 거리 초과 시 저장 yaw 사용 종료.
+      max_reacquire_time_s: 3.0    # 실측 이동 시작 후 새 yaw 확보 대기 상한; 정지 대기 시간 제외.
 
     # 지도별 route_progress 프로필은 해당 modes/*.yaml에서 설정.
     # expected_points / front_end_index / rear_start_index / 검색 범위를 확정한 뒤

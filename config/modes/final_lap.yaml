@@ -107,7 +107,7 @@
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
     route_progress_enabled: false # 본선 지도용 점 개수·구간 경계 확정 후 활성화.
     heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
-    # 명시적 일시정지→재개 시에도 heading만 미확보이면 같은 제한 시간으로 직진.
+    # 정지 후 재개는 control.yaml의 stopped_heading 정책 사용. 직진 bootstrap은 최초 확보 전만 허용.
     pid:
       enabled: false               # Opt-in after tuning; defaults report PID_NOT_CONFIGURED
     # PID 게인 / Pure Pursuit lookahead / 공통 도착 허용 거리는 control.yaml에서 설정.

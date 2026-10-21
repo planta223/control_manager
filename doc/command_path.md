@@ -56,20 +56,35 @@ Selector 상태가 일시적으로 오래되어도 이미 인식한 pause를 임
 긴 정지 후 heading이 유효하면 기존 진행 위치부터 Pure Pursuit을 재개합니다.
 재개 상태 발행 이후에 측정된 위치/속도를 먼저 기다리며 정지 중 캐시된 측정으로 진행 위치를 갱신하지 않습니다.
 Selector도 재개 수락 이후 생성된 AUTO 명령만 선택하여 정지 전 명령이 다시 출력되는 것을 막습니다.
-heading만 미확보이면 위치/속도/경로 검증을 통과한 뒤 RESUME_HEADING_ACTIVE로 조향 0 직진합니다.
-직진 출력이 시작된 때부터 control.yaml의 heading_bootstrap_timeout_s (현재 3초)를 적용합니다.
-heading을 확보하면 Pure Pursuit으로 전환하고 해당 재개 권한을 소진합니다.
-기한 내 확보 실패 시 RESUME_HEADING_TIMEOUT으로 정지합니다.
-같은 pause=false 요청을 반복해도 sequence나 제한 시간이 초기화되지 않습니다.
-새로운 pause=true → pause=false 전환으로만 명시적 재시도가 가능합니다.
-최초 출발에도 start_paused=true라면 같은 재개 절차를 사용합니다.
-start_paused=false는 기존 최초 heading bootstrap 동작을 유지합니다.
+최초 출발에서 유효 yaw를 한 번도 얻지 못한 경우에만 HEADING_BOOTSTRAP_ACTIVE로
+조향 0 직진을 허용한다. 직진 명령 시작부터 heading_bootstrap_timeout_s(현재 3초)를 적용한다.
+한 번 yaw를 확보한 뒤에는 pause/resume으로 직진 유예를 다시 부여하지 않는다.
 
-재개는 GNSS 위치/속도 freshness, 위치 표준편차 3 m, 경로 이탈 3 m, 경로 변경 검사와 차량 한계를 우회하지 않습니다.
-GlobalPose.heading_unavailable은 신선하고 정상 quaternion인 GNSS의 yaw 분산 초과를 나타내며 valid를 true로 바꾸지 않습니다.
+의도적인 정지(AUTO pause 또는 유효 MotionPlan.stop_request/속도 0)가 yaw 유효 상태에서
+관측되면 정지 후보로 기록한다. 실제 속도가 stopped_heading.stop_speed_mps(기본 0.1) 이하가
+되면 마지막 유효 yaw 한 개를 고정한다. 회전 전·후 값이 섞일 수 있어 평균은 적용하지 않는다.
+정지 중 위치·속도 입력이 계속 유효하면 긴 대기에서도 유지한다. 정지 요청 없이 주행 중
+yaw가 손실된 경우와 위치/속도 관측이 끊긴 경우에는 이 기억으로 주행하지 않는다.
+
+재출발 시 저장 yaw를 control 내부 TrackingState에만 적용하여 PP/PID 조향을 계산하고
+HEADING_HOLD_ACTIVE:<추종 결과>로 표시한다. GlobalPose.yaw_rad/valid/Header는 덮어쓰지 않는다.
+새 유효 yaw가 있으면 우선 사용한다. 실측 속도가 reacquire_speed_mps(기본 0.7) 이상이고
+유효 yaw가 확인되면 정지 yaw 기억을 종료한다. 이 값은 GNSS min_speed_for_cog와 맞춰야 한다.
+
+stopped_heading.max_distance_m(기본 1 m)는 정지 위치로부터 허용하는 변위이며,
+max_reacquire_time_s(기본 3초)는 실측 이동 시작 후 방향 재확보 대기 상한이다.
+정지 대기에는 시간 제한을 적용하지 않는다. 변위 초과/시간 초과 시 저장 yaw 사용을 끝내고,
+새 유효 yaw도 없으면 정지 명령을 출력한다. 반복 요청으로 제한을 초기화하지 않는다.
+이 값은 검증 전 software policy이며 차량 성능을 측정한 값이 아니다.
+
+재개는 GNSS 위치/속도 freshness, 위치 표준편차 3 m, 경로 이탈 3 m, 경로 변경 검사와 차량 한계를 우회하지 않는다.
+GlobalPose.heading_unavailable은 신선하고 정상 quaternion인 GNSS의 yaw 분산 초과를 나타내며 valid를 true로 바꾸지 않는다.
 Path Planning은 position_valid인 heading 미확보 상태에서도 경로를 유지하지만,
-Motion Control은 최초 출발 또는 명시적 재개에서만 직진을 허용합니다. 주행 중 자발적 heading 손실은 기존처럼 정지합니다.
-정지 중 차량을 옮기거나 돌리지 않고 재개 방향에 직진 공간을 확보하는 운용을 전제로 합니다.
+Motion Control은 최초 확보 전 bootstrap 또는 위 조건으로 고정한 정지 yaw만 허용한다.
+Mission 정지/해제 판정은 별도 구현이며 이번 변경은 유효 정지 계획을 받는 제어 동작을 제공한다.
+기존 지도 구간 정책은 XY/분산만 사용하는 계산이므로 position_valid를 독립적으로 사용한다.
+yaw만 만료돼도 유효 위치의 구간 판단은 유지하며, 위치 자체가 무효이면 기존처럼 invalid/stop이다.
+정지 중 외부 힘으로 차량을 돌린 경우는 현재 센서만으로 검출하지 못하므로 저장 yaw의 전제가 성립하지 않습니다.
 중간 위치에서 노드를 새로 실행하는 기능은 추가하지 않았으며 최초 검색은 여전히 경로 시작 10 m입니다.
 종점 완료는 pause/resume으로 해제하지 않습니다. 새 주행은 시작점에서 Motion Control을 재시작합니다.
 Selector를 단독 재시작하여 resume_sequence가 되돌아가면 Motion Control도 재시작해야 합니다.

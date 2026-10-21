@@ -7,7 +7,7 @@ float64 yaw_rad
 float64 position_variance_x_m2
 float64 position_variance_y_m2
 float64 yaw_variance_rad2
-# Position-only admission for initial GNSS heading bootstrap; never makes yaw valid.
+# Position-only admission for bootstrap / control-local stop yaw memory; never makes yaw valid.
 bool position_valid
 # GNSS has never supplied an observed heading and currently marks yaw unobserved.
 bool initial_heading_unavailable

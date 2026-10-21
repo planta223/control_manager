@@ -53,8 +53,8 @@ void PathPlanningNode::update() {
   const auto decision = core::evaluateGuidance(static_cast<std::uint8_t>(guidance_mode_), localization_available,
                                                global_path_available, lane_error);
   nav_msgs::msg::Path path;
-  // Keep the GPS path available for bounded initial/resume heading acquisition.
-  // Motion Control still requires valid yaw for all path-tracking steering.
+  // Position-only path availability permits initial bootstrap / intentional-stop yaw memory.
+  // Motion Control owns admission of the remembered yaw; observation validity is unchanged.
   if (decision.valid) path = *global_->value;
   path.header = header(frame_);  // Planning generation time, not sensor measurement time.
   publisher_->publish(path);  // Empty path -> invalid MotionPlan -> AUTO stop.

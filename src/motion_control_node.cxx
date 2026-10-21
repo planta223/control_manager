@@ -29,6 +29,13 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   pid.goal_tolerance_m = config.goal_tolerance_m;
   max_cross_track_m_ = positive("max_cross_track_m", 3.0);
   heading_bootstrap_timeout_s_ = positive("heading_bootstrap_timeout_s", 3.0);
+  core::StoppedHeadingConfig heading_memory;
+  heading_memory.enabled = param<bool>("stopped_heading.enabled", true);
+  heading_memory.stop_speed_mps = nonnegative("stopped_heading.stop_speed_mps", 0.1);
+  heading_memory.reacquire_speed_mps = positive("stopped_heading.reacquire_speed_mps", 0.7);
+  heading_memory.max_distance_m = positive("stopped_heading.max_distance_m", 1.0);
+  heading_memory.max_reacquire_time_s = positive("stopped_heading.max_reacquire_time_s", 3.0);
+  stopped_heading_ = std::make_unique<core::StoppedHeadingMemory>(heading_memory);
   heading_bootstrap_enabled_ = param<bool>("heading_bootstrap_enabled", false) &&
     (mode == "PURE_PURSUIT" || (pid.enabled &&
      (pid.kp_lateral > 0.0 || pid.ki_lateral > 0.0 || pid.kd_lateral > 0.0 || pid.kp_heading > 0.0)));
@@ -91,11 +98,27 @@ void MotionControlNode::update() {
     if (status.resume_sequence > resume_sequence_) {
       resume_sequence_ = status.resume_sequence;
       resume_after_ns_ = rclcpp::Time(status.header.stamp).nanoseconds();
-      heading_bootstrap_start_.reset();
-      resume_bootstrap_allowed_ = status.mode == msg::ControlStatus::AUTO;
+      if (!have_valid_heading_) heading_bootstrap_start_.reset();
     }
   }
-  // Pausing preserves route progress/completion. A stale status cannot release the pause.
+  const bool auto_status = current_input(control_status_) &&
+    control_status_->value->header.frame_id == base_frame_ && control_status_->value->mode == msg::ControlStatus::AUTO;
+  const bool heading_observations = auto_status && current_input(pose_) && current_input(motion_) &&
+    pose_->value->header.frame_id == frame_ && pose_->value->position_valid &&
+    std::isfinite(pose_->value->yaw_rad) &&
+    (pose_->value->valid || pose_->value->initial_heading_unavailable || pose_->value->heading_unavailable) &&
+    motion_->value->header.frame_id == base_frame_ && motion_->value->speed_valid;
+  const bool intentional_stop = auto_status && (paused_ ||
+    (current_input(plan_) && plan_->value->valid && plan_->value->header.frame_id == frame_ &&
+     (plan_->value->stop_request || plan_->value->target_speed_mps == 0.0)));
+  const auto memory = stopped_heading_->update(
+    std::chrono::duration<double>(tick_time.time_since_epoch()).count(), heading_observations, intentional_stop,
+    pose_->value ? pose_->value->x_m : 0.0, pose_->value ? pose_->value->y_m : 0.0,
+    motion_->value ? motion_->value->speed_mps : 0.0,
+    heading_observations && pose_->value->valid ? std::optional<double>(pose_->value->yaw_rad) : std::nullopt);
+  const bool held_heading = memory.yaw_rad.has_value();
+  if (heading_observations && pose_->value->valid) have_valid_heading_ = true;
+  // Remember heading even during an intentional pause; do not advance route progress.
   if (paused_) { stop("AUTO_PAUSED", true); return; }
   // Do not advance the remembered route using samples cached during the pause.
   if (resume_after_ns_ > 0) {
@@ -106,12 +129,10 @@ void MotionControlNode::update() {
     }
     resume_after_ns_ = 0;
   }
-  // Heading loss during normal driving never grants a new straight-drive window.
-  // Only an explicit paused -> resumed transition may re-arm it.
+  // After acquisition a resume never grants another blind straight-drive window.
   if (current_input(pose_) && pose_->value->header.frame_id == frame_ &&
       pose_->value->valid && std::isfinite(pose_->value->yaw_rad)) {
     have_valid_heading_ = true;
-    resume_bootstrap_allowed_ = false;
   }
   // Existing PID/PP require a pose and path in the same global frame. A local
   // lane path needs an agreed tracking-frame adapter, not a fabricated zero pose.
@@ -123,16 +144,19 @@ void MotionControlNode::update() {
   }
   if (!current_input(pose_) || !current_input(motion_) || !current_input(plan_) ||
       (!pose_->value->valid && !(pose_->value->position_valid &&
-       (pose_->value->initial_heading_unavailable ||
-        (resume_bootstrap_allowed_ && pose_->value->heading_unavailable)))) ||
+       (held_heading || (!have_valid_heading_ && pose_->value->initial_heading_unavailable)))) ||
       !motion_->value->speed_valid ||
       motion_->value->header.frame_id != base_frame_ || pose_->value->header.frame_id != frame_ || !plan_->value->valid ||
       plan_->value->header.frame_id != frame_ || !std::isfinite(plan_->value->target_speed_mps) ||
       plan_->value->target_speed_mps < 0.0) {
-    stop("INVALID_OR_STALE_STATE_OR_PLAN"); return;
+    stop(memory.reason.empty() ? "INVALID_OR_STALE_STATE_OR_PLAN" : memory.reason); return;
   }
   const auto &plan = *plan_->value;
-  const auto state = trackingInput(*pose_->value, *motion_->value);
+  auto state = trackingInput(*pose_->value, *motion_->value);
+  if (held_heading) {
+    state.yaw_rad = *memory.yaw_rad;
+    state.localization_valid = true;  // Control-local input; GlobalPose.valid is unchanged.
+  }
   // Stop plans retain the previous speed/brake policy but do not claim valid tracking.
   if (!std::isfinite(state.x_m) || !std::isfinite(state.y_m) || !std::isfinite(state.yaw_rad) ||
       !std::isfinite(state.speed_mps) || state.speed_mps < 0.0) {
@@ -151,7 +175,7 @@ void MotionControlNode::update() {
   std::optional<core::PathMatch> route_match;
   if (route_progress_) {
     const auto progress=route_progress_->update(state.x_m,state.y_m,
-      pose_->value->valid ? std::optional<double>(state.yaw_rad) : std::nullopt,path,max_cross_track_m_);
+      (pose_->value->valid || held_heading) ? std::optional<double>(state.yaw_rad) : std::nullopt,path,max_cross_track_m_);
     if (!progress.match.valid) { stop(progress.reason); return; }
     route_match=progress.match;
     if (progress.phase!=route_phase_) {
@@ -164,8 +188,8 @@ void MotionControlNode::update() {
     if (!std::isfinite(path_distance)) { stop("INVALID_TRACKING_GEOMETRY"); return; }
     if (path_distance > max_cross_track_m_) { stop("PATH_DEVIATION_EXCEEDED"); return; }
   }
-  if (!pose_->value->valid) {
-    if (have_valid_heading_ && !resume_bootstrap_allowed_) {
+  if (!pose_->value->valid && !held_heading) {
+    if (have_valid_heading_) {
       stop("HEADING_UNAVAILABLE_AFTER_ACQUISITION"); return;
     }
     if (!heading_bootstrap_enabled_) { stop("HEADING_BOOTSTRAP_DISABLED"); return; }
@@ -178,12 +202,11 @@ void MotionControlNode::update() {
     if (!heading_bootstrap_start_) heading_bootstrap_start_ = tick_time;
     if (std::chrono::duration<double>(tick_time - *heading_bootstrap_start_).count() >=
         heading_bootstrap_timeout_s_) {
-      stop(resume_bootstrap_allowed_ ? "RESUME_HEADING_TIMEOUT" : "HEADING_BOOTSTRAP_TIMEOUT"); return;
+      stop("HEADING_BOOTSTRAP_TIMEOUT"); return;
     }
     tracking_->reset(); previous_path_.clear();
     const core::Command straight{0.0, plan.target_speed_mps, false, true,
-                                now().nanoseconds(), resume_bootstrap_allowed_
-                                  ? "RESUME_HEADING_ACTIVE" : "HEADING_BOOTSTRAP_ACTIVE"};
+                                now().nanoseconds(), "HEADING_BOOTSTRAP_ACTIVE"};
     publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
     return;  // Never run PID / Pure Pursuit using an unavailable yaw.
   }
@@ -225,7 +248,7 @@ void MotionControlNode::update() {
   }
   else if (result.valid)
     command = {result.steering_rad, plan.target_speed_mps, false, true,
-               now().nanoseconds(), result.reason};
+               now().nanoseconds(), held_heading ? "HEADING_HOLD_ACTIVE:" + result.reason : result.reason};
   command = core::limitAutomaticCommand(command, limits_);
   // MotionPlan target speed capped at the vehicle limit. No speed PID or reverse tracking.
   publisher_->publish(toRos(command, base_frame_));
