@@ -11,7 +11,11 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   config_.operating_limits_verified = param<bool>("operating_limits_verified", false);
   config_.limits = vehicleLimits();
   selected_ = input<msg::VehicleCommand>("selected_cmd");
+  (void)topic("stop_status");  // 고규범 수정: expose common observer wiring to console discovery.
   if (!dry_run) actuator_publisher_ = output<std_msgs::msg::Float32MultiArray>("actuator_raw", rclcpp::QoS(1));
+  // 고규범 신규 로직 (2026-10-21): publish a timestamped observation alongside raw commands.
+  if (!dry_run) command_event_publisher_ = create_publisher<vehicle_stop::msg::CommandEvent>(
+    param<std::string>("command_events_topic", "/vehicle/command_events"), 100);
   RCLCPP_INFO(get_logger(), "%s", dry_run ?
     "[DRY_RUN] actuator protection active; actuator_raw disabled" :
     "[ACTUATOR_RAW] right-positive steering; UDP transmission belongs to external trans");
@@ -21,13 +25,23 @@ void VehicleInterfaceNode::update() {
   auto command = core::stop(now().nanoseconds(), "SELECTED_COMMAND_UNAVAILABLE");
   if (current(selected_, config_.command_timeout_s) && selected_->value->header.frame_id == frame_)
     command = toCore(*selected_->value);
-  const auto protected_command = core::protectActuatorCommand(
-    command, now().nanoseconds(), config_);
+  // 고규범 수정 (2026-10-21): previous protected stop reset steering to zero.
+  // const auto protected_command = core::protectActuatorCommand(command, now().nanoseconds(), config_);
+  // 고규범 신규 로직: update memory only AFTER final limits/freshness protection succeeds.
+  const auto protected_command = stop_steering_.apply(core::protectActuatorCommand(
+    command, now().nanoseconds(), config_));
   if (actuator_publisher_) {
     const auto values = core::actuatorRaw(protected_command, conversion_);
     std_msgs::msg::Float32MultiArray raw;
     raw.data.assign(values.begin(), values.end());
+    // 고규범 신규 로직: publication time is separate from trans's actual socket send time.
+    vehicle_stop::msg::CommandEvent event;
+    event.header = header(frame_);
+    event.command_topic = actuator_publisher_->get_topic_name();
+    event.stage = vehicle_stop::msg::CommandEvent::COMMAND;
+    event.steering_raw = values[0]; event.speed_raw = values[1]; event.brake = values[2] != 0.0F;
     actuator_publisher_->publish(raw);
+    command_event_publisher_->publish(event);
   }
   RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
     "[%s] steer=%.4f rad speed=%.3f m/s brake=%d valid=%d reason=%s",

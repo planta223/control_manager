@@ -27,6 +27,7 @@ from rcl_interfaces.srv import GetParameters
 import yaml
 
 from control_manager.msg import ControlStatus, MotionState, PauseRequest, VehicleCommand
+from vehicle_stop.msg import StopStatus  # 고규범 수정 (2026-10-21): shared measured-stop observer.
 
 MODES = ('test', 'brake_inspection', 'preliminary_lap', 'final_lap')
 CONTROL_NODES = {'global_path_provider', 'sensor_interface', 'global_state_estimator',
@@ -161,10 +162,15 @@ class Operator(Node):
         self.base_frame = settings['base_frame']
         self.dry_run = self.parameters('vehicle_interface', ['dry_run'], process)['dry_run']
         motion_topic = self.parameters('global_state_estimator', ['topics.motion_state'], process)['topics.motion_state']
+        # 고규범 신규 로직: the observer provides measured state for ordinary control as well as tests.
+        self.map_frame = self.parameters('global_state_estimator', ['map_frame'], process)['map_frame']
+        # 고규범 수정: stop_topic = '/control/stop_status'
+        stop_topic = self.parameters('vehicle_interface', ['topics.stop_status'], process)['topics.stop_status']
         self.publisher = self.create_publisher(PauseRequest, settings['topics.pause_request'], 10)
         for key, topic, message_type in [('status', settings['topics.status'], ControlStatus),
                                           ('selected', settings['topics.selected_cmd'], VehicleCommand),
-                                          ('motion', motion_topic, MotionState)]:
+                                          ('motion', motion_topic, MotionState),
+                                          ('stop', stop_topic, StopStatus)]:  # 고규범 수정: shared stop status subscription.
             self.create_subscription(message_type, topic,
                                      lambda msg, name=key: self.receive(name, msg), 10)
         self.journal.metadata.update(selector=settings, dry_run=self.dry_run, motion_topic=motion_topic)
@@ -187,7 +193,11 @@ class Operator(Node):
         msg, received = self.samples[name]
         stamp = stamp_ns(msg.header.stamp)
         age = (self.get_clock().now().nanoseconds - stamp) / 1e9
-        if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != self.base_frame
+        # 고규범 수정: previous frame check always required base_frame.
+        # if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != self.base_frame
+        # 고규범 신규 로직: stop positions and stamps use the GNSS map frame.
+        expected_frame = self.map_frame if name == 'stop' else self.base_frame
+        if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != expected_frame
                 or not 0 <= age <= self.args.status_timeout
                 or time.monotonic() - received > self.args.status_timeout):
             return None
@@ -239,14 +249,26 @@ class Operator(Node):
                 self.journal.event('exit_ready', verification='dry_run_stop_command')
                 self.exit_ready = True
             else:
-                motion = self.fresh('motion', action['first_ns'])
-                stopped = (ack and motion is not None and motion.speed_valid
-                           and math.isfinite(motion.speed_mps)
-                           and abs(motion.speed_mps) <= self.args.stop_speed_mps)
-                self.stop_since = (self.stop_since if self.stop_since is not None else now) if stopped else None
+                # 고규범 수정 (2026-10-21): previous wall-clock polling could reuse one GNSS sample.
+                # motion = self.fresh('motion', action['first_ns'])
+                # stopped = (ack and motion is not None and motion.speed_valid
+                #            and math.isfinite(motion.speed_mps)
+                #            and abs(motion.speed_mps) <= self.args.stop_speed_mps)
+                # self.stop_since = (self.stop_since if self.stop_since is not None else now) if stopped else None
+                # if self.stop_since is not None and now - self.stop_since >= self.args.stop_hold_s:
+                #     self.journal.event('exit_ready', verification='measured_stop', speed_mps=motion.speed_mps)
+                #     self.exit_ready = True
+                # 고규범 신규 로직: require distinct GNSS samples confirmed by the shared observer.
+                measured = self.fresh('stop', action['first_ns'])
+                stopped = (ack and measured is not None and measured.speed_valid and measured.stopped
+                           and stamp_ns(measured.sample_stamp) >= action['first_ns']
+                           and 0 <= self.get_clock().now().nanoseconds - stamp_ns(measured.sample_stamp)
+                           <= self.args.status_timeout * 1e9)
                 self.message = '종료 대기: 정지 명령 유지 및 실측 정지 확인 중'
-                if self.stop_since is not None and now - self.stop_since >= self.args.stop_hold_s:
-                    self.journal.event('exit_ready', verification='measured_stop', speed_mps=motion.speed_mps)
+                if stopped:
+                    self.journal.event('exit_ready', verification='measured_stop', speed_mps=measured.speed_mps,
+                                       stopped_since_ns=stamp_ns(measured.stopped_since),
+                                       confirmed_at_ns=stamp_ns(measured.confirmed_at))
                     self.exit_ready = True
         elif now - action['started'] > self.args.request_timeout:
             if action['exit']:
@@ -298,6 +320,9 @@ def prepare(args, journal):
     journal.snapshot('source_mode.yaml', operation)
     command = ['ros2', 'launch', 'control_manager', 'control_manager.xml', 'mode:=' + args.mode,
                'operation_file:=' + str(resolved)]
+    # 고규범 신규 로직 (2026-10-21): one detector and one run folder for console and monitor.
+    command += ['stop_speed_mps:=' + str(args.stop_speed_mps), 'stop_hold_s:=' + str(args.stop_hold_s),
+                'stop_log_root:=' + str(journal.path / 'stop_observation')]
     for name, filename in files.items():
         command.append(name + '_file:=' + journal.snapshot(name + '.yaml', filename))
     if args.map_file:

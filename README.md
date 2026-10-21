@@ -9,6 +9,12 @@ PID disabled/zero gains, 미확정 운용 한계는 0,
 AUTO는 `operation.yaml`의 `start_paused: true`에 따라 일시정지 상태로 시작합니다.
 `/control/pause_request` (`PauseRequest`)에 timestamp를 포함한 `pause=false`를 발행하면 출발/재개하고,
 `pause=true`는 경로 진행 위치를 보존하며 속도 0 / 브레이크를 유지합니다.
+고규범 수정 (2026-10-21): 정지·일시정지·도착·입력 이상 시 마지막 유효 조향 지령을 유지합니다.
+Motion Control / Selector / Vehicle Interface에 각각 지령 이력을 두고,
+최종 보호를 통과한 출력 이력이 실제 actuator 조향 유지의 기준입니다. 초기 이력이 없을 때만 0입니다.
+공용 `vehicle_stop` 관측 노드가 명령 발행·UDP 전송 시각과 GNSS 실측 정지를 별도로 제공합니다.
+결과 토픽은 `/control/stop_status`, 기본 기준은 `|v| <= 0.1 m/s`가 새 GNSS 샘플에서 0.5초 지속입니다.
+관측 노드는 명령을 생성하거나 송신하지 않습니다. 수동제어에서도 같은 패키지를 따로 실행할 수 있습니다.
 긴 정지 후 heading만 미확보이면 명시적 재개당 최대 3초 직진으로 확보하며 실패 시 정지합니다.
 명령과 조건은 [doc/command_path.md](doc/command_path.md#auto-일시정지--재개)에 있습니다.
 
@@ -433,7 +439,8 @@ PID / Pure Pursuit 도착 판정은 남은 경로 거리와 실제 종점까지 
 접근 이력은 입력 불량, stop plan, 경로 교체, AUTO 해제로 초기화하며 최초부터 종점 뒤인 입력은 통과로 보지 않습니다.
 AUTO가 선택된 상태에서 종점 도착을 판정하면 주행 완료 상태를 저장합니다.
 이후에는 GNSS 위치 흔들림, 입력 만료, 경로 교체, IDLE/MANUAL/AUTO 전환에도
-auto_cmd의 GOAL_REACHED(speed=0, steer=0, brake=true, valid=true)를 유지합니다.
+<!-- 고규범 수정 (2026-10-21): auto_cmd의 GOAL_REACHED(speed=0, steer=0, brake=true, valid=true)를 유지합니다. -->
+고규범 수정: auto_cmd의 GOAL_REACHED(speed=0, steer=마지막 유효 조향 지령, brake=true, valid=true)를 유지합니다.
 완료 상태는 Motion Control 노드 재시작으로만 해제하며 별도 reset topic이나 자동 재출발은 없습니다.
 IDLE/MANUAL에서 계산한 종점 preview는 AUTO 완료를 저장하지 않습니다.
 명시적으로 MANUAL을 선택하면 기존 Control Selector의 수동 명령 선택은 그대로 가능합니다.

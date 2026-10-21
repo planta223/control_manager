@@ -129,11 +129,16 @@ TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
   raw=cm::actuatorRaw(c,cfg);
   EXPECT_FLOAT_EQ(raw[0],-1.0F); EXPECT_FLOAT_EQ(raw[1],-1.0F);
   c.target_brake=true;
-  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // 고규범 수정 (2026-10-21): EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{-1,0,1}));
   c=command(); c.valid=false;
-  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // 고규범 수정: EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  EXPECT_NEAR(cm::actuatorRaw(c,cfg)[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);
+  EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],0); EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[2],1);
   c=command(); c.target_speed_mps=std::numeric_limits<double>::quiet_NaN();
-  EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  // 고규범 수정: EXPECT_EQ(cm::actuatorRaw(c,cfg),(std::array<float,3>{0,0,1}));
+  EXPECT_NEAR(cm::actuatorRaw(c,cfg)[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);
+  EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],0); EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[2],1);
   EXPECT_EQ(cm::actuatorRaw(command(),{}),(std::array<float,3>{0,0,1}));
   for (double bad : {0.0, -0.5, std::numeric_limits<double>::infinity()}) {
     auto invalid=cfg; invalid.wheel_diameter_m=bad;
@@ -141,6 +146,35 @@ TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
     invalid=cfg; invalid.motor_to_wheel_ratio=bad;
     EXPECT_FALSE(cm::validActuatorConversion(invalid));
   }
+}
+// 고규범 신규 검증 (2026-10-21): safety stops must retain actual last protected steering.
+TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedValues) {
+  cm::StopSteeringHold memory;
+  EXPECT_DOUBLE_EQ(memory.apply(cm::stop(now_ns,"STARTUP")).target_steer_rad,0.0);
+  auto c=command(); c.target_steer_rad=-0.3;
+  EXPECT_DOUBLE_EQ(memory.apply(cm::protectActuatorCommand(c,now_ns,config())).target_steer_rad,-0.3);
+  auto braking=cm::stop(now_ns,"PAUSED",true);
+  braking.target_steer_rad=0.2;
+  for (int i=0;i<5;++i)
+    EXPECT_DOUBLE_EQ(memory.apply(braking).target_steer_rad,-0.3);
+  for (auto bad : {cm::stop(now_ns,"INVALID"), cm::stop(now_ns,"MISSING")})
+    EXPECT_DOUBLE_EQ(memory.apply(bad).target_steer_rad,-0.3);
+  c.target_steer_rad=0.9;
+  auto rejected=memory.apply(cm::protectActuatorCommand(c,now_ns,config()));
+  EXPECT_FALSE(rejected.valid); EXPECT_DOUBLE_EQ(rejected.target_steer_rad,-0.3);
+  c.target_steer_rad=0.1; c.timestamp_ns=1;
+  EXPECT_DOUBLE_EQ(memory.apply(cm::protectActuatorCommand(c,now_ns,config())).target_steer_rad,-0.3);
+  c.timestamp_ns=now_ns;
+  EXPECT_DOUBLE_EQ(memory.apply(cm::protectActuatorCommand(c,now_ns,config())).target_steer_rad,0.1);
+  EXPECT_DOUBLE_EQ(memory.apply(braking).target_steer_rad,0.1);
+}
+// 고규범 신규 검증 (2026-10-21): numerical conversion failure must not recenter either.
+TEST(StopSteering, ConversionOverflowKeepsSteering) {
+  const cm::ActuatorConversionConfig cfg{std::numeric_limits<double>::min(), 1.0, 30.0, 1500.0};
+  auto c=command();
+  const auto raw=cm::actuatorRaw(c,cfg);
+  EXPECT_NEAR(raw[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);
+  EXPECT_FLOAT_EQ(raw[1],0); EXPECT_FLOAT_EQ(raw[2],1);
 }
 TEST(VehicleLimits, SignedBoundaryAndInvalidLowerLimits) {
   auto c=command(); c.target_speed_mps=-2.0; c.target_steer_rad=0.4;

@@ -60,6 +60,15 @@ struct ActuatorConversionConfig {
   double steering_full_scale_deg{30.0}, motor_full_scale_rpm{1500.0};
 };
 bool validActuatorConversion(const ActuatorConversionConfig &config);
+// 고규범 수정 (2026-10-21): stop/invalid commands retain the last valid moving command.
+// Keep one instance per output stage; never substitute unverified steering feedback.
+class StopSteeringHold {
+ public:
+  Command apply(Command command);
+ private:
+  double last_steer_rad_{0.0};  // No prior command at process startup: neutral reference only.
+};
+// 고규범 수정: resolve all stop/invalid angles with StopSteeringHold before raw conversion.
 std::array<float, 3> actuatorRaw(const Command &command, const ActuatorConversionConfig &config);
 bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);
 Command stop(std::int64_t now_ns, const std::string &reason, bool valid = false);

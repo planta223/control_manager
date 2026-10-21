@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Vehicle Interface -> existing trans encoders; no UDP sender or hardware starts."""
+"""고규범 수정 (2026-10-21): 24-degree scale fixture and stop hold.
+Vehicle Interface -> existing trans encoders; no UDP sender or hardware starts."""
 import math
 import struct
 import sys
@@ -24,7 +25,7 @@ def run():
         node.create_subscription(Float32MultiArray, topic,
                                  lambda msg, key=topic: received.__setitem__(key, list(msg.data)), 10)
     pub = node.create_publisher(VehicleCommand, '/control/selected_cmd', 10)
-    active = {'steer': -math.radians(15), 'speed': 10/3.6, 'brake': False, 'valid': True}
+    active = {'steer': -math.radians(12), 'speed': 10/3.6, 'brake': False, 'valid': True}
 
     def publish():
         cmd = VehicleCommand(target_steer_rad=active['steer'], target_speed_mps=active['speed'],
@@ -60,22 +61,25 @@ def run():
     try:
         launch('vehicle.wheel_diameter_m:=0.5')  # Fixed fixture; production diameter is editable.
         speed_raw = (10/3.6) * 60 / (math.pi*.50) / 1500
-        assert expect([.5, speed_raw, 0], 'right 15 degrees / 10 km/h normalized output') == (15, 7, 0)
+        assert expect([.5, speed_raw, 0], 'right 12 degrees / 10 km/h normalized output') == (12, 7, 0)
         assert {i.node_name for i in node.get_publishers_info_by_topic('/control/actuator_raw')} == {
             'vehicle_interface'}
-        active.update(steer=math.radians(15), speed=-10/3.6)
-        assert expect([-.5, -speed_raw, 0], 'left steering and reverse match existing trans') == (-15, -7, 0)
+        active.update(steer=math.radians(12), speed=-10/3.6)
+        assert expect([-.5, -speed_raw, 0], 'left steering and reverse match existing trans') == (-12, -7, 0)
         active.update(steer=0., speed=0., brake=True)
-        assert expect([0, 0, 1], 'brake encodes misc bit 7') == (0, 0, 128)
-        active.update(steer=-math.radians(15), speed=10/3.6, brake=False, valid=True)
+        # 고규범 수정 (2026-10-21): assert expect([0, 0, 1], 'brake encodes misc bit 7') == (0, 0, 128)
+        assert expect([-.5, 0, 1], 'brake holds prior left steering and misc bit 7') == (-12, 0, 128)
+        active.update(steer=-math.radians(12), speed=10/3.6, brake=False, valid=True)
         expect([.5, speed_raw, 0], 'brake release returns to normal command')
         active.update(valid=False)
-        expect([0, 0, 1], 'invalid selected command outputs stop')
+        # 고규범 수정: expect([0, 0, 1], 'invalid selected command outputs stop')
+        expect([.5, 0, 1], 'invalid selected command holds prior right steering')
         active.update(valid=True)
         expect([.5, speed_raw, 0], 'normal command recovers')
         active.update(steer=math.radians(31))
-        expect([0, 0, 1], 'vehicle steering limit is checked before conversion')
-        active.update(steer=-math.radians(15))
+        # 고규범 수정: expect([0, 0, 1], 'vehicle steering limit is checked before conversion')
+        expect([.5, 0, 1], 'out-of-range steering cannot replace prior valid steering')
+        active.update(steer=-math.radians(12))
         launch('vehicle.wheel_diameter_m:=1.0')
         expect([.5, speed_raw/2, 0], 'wheel diameter change updates RPM conversion')
         launch('topics.actuator_raw:=/test/actuator_raw', 'vehicle.wheel_diameter_m:=0.5')

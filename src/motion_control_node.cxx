@@ -80,7 +80,10 @@ void MotionControlNode::update() {
   auto stop = [this](const std::string &reason, bool valid = false) {
     tracking_->reset(); previous_path_.clear();
     goal_approach_seen_=false;
-    publisher_->publish(toRos(core::stop(now().nanoseconds(), reason, valid), base_frame_));
+    // 고규범 수정 (2026-10-21): previous zero-steering stop retained as a comment.
+    // publisher_->publish(toRos(core::stop(now().nanoseconds(), reason, valid), base_frame_));
+    // 고규범 신규 로직: do not recenter during any automatic stopping path.
+    publisher_->publish(toRos(stop_steering_.apply(core::stop(now().nanoseconds(), reason, valid)), base_frame_));
   };
   if (run_completed_) { stop("GOAL_REACHED", true); return; }
   const auto selection_error = tracking_->selectionError();
@@ -207,7 +210,9 @@ void MotionControlNode::update() {
     tracking_->reset(); previous_path_.clear();
     const core::Command straight{0.0, plan.target_speed_mps, false, true,
                                 now().nanoseconds(), "HEADING_BOOTSTRAP_ACTIVE"};
-    publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
+    // 고규범 수정 (2026-10-21): publisher_->publish(toRos(core::limitAutomaticCommand(straight, limits_), base_frame_));
+    // 고규범 신규 로직: bootstrap output also participates in last-command memory.
+    publisher_->publish(toRos(stop_steering_.apply(core::limitAutomaticCommand(straight, limits_)), base_frame_));
     return;  // Never run PID / Pure Pursuit using an unavailable yaw.
   }
   const bool same_path = path.size() == previous_path_.size() &&
@@ -251,6 +256,8 @@ void MotionControlNode::update() {
                now().nanoseconds(), held_heading ? "HEADING_HOLD_ACTIVE:" + result.reason : result.reason};
   command = core::limitAutomaticCommand(command, limits_);
   // MotionPlan target speed capped at the vehicle limit. No speed PID or reverse tracking.
-  publisher_->publish(toRos(command, base_frame_));
+  // 고규범 수정 (2026-10-21): publisher_->publish(toRos(command, base_frame_));
+  // 고규범 신규 로직: latch normal output and reuse it on goal/protection stops.
+  publisher_->publish(toRos(stop_steering_.apply(command), base_frame_));
 }
 }  // namespace control_manager

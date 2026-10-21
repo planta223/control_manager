@@ -25,7 +25,9 @@ Vehicle Interface는 검사와 변환을 수행하고, 실제 패킷 조립·UDP
 ## AUTO 일시정지 / 재개
 
 `operation.yaml`의 `mode: AUTO`는 유지하며 `start_paused: true`가 기본입니다.
-출발/재개 전에는 유효 GNSS/경로가 있어도 selected_cmd가 조향 0 / 속도 0 / brake=true를 유지합니다.
+<!-- 고규범 수정 (2026-10-21): 출발/재개 전에는 유효 GNSS/경로가 있어도 selected_cmd가 조향 0 / 속도 0 / brake=true를 유지합니다. -->
+고규범 수정: 출발/재개 전에는 유효 GNSS/경로가 있어도 selected_cmd가 마지막 유효 조향 / 속도 0 / brake=true를 유지합니다.
+초기 지령 이력이 없을 때만 조향 0이며, 최종 Vehicle Interface에서도 보호를 통과한 마지막 조향을 유지합니다.
 mode는 여전히 시작 시 고정이며 pause는 모드 선택과 독립적인 운용 요청입니다.
 
 외부 입력 `/control/pause_request`는 `PauseRequest` (`Header header`, `bool pause`)입니다.

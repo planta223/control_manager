@@ -7,7 +7,7 @@ from std_msgs.msg import UInt8
 from rcl_interfaces.srv import SetParameters
 from rclpy.parameter import Parameter
 from control_manager.msg import VehicleCommand, ControlStatus
-from smoke_test import SelectorFixture, observe, wait_for, watch_protection_log
+from smoke_test import ROOT, SelectorFixture, observe, wait_for, watch_protection_log  # 고규범 수정.
 from state_split_smoke_test import start, settle
 
 
@@ -56,7 +56,9 @@ def run():
             if kind=='wrong_frame': c.header.frame_id='map'
             pubs['selected_cmd'].publish(c)
     timer=node.create_timer(.05,publish)
-    selector=SelectorFixture(node,values,label='command_selector')
+    # 고규범 수정 (2026-10-21): selector=SelectorFixture(node,values,label='command_selector')
+    # 고규범 신규 검증: use the current mode configuration instead of removed config/operation.yaml.
+    selector=SelectorFixture(node,values,ROOT/'config/modes/test.yaml',label='command_selector')
     wait_for(node,lambda: values['status'].fsm_state==ControlStatus.READY and
              values.get('selected_cmd') is not None and values['selected_cmd'].reason=='IDLE',
              'selector reports selected-command status without a Vehicle Interface')
@@ -65,10 +67,15 @@ def run():
                     'vehicle.limits.max_steering_deg:='+str(math.degrees(0.5)),
                     'vehicle.limits.min_speed_kph:=-7.2', 'vehicle.limits.max_speed_kph:=7.2')
     protection_probe=watch_protection_log(node,values,interface)
+    # 고규범 신규 검증 (2026-10-21): last valid protected steering survives source failures.
+    expected_steering = 0.0
     def safe():
         c=values.get('protected_cmd')
-        return c is not None and not c.valid and c.target_brake and c.target_speed_mps==0 and c.target_steer_rad==0
+        # 고규범 수정: return c is not None and not c.valid and c.target_brake and c.target_speed_mps==0 and c.target_steer_rad==0
+        return (c is not None and not c.valid and c.target_brake and c.target_speed_mps==0
+                and abs(c.target_steer_rad - expected_steering) < 1e-4)
     def choose(mode,speed):
+        nonlocal expected_steering
         selector.set_mode(mode)
         wait_for(node,lambda:'status' in values and values['status'].mode==mode and
                  values.get('protected_cmd') is not None and values['protected_cmd'].valid and
@@ -76,6 +83,8 @@ def run():
         expected=ControlStatus.READY if mode==ControlStatus.IDLE else ControlStatus.DRIVING
         wait_for(node,lambda: values['status'].fsm_state==expected and
                  values['status'].reason==values['selected_cmd'].reason,'FSM describes selected command')
+        if mode != ControlStatus.IDLE:
+            expected_steering = .2 if mode == ControlStatus.AUTO else -.1
     try:
         wait_for(node,lambda:'protected_cmd' in values and values['protected_cmd'].reason=='IDLE' and
                  values['protected_cmd'].target_brake and values['protected_cmd'].target_speed_mps==0,
@@ -151,6 +160,7 @@ def run():
         wait_for(node,safe,'selector shutdown expires at vehicle interface')
         active['direct']=True
         wait_for(node,lambda:values['protected_cmd'].valid,'isolated direct selected command fixture accepted')
+        expected_steering = .1  # 고규범 신규 검증: direct valid source becomes the hold reference.
         active['kind']='reverse'
         wait_for(node,lambda:values['protected_cmd'].valid and values['protected_cmd'].target_speed_mps==-0.1,
                  'reverse command inside vehicle range accepted')

@@ -49,6 +49,7 @@ inline const std::map<std::string, std::string> kTopics{
   {"manual_cmd", "/control/manual_cmd"}, {"selected_cmd", "/control/selected_cmd"},
   {"actuator_raw", "/control/actuator_raw"},
   {"status", "/control/status"},
+  {"stop_status", "/control/stop_status"},  // 고규범 수정 (2026-10-21): measured state.
   {"pause_request", "/control/pause_request"},
 };
 template<class T> struct Input {

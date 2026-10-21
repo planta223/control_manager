@@ -14,6 +14,8 @@ find_package(builtin_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(encoder_motor REQUIRED)
+# 고규범 수정 (2026-10-21): common observation messages, independent of manual input.
+find_package(vehicle_stop REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GlobalPose.msg" "msg/MotionState.msg" "msg/LanePose.msg" "msg/ObjectState.msg"
@@ -31,7 +33,9 @@ function(add_control_node executable class_name)
   add_executable(${executable} src/main.cxx src/${executable}.cxx)
   target_compile_definitions(${executable} PRIVATE CONTROL_MANAGER_NODE_CLASS=${class_name})
   target_link_libraries(${executable} control_core "${cpp_typesupport_target}")
-  ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
+  # 고규범 수정 (2026-10-21): nodes.hxx contains the shared CommandEvent publisher.
+  # ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
+  ament_target_dependencies(${executable} rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
   install(TARGETS ${executable} RUNTIME DESTINATION lib/${PROJECT_NAME})
 endfunction()
 add_control_node(sensor_interface_node SensorInterfaceNode)
@@ -74,5 +78,7 @@ install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md LICENSE DESTINATION share/${PROJECT_NAME})
 install(FILES doc/guidance_modes.md doc/state_split.md doc/sensor_ingress.md doc/estimators.md doc/command_path.md doc/terminal_console.md DESTINATION share/${PROJECT_NAME}/doc)
 ament_export_targets(control_coreTargets HAS_LIBRARY_TARGET)
-ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
+# 고규범 수정 (2026-10-21): shared CommandEvent appears in installed node headers.
+# ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs)
+ament_export_dependencies(rosidl_default_runtime rclcpp rcl_interfaces std_msgs sensor_msgs nav_msgs vehicle_stop)
 ament_package()
