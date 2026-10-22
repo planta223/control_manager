@@ -367,8 +367,9 @@ vehicle_interface는 선택 명령 수신/source timeout, non-finite/제동·속
 vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
 최종 보호 결과를 actuator_raw `[steering, speed, brake]`로 변환해 발행합니다 (`dry_run=false`).
 바퀴 지름은 vehicle.yaml의 wheel_diameter_m=0.47 m (임시), motor_to_wheel_ratio=1.0 (사용자 확인)입니다.
-내부 좌회전 양수 rad를 외부 우회전 양수 ±1로 변환하고, 속도는 m/s → 바퀴 RPM → 모터 RPM / 4500으로 환산합니다.
-trans는 조향·속도를 float32 `<ffB>`로 송신하며, UNO에서 최종 CAN RPM만 반올림합니다. 연결 명령·속도 해상도는 [Command path 보고서](doc/command_path.md)를 참고합니다.
+내부 좌회전 양수 rad를 외부 우회전 양수 ±1로 변환하고, 속도는 m/s → 바퀴 RPM → 실제 모터 RPM / 891.387로 환산합니다.
+trans는 정규화 속도에 -891.387을 곱해 실제 RPM float32를 `<ffB>`의 속도 필드로 송신합니다.
+UNO가 실제 목표 RPM을 컨트롤러 단위로 환산하고 최종 CAN 정수 명령만 반올림합니다. 연결 명령·속도 해상도는 [Command path 보고서](doc/command_path.md)를 참고합니다.
 `dry_run=true`에서는 로그만 남기고 actuator_raw를 발행하지 않습니다. 외부 trans는 기본 launch가 실행하지 않습니다.
 `/control/vehicle_interface/status` 발행·구독·설정과 VehicleInterfaceStatus 메시지 생성은 제거했습니다.
 msg/VehicleInterfaceStatus.msg 파일은 과거 정의로 보관합니다.
