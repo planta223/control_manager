@@ -38,32 +38,54 @@ final_lap.yaml
 필요한 추가 토픽
 ===========================================
 
+
 1. 라바콘 인식 결과 (필수 : 조성준)
-- /sensors/detectCone
-- 라이다로 할지 카메라로 할지는 미정.
+- 토픽명 : /sensors/detectCone
+- 타입명 : control_manager/msg/LidarObjects
+- 발행 주기 : 본인이 결정해 주세요.
 - 필드는 다음과 같이 구현할 것.
 '''
+# 인식에 사용한 원본 라이다 측정 시각
+# 인식 완료 시각이나 발행 시각으로 덮어쓰지 않음
+builtin_interfaces/Time timestamp
 
+# 입력·인식 처리가 정상적으로 완료됐는지
+# 정상 미검출: true + objects=[]
+# 입력·처리 실패: false + objects=[]
+bool valid
+
+# 검출한 라바콘 목록
+LidarObject[] objects
 '''
+- 배열 원소인 LidarObject.msg의 필드는 다음과 같이 구성할 것.
+'''
+# 검출한 물체 경계 박스의 중심 위치 [m]
+geometry_msgs/Point center
+
+# 해당 좌표계의 x/y/z축에 평행한 경계 박스 크기 [m]
+geometry_msgs/Vector3 size
+'''
+- center와 size는 차량 좌표계 base_link 기준이며, 인식 측에서 해당 좌표계로 변환하여 발행한다.
+- 좌표계는 후륜축 중심 기준 전방 +x, 좌측 +y, 상방 +z를 사용한다.
+- 제동 기준으로 사용할 라바콘 선택 및 제동 시점 판단은 제어단에서 수행한다.
 
 
-2. 신호 인식 결과 (필수 : 정재은)
-- /sensors/detectTraffic 토픽으로 발행할 것.
-- 메시지 타입은 TrafficLight.msg 으로 할 것.
+2. 장애물 인식 결과 (선택 : 조성준)
+- 토픽명 : /sensors/detectObstacle
+- 타입명 : control_manager/msg/LidarObjects
+- 발행 주기 : 본인이 결정해 주세요.
+- 필드 및 상세 사항은 1번과 동일하게 구성하면 되며, 검출 대상만 라바콘이 아닌 장애물로 바꾼다.
+
+
+3. 신호 인식 결과 (필수 : 정재은)
+- 토픽명 : /sensors/detectTraffic
+- 타입명 : control_manager/msg/TrafficLight
+- 발행 주기 : 본인이 결정해 주세요.
 - 필드는 다음과 같이 구성할 것.
 '''
-# 신호 대상 식별자: 1~5, 미지정은 0
-# 1: 예선 #300 교차로 북서 방향 — 직진
-# 2: 본선 #200 교차로 남서 방향 — 직진
-# 3: 본선 #300 교차로 남서 방향 — 직진
-# 4: 본선 #400 교차로 남 방향 — 좌회전
-# 5: 본선 #1400 교차로 북동 방향 — 직진
-# 예: traffic_id=1 → 예선 #300 교차로 북서 방향 신호의 인식 결과
-# 해당 ROI에서 미검출되어도 ID는 유지하고 status="Unknown"으로 발행
-uint8 traffic_id
-
 # 신호 상태: R / Y / G / Unknown
 # 예: "R" → 적색으로 판단
+# 예: "G" → 청색 및 좌회전 (미션상 청색, 좌회전이 따로 켜지는 경우는 없음을 참고)
 string status
 
 # 인식에 사용한 원본 영상의 촬영 시각
@@ -77,10 +99,11 @@ bool valid
 
 # status에 해당하는 색 판단 점수, 범위 0.0~1.0
 # 예: status="R", color_confidence=0.93 → 적색 판단 점수 0.93
+# valid = false 일때는 0.0 으로 한다.
+# 예: 판별 불가 상황에서 valid=true, status="Unknown", color_confidence=0.0
+# 예: 처리 실패 상황에서 valid=false, status="Unknown", color_confidence=0.0
 float32 color_confidence
 '''
-
-
-3. 장애물 인식 결과 (선택)
-- /sensors/detectObstacle 로 발행할 것
-- 구현할지는 미정
+- 카메라로 현재 프레임이 어떤 교차로의 신호등인지 구분할 필요는 없다.
+- 단 여러 신호등이 관측되는 상황에서는 목표 신호등의 status를 추출할 수 있어야 한다.
+- 청색과 좌회전은 항상 같이 켜지므로 굳이 좌회전과 청색을 구분할 필요는 없다.
