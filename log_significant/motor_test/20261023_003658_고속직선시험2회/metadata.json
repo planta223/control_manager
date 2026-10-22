@@ -1,0 +1,57 @@
+{
+  "node": "vehicle_recorder",
+  "topics": [
+    "/gnss/odom",
+    "/gnss/fix",
+    "/gnss/status",
+    "/motor_feedback",
+    "/steering_feedback"
+  ],
+  "reference_path_topic": "/control/reference_path",
+  "record_queue_size": 4096,
+  "ROS_DOMAIN_ID": "0",
+  "docker_image_id": "sha256:45f927a726b9a5b95bf1bfb42bbc4432363cda550f6a164f673a42ca60cb6778",
+  "container_id": "b9bd3412d99ec15ee5c14619478e9b02e7125865da1f53fffdd0860ab7c02c40",
+  "source_sha256": {
+    "record_terminal.py": "8cf70e0afe6e352b55a1a7e787861ff0aa019faa5c63ce4708c0db1a439048d3",
+    "recorder_node.py": "fb26b4ede525dec5fede8c6c0f5a91d7f27a1bfa0c51a5738d6673738233ac96",
+    "path_monitor.py": "77bd890183b340f3b57b013185421d59aab764f239ef8ad35172e2c14bd117d5",
+    "run_recorder.py": "147c40e0225c7ecde4c9dd81af6b96777b7572413ec0882b025e0b02336949f2",
+    "stop_observation.py": "a988d20aeaf88e5fe38929d51f0210fc0fa3168dc8d0144c73fa42bf2d008577"
+  },
+  "created_at": "2026-10-22T15:36:58.243981+00:00",
+  "nonfinite_policy": "JSON null; source validity is preserved",
+  "clock": "source_stamp_ns and received_ros_ns: ROS time; received_monotonic_ns: local monotonic",
+  "complete": true,
+  "review_status": "accepted",
+  "record_name": "고속 직선운동 2회",
+  "snapshots": [],
+  "snapshot_errors": [],
+  "written": 6036,
+  "dropped": 0,
+  "errors": [],
+  "pending": 0,
+  "files": {
+    "topic-d10b05d3.csv": {
+      "topic": "/steering_feedback",
+      "type": "encoder_motor/msg/SteeringFeedback"
+    },
+    "topic-9596e051.csv": {
+      "topic": "/motor_feedback",
+      "type": "encoder_motor/msg/MotorFeedback"
+    },
+    "topic-5a85527a.csv": {
+      "topic": "/gnss/odom",
+      "type": "nav_msgs/msg/Odometry"
+    },
+    "topic-7f0d158d.csv": {
+      "topic": "/gnss/fix",
+      "type": "sensor_msgs/msg/NavSatFix"
+    },
+    "topic-9baf8679.csv": {
+      "topic": "/gnss/status",
+      "type": "std_msgs/msg/UInt8"
+    }
+  },
+  "reviewed_at": "2026-10-22T15:37:50.121163+00:00"
+}
