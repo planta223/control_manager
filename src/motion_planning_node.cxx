@@ -10,8 +10,8 @@ MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
   if (param<bool>("speed_profile.enabled", false)) {
     const auto limits=vehicleLimits();
     core::SpeedProfileConfig config{std::min(cruise_speed_mps_,limits.max_speed_mps),
-      positive("speed_profile.max_lateral_accel_mps2",0.0),
-      positive("speed_profile.planned_decel_mps2",0.0),
+      vehicleAccelerationLimit("max_lateral_accel_g", "speed_profile.max_lateral_accel_mps2", 9.80665, true),
+      vehicleAccelerationLimit("max_decel_kphps", "speed_profile.planned_decel_mps2", 1.0 / 3.6, true),
       positive("vehicle.wheelbase_m",1.328),std::min(-limits.min_steer_rad,limits.max_steer_rad)};
     config.curvature_sample_m=positive("speed_profile.curvature_sample_m",1.0);
     config.response_time_s=nonnegative("speed_profile.response_time_s",0.5);

@@ -333,6 +333,20 @@ def prepare(args, journal):
     files = {name: Path(getattr(args, name + '_file') or share / 'config' / (name + '.yaml')) for name in names}
     operation = Path(args.operation_file or share / 'config/modes' / (args.mode + '.yaml'))
     data = yaml.safe_load(operation.read_text())
+    limits = yaml.safe_load(files['vehicle'].read_text())['/**']['ros__parameters']['vehicle']['limits']
+    # CLI overrides can tighten a configured vehicle ceiling. Zero denotes an undecided ceiling.
+    for option, key, factor in [('max_accel_kphps', 'max_accel_kphps', 1.0),
+                                ('max_decel_kphps', 'max_decel_kphps', 1.0),
+                                ('max_lateral_accel_mps2', 'max_lateral_accel_g', 9.80665)]:
+        ceiling = float(limits[key]) * factor
+        if not math.isfinite(ceiling) or ceiling < 0:
+            raise RuntimeError('vehicle.limits.' + key + ' must be finite and nonnegative')
+        value = getattr(args, option)
+        if value is not None and ceiling > 0 and value > ceiling + 1e-12:
+            raise RuntimeError('--' + option.replace('_', '-') + ' exceeds vehicle.limits.' + key)
+        if args.variable_speed and (value if value is not None else ceiling) <= 0:
+            raise RuntimeError('variable-speed requires positive --' + option.replace('_', '-') +
+                               ' or vehicle.limits.' + key)
     # Apply an explicit trial speed to this run's snapshot; leave source YAML untouched.
     if args.cruise_speed_kph is not None:
         data.setdefault('/**', {}).setdefault('ros__parameters', {})['cruise_speed_kph'] = args.cruise_speed_kph
@@ -344,9 +358,12 @@ def prepare(args, journal):
         data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_decel_mps2'] = args.max_decel_kphps / 3.6
     if args.variable_speed:
         planner = data.setdefault('/control/motion_planning', {}).setdefault('ros__parameters', {})
-        planner.setdefault('speed_profile', {}).update(enabled=True,
-                        max_lateral_accel_mps2=args.max_lateral_accel_mps2,
-                        planned_decel_mps2=args.max_decel_kphps / 3.6)
+        profile = planner.setdefault('speed_profile', {})
+        profile['enabled'] = True
+        if args.max_lateral_accel_mps2 is not None:
+            profile['max_lateral_accel_mps2'] = args.max_lateral_accel_mps2
+        if args.max_decel_kphps is not None:
+            profile['planned_decel_mps2'] = args.max_decel_kphps / 3.6
         lateral = data.get('/control/motion_control', {}).get('ros__parameters', {})
         planner['route_progress_enabled'] = lateral.get('route_progress_enabled', False)
         if planner['route_progress_enabled']:
@@ -403,12 +420,12 @@ def main():
     parser.add_argument('--cruise-speed-kph', type=float,
                         help='Target speed or variable-speed ceiling in km/h; source YAML is preserved')
     parser.add_argument('--max-accel-kphps', type=float,
-                        help='This run only: positive AUTO speed command rise limit in (km/h)/s')
+                        help='AUTO speed command rise limit in (km/h)/s; defaults to vehicle.yaml ceiling')
     parser.add_argument('--max-decel-kphps', type=float,
-                        help='Positive normal speed command decrease limit and assumed planning deceleration in (km/h)/s')
+                        help='Normal speed command decrease limit and planning deceleration in (km/h)/s; defaults to vehicle.yaml')
     parser.add_argument('--variable-speed', action='store_true', help='Plan speed from route curvature and end distance')
     parser.add_argument('--max-lateral-accel-mps2', type=float,
-                        help='Assumed curve lateral acceleration limit in m/s^2; required with --variable-speed')
+                        help='Curve lateral acceleration limit in m/s^2; defaults to vehicle.yaml g value times 9.80665')
     for name in ('map', 'operation', 'pipeline', 'mission', 'control', 'vehicle'):
         parser.add_argument('--' + name + '-file')
     parser.add_argument('--log-root', type=Path, default=Path(os.environ.get('CONTROL_LOG_ROOT',
@@ -423,9 +440,6 @@ def main():
         value = getattr(args, key)
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(key.replace('_', '-') + ' must be finite and positive')
-    if args.variable_speed and any(getattr(args, key) is None for key in
-            ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps', 'max_lateral_accel_mps2')):
-        parser.error('variable-speed requires --cruise-speed-kph, --max-accel-kphps, --max-decel-kphps and --max-lateral-accel-mps2')
     if args.max_lateral_accel_mps2 is not None and not args.variable_speed:
         parser.error('max-lateral-accel-mps2 requires --variable-speed')
     for name in ('startup_timeout', 'request_timeout', 'status_timeout', 'stop_speed_mps', 'stop_hold_s'):

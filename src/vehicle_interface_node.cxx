@@ -3,7 +3,6 @@ namespace control_manager {
 VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   const bool dry_run = param<bool>("dry_run", true);
   conversion_.wheel_diameter_m = positive("vehicle.wheel_diameter_m", 0.0);
-  conversion_.motor_to_wheel_ratio = positive("vehicle.motor_to_wheel_ratio", 1.0);
   conversion_.steering_full_scale_deg = positive("trans.steering_full_scale_deg", 30.0);
   conversion_.motor_full_scale_rpm = positive("trans.motor_full_scale_rpm", 891.387);
   frame_ = param<std::string>("base_frame", "base_link");

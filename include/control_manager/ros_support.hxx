@@ -80,6 +80,15 @@ class NodeBase : public rclcpp::Node {
     if (!std::isfinite(value) || value < 0.0) throw std::invalid_argument(key + " must be nonnegative");
     return value;
   }
+  // Vehicle YAML owns defaults/ceilings; per-run SI parameters may only tighten a positive ceiling.
+  double vehicleAccelerationLimit(const std::string &vehicle_key, const std::string &runtime_key,
+                                  double to_mps2, bool required = false) {
+    const double ceiling = nonnegative("vehicle.limits." + vehicle_key, 0.0) * to_mps2;
+    const double value = required ? positive(runtime_key, ceiling) : nonnegative(runtime_key, ceiling);
+    if (ceiling > 0.0 && (value == 0.0 || value > ceiling + 1e-12))
+      throw std::invalid_argument(runtime_key + " must not disable or exceed vehicle.limits." + vehicle_key);
+    return value;
+  }
   core::VehicleLimits vehicleLimits() {
     const double rad_per_deg = std::acos(-1.0) / 180.0;
     core::VehicleLimits limits{

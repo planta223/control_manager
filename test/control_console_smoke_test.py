@@ -187,21 +187,34 @@ try:
 
     console = Console('missing_variable_limits', '--mode', 'test', '--variable-speed')
     try:
-        wait(console, lambda: console.process.poll() is not None, 'variable speed requires explicit limits')
+        wait(console, lambda: console.process.poll() is not None, 'variable speed requires undecided deceleration')
         assert console.process.returncode != 0 and 'variable-speed requires' in console.output
-        assert console.run_dir() is None
+        assert 'max-decel-kphps' in console.output
+        assert 'launch_pid' not in json.loads((console.run_dir() / 'metadata.json').read_text())
     finally:
         console.close()
 
+    for option, value in [('max-accel-kphps', '6'), ('max-lateral-accel-mps2', '2.0')]:
+        console = Console('exceeds_' + option, '--mode', 'test', '--variable-speed',
+                          '--max-decel-kphps', '5', '--' + option, value)
+        try:
+            wait(console, lambda: console.process.poll() is not None, 'vehicle ceiling enforced: ' + option)
+            assert console.process.returncode != 0 and 'exceeds vehicle.limits.' in console.output
+            assert 'launch_pid' not in json.loads((console.run_dir() / 'metadata.json').read_text())
+        finally:
+            console.close()
+
     console = Console('variable_speed', '--mode', 'preliminary_lap', '--variable-speed',
-                      '--cruise-speed-kph', '20', '--max-accel-kphps', '5',
-                      '--max-decel-kphps', '5', '--max-lateral-accel-mps2', '1.5')
+                      '--max-decel-kphps', '5')
     try:
         wait(console, lambda: '일시정지 상태로 준비됐습니다.' in console.output, 'variable-speed console ready paused')
         run = console.run_dir()
         metadata = json.loads((run/'metadata.json').read_text())
         assert metadata['variable_speed'] and metadata['max_decel_kphps'] == 5.0
-        assert metadata['speed_profile']['speed_profile.max_lateral_accel_mps2'] == 1.5
+        assert metadata['requested_max_accel_kphps'] is None
+        assert abs(metadata['max_accel_kphps'] - 5.0) < 1e-12
+        assert metadata['requested_max_lateral_accel_mps2'] is None
+        assert metadata['speed_profile']['speed_profile.max_lateral_accel_mps2'] == 0.20 * 9.80665
         assert metadata['speed_profile']['speed_profile.planned_decel_mps2'] == 5/3.6
         assert '속도 상한: 20 km/h' in console.output and '계획 목표속도:' in console.output
         resolved = yaml.safe_load((run/'config/operation.yaml').read_text())
@@ -211,6 +224,28 @@ try:
         assert planner['speed_profile']['enabled']
         console.key('3')
         wait(console, lambda: console.process.poll() is not None, 'variable-speed dry-run quit completes')
+        assert console.process.returncode == 0
+        clean_graph(console)
+    finally:
+        console.close()
+
+    custom_vehicle = yaml.safe_load((ROOT / 'config/vehicle.yaml').read_text())
+    custom_vehicle['/**']['ros__parameters']['vehicle']['limits'].update(
+        max_accel_kphps=3.0, max_decel_kphps=2.0, max_lateral_accel_g=0.1)
+    vehicle_file = OUT / 'custom_vehicle.yaml'
+    vehicle_file.write_text(yaml.safe_dump(custom_vehicle))
+    console = Console('vehicle_defaults', '--mode', 'preliminary_lap', '--variable-speed',
+                      '--vehicle-file', str(vehicle_file))
+    try:
+        wait(console, lambda: '일시정지 상태로 준비됐습니다.' in console.output,
+             'custom vehicle defaults allow variable speed without limit CLI overrides')
+        metadata = json.loads((console.run_dir()/'metadata.json').read_text())
+        assert abs(metadata['max_accel_kphps']-3.0) < 1e-12
+        assert abs(metadata['max_decel_kphps']-2.0) < 1e-12
+        assert metadata['speed_profile']['speed_profile.max_lateral_accel_mps2'] == 0.1*9.80665
+        assert abs(metadata['speed_profile']['speed_profile.planned_decel_mps2']-2.0/3.6) < 1e-12
+        console.key('3')
+        wait(console, lambda: console.process.poll() is not None, 'custom vehicle dry-run quit completes')
         assert console.process.returncode == 0
         clean_graph(console)
     finally:

@@ -56,7 +56,7 @@ struct ActuatorProtectionConfig {
 };
 // Existing trans input: normalized right-positive steering, forward-positive motor speed, brake.
 struct ActuatorConversionConfig {
-  double wheel_diameter_m{0.0}, motor_to_wheel_ratio{1.0};
+  double wheel_diameter_m{0.0};
   double steering_full_scale_deg{30.0}, motor_full_scale_rpm{891.387};
 };
 bool validActuatorConversion(const ActuatorConversionConfig &config);

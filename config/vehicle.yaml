@@ -1,43 +1,48 @@
 /**:
   ros__parameters:
-    # Local source of truth. Rear axle centre, +x forward, +y left, +z up.
-    # Mount z_m values are heights above ground, NOT rear-axle-relative TF z.
+    # =============
+    # 차량 수치
+    # =============
     vehicle:
-      length_m: 2.222                 # MEASURED, user 2026-10
-      width_m: 1.280                  # MEASURED
-      height_m: 1.3005                # MEASURED
-      rear_axle_from_rear_m: 0.225    # MEASURED
-      front_axle_from_rear_m: 1.553   # MEASURED
-      wheelbase_m: 1.328              # MEASURED: 1.553 - 0.225
-      track_width_m: 1.060            # MEASURED
-      wheel_diameter_m: 0.47          # MEASURED
-      motor_to_wheel_ratio: 1.0       # USER_CONFIRMED: motor RPM / wheel RPM, direct drive
-      # Vehicle command limits; degrees / km/h here, rad / m/s internally.
+      length_m: 2.222                 # 실측
+      width_m: 1.280                  # 실측
+      height_m: 1.3005                # 실측
+      rear_axle_from_rear_m: 0.225    # 실측, 차량 후단에서 후륜축까지 거리
+      front_axle_from_rear_m: 1.553   # 실측, 차량 후단에서 전륜축까지 거리
+      wheelbase_m: 1.328              # 실측: 1.553 - 0.225
+      track_width_m: 1.060            # 실측, 좌우 바퀴 중심 간 거리
+      wheel_diameter_m: 0.47          # 실측
+      
+      # =============
+      # 제어 상한
+      # =============
       limits:
-        # GPS 원선회 기반 좌우 공통 등가 조향각. 중간값은 선형으로 가정.
-        # 기계 끝단과 별도이며, PC UDP는 float32 degree로 ±17.01까지 전송.
-        min_steering_deg: -17.01    # right negative
-        max_steering_deg:  17.01    # left positive
-        min_speed_kph:    -132.89    # USER_SPECIFIED: reverse negative
-        max_speed_kph:     132.89    # USER_SPECIFIED: forward positive
+        min_steering_deg: -17.01           # 우회전 음수
+        max_steering_deg:  17.01           # 좌회전 양수
+        min_speed_kph: -78.97057078989354  # 후진 음수
+        max_speed_kph:  78.97057078989354  # 전진 양수
+        max_lateral_accel_g: 0.20          # 횡가속도 운용 상한, 실측 한계 아님. 1g = 9.80665m/s².
+        max_accel_kphps: 5.0             # 종가속도 모든 AUTO 속도 증가 구간의 명령 증가율, 실측 성능 아님.
+        max_decel_kphps: 0.0               # 미정. 0이면 일반 감속 명령은 즉시 적용. 변속 사용 시 양수 지정 필수.
+        # 감속도는 속도 계획에도 사용. 정지·제동·무효 입력은 가감속 제한을 우회해 즉시 적용.
+    
+    # =============
+    # 센서 좌표계
+    # +x 전방, +y 좌측, +z 상방. (z_m은 지면으로부터의 높이이며 후륜축 기준 좌표 변환의 z값이 아님)
+    # =============
     lidar_mount:
-      x_m: 0.559                     # MEASURED: 0.784 - 0.225
-      y_m: 0.0                       # ASSUMPTION: centreline, NOT_MEASURED
-      z_m: 1.224                     # MEASURED
+      x_m: 0.559                     # 실측: 0.784 - 0.225
+      y_m: 0.0                       # 중심선에 있다고 가정, 미실측
+      z_m: 1.224                     # 실측
     camera_mount:
-      x_m: 0.636                     # MEASURED: 0.861 - 0.225
-      y_m: 0.0                       # ASSUMPTION: centreline, NOT_MEASURED
-      z_m: 1.140                     # MEASURED
-      pitch_deg: 0.0                 # CONFIG: horizontal 0, up positive
+      x_m: 0.636                     # 실측: 0.861 - 0.225
+      y_m: 0.0                       # 중심선에 있다고 가정, 미실측
+      z_m: 1.140                     # 실측
+      pitch_deg: 0.0                 # 미실측
     gnss_mount:
-      x_m: 0.559                     # CONFIG: rear axle -> antenna, forward positive
-      y_m: 0.0                       # CONFIG: left positive
-      z_m: 1.424                     # CONFIG: height above ground
+      x_m: 0.559                     # 실측
+      y_m: 0.0                       # 중심선에 있다고 가정, 미실측
+      z_m: 1.424                     # 실측
     path_reference:
-      offset_x_m: 0.0                # CONFIG: rear axle centre
-      offset_y_m: 0.0                # CONFIG: rear axle centre
-    # Wheelbase / command limits / wheel diameter / drive ratio are consumed now.
-    # Other geometry documents future footprint/TF.
-    # TODO NOT_MEASURED: rear axle ground height, GNSS rotation, IMU xyz/RPY,
-    # camera roll/yaw and optical-frame transform, and LiDAR rotation extrinsics.
-    # NO TF is published from these partial measurements.
+      offset_x_m: 0.0                # 설정값: 후륜축 중심
+      offset_y_m: 0.0                # 설정값: 후륜축 중심

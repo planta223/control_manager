@@ -90,7 +90,7 @@ Command protectActuatorCommand(const Command &c,
   return c;  // Preserve source time; periodic forwarding must not renew a dead source.
 }
 bool validActuatorConversion(const ActuatorConversionConfig &cfg) {
-  for (const double value : {cfg.wheel_diameter_m, cfg.motor_to_wheel_ratio,
+  for (const double value : {cfg.wheel_diameter_m,
                              cfg.steering_full_scale_deg, cfg.motor_full_scale_rpm})
     if (!std::isfinite(value) || value <= 0.0) return false;
   return true;
@@ -108,8 +108,7 @@ std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfi
   const auto steering_raw = static_cast<float>(std::clamp(steering, -1.0, 1.0));
   if (!c.valid || c.target_brake || !std::isfinite(c.target_speed_mps))
     return {steering_raw, 0.0F, 1.0F};
-  const double motor_rpm = c.target_speed_mps * 60.0 / (pi * cfg.wheel_diameter_m) *
-                           cfg.motor_to_wheel_ratio;
+  const double motor_rpm = c.target_speed_mps * 60.0 / (pi * cfg.wheel_diameter_m);
   const double speed = motor_rpm / cfg.motor_full_scale_rpm;
   // if (!std::isfinite(steering) || !std::isfinite(speed)) return {0.0F, 0.0F, 1.0F};
   // conversion overflow also brakes without recentering the held angle.

@@ -58,7 +58,8 @@ ros2 run control_manager control_console --mode test --cruise-speed-kph "$TEST_S
 CLI 값은 내부 ROS 파라미터 max_accel_mps2에 /3.6하여 적용한다. 2.0 (km/h)/s는 약 0.5556m/s²이며,
 2km/h 명령에서 1초 뒤 4km/h 명령이 되는 증가율이다. km/s²와는 다른 단위다.
 이는 명령 제한이며 실제 가속도는 GNSS로 검증해야 한다. 수동 조작에는 적용하지 않는다.
-생략하면 control.yaml 값을 사용하며 현재 기본값 0.0은 미적용이다. CLI에는 양수만 지정한다.
+생략하면 vehicle.yaml의 vehicle.limits 값을 사용한다. 현재 가속도 기본값은 5.0(km/h)/s,
+감속도는 0.0(미정)이다. 양수로 설정한 차량 공통 상한보다 큰 실행 옵션은 거부한다. CLI에는 양수만 지정한다.
 
 ```bash
 # 5km/h·2(km/h)/s는 사용법 예시이며 시험 확정값이 아니다.
@@ -78,7 +79,11 @@ ros2 run control_manager control_console --mode test --variable-speed \
   --max-lateral-accel-mps2 1.5
 ```
 
-변속은 최고속도·가속도·감속도·횡가속도 상한을 모두 명시해야 한다.
+최고속도 옵션 생략 시 mission.yaml의 공통 운용속도를 사용한다.
+가속도·감속도·횡가속도 옵션 생략 시 vehicle.yaml의 vehicle.limits를 사용한다.
+횡가속도 기본값은 max_lateral_accel_g=0.20이며 내부에서는 9.80665를 곱해 1.96133m/s²로 변환한다.
+변속은 적용할 세 가속도 값이 모두 양수여야 한다. 현재 감속도가 미정(0)이므로
+--max-decel-kphps를 지정하거나 vehicle.yaml에 양수 감속도를 설정해야 한다.
 종방향 가속/감속 CLI 단위는 (km/h)/s, 횡가속도 CLI 단위는 m/s²다.
 변속 활성 여부와 모든 적용값을 실행별 설정 사본 및 metadata에 남긴다.
 화면에는 속도 상한, 현재 경로의 계획 목표속도, 제한 적용 후 속도 명령, GNSS 실측 속도를 구분한다.

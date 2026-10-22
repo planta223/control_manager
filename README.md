@@ -366,7 +366,11 @@ vehicle_interface는 선택 명령 수신/source timeout, non-finite/제동·속
 미검증 운용 한계와 범위 초과를 검사합니다. 범위 초과는 기존처럼 clamp 대신 stop입니다.
 vehicle_interface가 자체 timer로 command loss를 처리하므로 selector 중단도 정지시킵니다.
 최종 보호 결과를 actuator_raw `[steering, speed, brake]`로 변환해 발행합니다 (`dry_run=false`).
-바퀴 지름은 vehicle.yaml의 wheel_diameter_m=0.47 m (임시), motor_to_wheel_ratio=1.0 (사용자 확인)입니다.
+바퀴 지름은 vehicle.yaml의 실측 wheel_diameter_m=0.47 m이며, 보정된 실제 RPM을 바퀴 RPM과 동일하게 사용합니다.
+실제 RPM 상한 891.387에 대응하는 속도 제한은 ±78.97057078989354 km/h입니다. 이는 환산된 명령 상한이며 실측 최고속도가 아닙니다.
+횡가속도·종가감속도 기본값도 vehicle.limits에 둡니다. 횡가속도 0.20g(1.96133m/s²),
+AUTO 명령 증가율 5(km/h)/s, 일반 감속도 0(미정)이며, 변속 주행에는 양수 감속도 지정이 필요합니다.
+실행 옵션은 양수로 설정된 차량 공통 상한 이내에서만 변경할 수 있습니다.
 내부 좌회전 양수 rad를 외부 우회전 양수 ±1로 변환하고, 속도는 m/s → 바퀴 RPM → 실제 모터 RPM / 891.387로 환산합니다.
 trans는 정규화 속도에 -891.387을 곱해 실제 RPM float32를 `<ffB>`의 속도 필드로 송신합니다.
 UNO가 실제 목표 RPM을 컨트롤러 단위로 환산하고 최종 CAN 정수 명령만 반올림합니다. 연결 명령·속도 해상도는 [Command path 보고서](doc/command_path.md)를 참고합니다.

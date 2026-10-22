@@ -163,7 +163,7 @@ TEST(VehicleLimits, AutoSaturatesBothSteeringDirectionsAndForwardSpeed) {
   EXPECT_FALSE(cm::limitAutomaticCommand(command(),{}).valid);
 }
 TEST(ActuatorRaw, RightPositiveSteeringAndWheelSpeedConversion) {
-  const cm::ActuatorConversionConfig cfg{0.5, 1.0, 30.0, 1500.0};
+  const cm::ActuatorConversionConfig cfg{0.5, 30.0, 1500.0};
   auto c=command();
   c.target_steer_rad=-std::acos(-1.0)/12.0;  // Right 15 degrees.
   c.target_speed_mps=10.0/3.6;
@@ -177,11 +177,9 @@ TEST(ActuatorRaw, RightPositiveSteeringAndWheelSpeedConversion) {
   EXPECT_NEAR(raw[1],-0.07073553,1e-7);
   auto larger_wheel=cfg; larger_wheel.wheel_diameter_m=1.0;
   EXPECT_NEAR(cm::actuatorRaw(c,larger_wheel)[1],raw[1]/2.0,1e-7);
-  auto reduction=cfg; reduction.motor_to_wheel_ratio=2.0;
-  EXPECT_NEAR(cm::actuatorRaw(c,reduction)[1],raw[1]*2.0,1e-7);
 }
 TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
-  const cm::ActuatorConversionConfig cfg{0.5, 1.0, 30.0, 1500.0};
+  const cm::ActuatorConversionConfig cfg{0.5, 30.0, 1500.0};
   auto c=command(); c.target_steer_rad=-1.0; c.target_speed_mps=100.0;
   auto raw=cm::actuatorRaw(c,cfg);
   EXPECT_FLOAT_EQ(raw[0],1.0F); EXPECT_FLOAT_EQ(raw[1],1.0F);
@@ -203,9 +201,14 @@ TEST(ActuatorRaw, ProtocolSaturationAndStopEncoding) {
   for (double bad : {0.0, -0.5, std::numeric_limits<double>::infinity()}) {
     auto invalid=cfg; invalid.wheel_diameter_m=bad;
     EXPECT_FALSE(cm::validActuatorConversion(invalid));
-    invalid=cfg; invalid.motor_to_wheel_ratio=bad;
-    EXPECT_FALSE(cm::validActuatorConversion(invalid));
   }
+}
+TEST(ActuatorRaw, CalibratedWheelSpeedReachesActualRpmFullScale) {
+  const cm::ActuatorConversionConfig cfg{0.47, 30.0, 891.387};
+  auto c=command(); c.target_speed_mps=78.97057078989354/3.6;
+  EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],1.0F);
+  c.target_speed_mps=-c.target_speed_mps;
+  EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],-1.0F);
 }
 // safety stops must retain actual last protected steering.
 TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedValues) {
@@ -230,7 +233,7 @@ TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedVal
 }
 // numerical conversion failure must not recenter either.
 TEST(StopSteering, ConversionOverflowKeepsSteering) {
-  const cm::ActuatorConversionConfig cfg{std::numeric_limits<double>::min(), 1.0, 30.0, 1500.0};
+  const cm::ActuatorConversionConfig cfg{std::numeric_limits<double>::min(), 30.0, 1500.0};
   auto c=command();
   const auto raw=cm::actuatorRaw(c,cfg);
   EXPECT_NEAR(raw[0], -0.1 * 180.0 / std::acos(-1.0) / 30.0, 1e-7);

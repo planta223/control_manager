@@ -105,7 +105,7 @@ ros2 run trans trans --ros-args -p cmd_topic:=/control/actuator_raw
 
 - 내부 VehicleCommand는 rad / 좌회전 양수입니다. raw 조향은 `-steer_rad × 180 / π / 17.01`로 우회전 양수입니다.
 - 바퀴 RPM은 `speed_mps × 60 / (π × wheel_diameter_m)`입니다.
-- 실제 모터 RPM은 바퀴 RPM × motor_to_wheel_ratio이며 raw 속도는 실제 모터 RPM / 891.387입니다. 전진 양수를 유지합니다.
+- 보정된 실제 모터 RPM을 바퀴 RPM과 동일하게 사용하며 raw 속도는 실제 RPM / 891.387입니다. 전진 양수를 유지합니다.
 - vehicle.yaml의 바퀴 지름 0.47 m는 임시값, 구동비 1:1은 사용자 확인값입니다. 실측 후 지름만 수정하면 환산에 반영됩니다.
 - trans의 ±17.01 deg / 실제 ±891.387 RPM 계약은 pipeline.yaml의 `trans.*`에 둡니다. raw 조향·속도는 ±1로 제한합니다.
 - trans는 정규화 속도에 -891.387을 곱해 실제 RPM을 float32로 전송합니다. UNO에서만 0.198086으로 나눠 CAN 정수 명령으로 변환합니다.

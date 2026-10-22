@@ -14,8 +14,7 @@
   ros__parameters:
     speed_profile:
       enabled: false                  # console --variable-speed로 실행별 적용.
-      max_lateral_accel_mps2: 0.0      # 미확정. 변속 사용 시 양수 지정 필수.
-      planned_decel_mps2: 0.0          # 미확정. 속도 계획에 사용할 가정 감속도, 양수 필수.
+      # 횡가속도·종감속도 상한은 vehicle.yaml의 vehicle.limits 사용.
       curvature_sample_m: 1.0          # 지도 곡률 계산용 전후 거리.
       response_time_s: 0.5             # 미실측 지연 가정. 제동 성능 보장값 아님.
       max_path_distance_m: 3.0

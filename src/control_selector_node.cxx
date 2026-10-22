@@ -9,8 +9,9 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("command_timeout_s", 0.5);
   paused_ = param<bool>("start_paused", true);
-  acceleration_limiter_ = core::AccelerationLimiter(nonnegative("max_accel_mps2", 0.0),
-                                                   nonnegative("max_decel_mps2", 0.0));
+  acceleration_limiter_ = core::AccelerationLimiter(
+    vehicleAccelerationLimit("max_accel_kphps", "max_accel_mps2", 1.0 / 3.6),
+    vehicleAccelerationLimit("max_decel_kphps", "max_decel_mps2", 1.0 / 3.6));
   subscriptions_.push_back(create_subscription<msg::PauseRequest>(topic("pause_request"), 10,
     [this](msg::PauseRequest::ConstSharedPtr request) {
       if (mode_ != core::ControlMode::AUTO || !ingress::validStampFormat(request->header.stamp) ||

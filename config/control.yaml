@@ -1,11 +1,4 @@
-/control/control_selector:
-  ros__parameters:
-    # AUTO 목표속도 명령 증가율 [m/s²]. 0: 미적용. 실측 가속도 보장값이 아님.
-    # console --max-accel-kphps [(km/h)/s] 값을 /3.6하여 적용. 정지/제동은 즉시 적용.
-    max_accel_mps2: 0.0
-    # 일반 주행의 양수 속도 목표 감소율. 0: 즉시 감소. 정지/제동/무효 입력은 항상 즉시 적용.
-    max_decel_mps2: 0.0
-
+# 가감속 명령 상한은 vehicle.yaml의 vehicle.limits에서 관리.
 /control/motion_control:
   ros__parameters:
     # Motion Control PID 계산 설정
