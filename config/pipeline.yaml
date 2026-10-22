@@ -85,11 +85,11 @@
 
 /control/vehicle_interface:
   ros__parameters:
-    # normalized ±1 -> 등가 조향각 ±17.01 deg / 모터 ±4500 RPM.
+    # normalized ±1 -> 등가 조향각 ±17.01 deg / 모터 실제 ±891.387 RPM.
     # trans는 조향/속도를 float32로 전송하며 최종 RPM 반올림은 UNO에서 수행.
     trans:
       steering_full_scale_deg: 17.01
-      motor_full_scale_rpm: 4500.0
+      motor_full_scale_rpm: 891.387
 
 /control/global_path_provider:
   ros__parameters:

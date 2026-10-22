@@ -109,7 +109,7 @@ TEST(ActuatorRaw, RightPositiveSteeringAndWheelSpeedConversion) {
   c.target_speed_mps=10.0/3.6;
   auto raw=cm::actuatorRaw(c,cfg);
   EXPECT_FLOAT_EQ(raw[0],0.5F);
-  EXPECT_NEAR(raw[1],0.07073553,1e-7);  // 106.103 RPM / 1500; trans rounds to speed=7.
+  EXPECT_NEAR(raw[1],0.07073553,1e-7);  // Generic fixture: 106.103 RPM / 1500.
   EXPECT_FLOAT_EQ(raw[2],0.0F);
   c.target_steer_rad=-c.target_steer_rad; c.target_speed_mps=-c.target_speed_mps;
   raw=cm::actuatorRaw(c,cfg);
