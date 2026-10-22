@@ -1,0 +1,32 @@
+/vehicle_recorder:
+  ros__parameters:
+    log_root: /workspace/log/vehicle_recorder/autonomy_constant_speed
+    record_queue_size: 4096
+    reference_path_topic: /control/reference_path
+    snapshot_files:
+      - /workspace/src/control_manager/config/vehicle.yaml
+      - /workspace/src/control_manager/config/pipeline.yaml
+      - /workspace/src/control_manager/config/control.yaml
+      - /workspace/src/control_manager/config/mission.yaml
+      - /workspace/src/control_manager/config/modes/test.yaml
+      - /workspace/src/control_manager/config/record_test.yaml
+      - /workspace/src/trans/trans/config.py
+      - /workspace/src/trans/trans/motor.py
+    topics:
+      - /gnss/odom
+      - /gnss/fix
+      - /gnss/status
+      - /motor_feedback
+      - /steering_feedback
+      - /control/global_path
+      - /control/reference_path
+      - /control/global_pose
+      - /control/motion_state
+      - /control/pp_diagnostic
+      - /control/motion_plan
+      - /control/auto_cmd
+      - /control/selected_cmd
+      - /control/actuator_raw
+      - /control/status
+      - /control/stop_status
+      - /vehicle/command_events

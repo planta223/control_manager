@@ -68,6 +68,15 @@ class StopSteeringHold {
  private:
   double last_steer_rad_{0.0};  // No prior command at process startup: neutral reference only.
 };
+// Forward AUTO command slew only; physical acceleration still depends on the vehicle.
+class AccelerationLimiter {
+ public:
+  explicit AccelerationLimiter(double max_accel_mps2 = 0.0, double max_decel_mps2 = 0.0);
+  Command apply(Command command, double dt_s);
+  void reset() { previous_speed_mps_ = 0.0; }
+ private:
+  double max_accel_mps2_, max_decel_mps2_, previous_speed_mps_{0.0};
+};
 // resolve all stop/invalid angles with StopSteeringHold before raw conversion.
 std::array<float, 3> actuatorRaw(const Command &command, const ActuatorConversionConfig &config);
 bool fresh(std::int64_t stamp_ns, std::int64_t now_ns, double timeout_s);

@@ -116,12 +116,30 @@ def ack_count(console, pause, exiting=False):
 
 
 try:
-    console = Console('menu_and_logging', '--map-file', MAP)
+    # The production test mode publishes actuator_raw. Keep this fixture explicitly dry.
+    dry_operation = yaml.safe_load((ROOT / 'config/modes/test.yaml').read_text())
+    dry_operation['/control/vehicle_interface']['ros__parameters']['dry_run'] = True
+    dry_file = OUT / 'dry_operation.yaml'
+    dry_file.write_text(yaml.safe_dump(dry_operation))
+    original_mission = (ROOT / 'config/mission.yaml').read_bytes()
+    console = Console('menu_and_logging', '--map-file', MAP, '--operation-file', str(dry_file),
+                      '--cruise-speed-kph', '5.0', '--max-accel-kphps', '2.0')
     try:
         wait(console, lambda: '주행 모드 선택' in console.output, 'mode selection menu')
         console.key('1')
         wait(console, lambda: '일시정지 상태로 준비됐습니다.' in console.output, 'test mode starts paused')
         run = console.run_dir()
+        assert '목표속도: 5 km/h' in console.output
+        metadata = json.loads((run / 'metadata.json').read_text())
+        assert metadata['requested_cruise_speed_kph'] == metadata['cruise_speed_kph'] == 5.0
+        assert metadata['requested_max_accel_kphps'] == metadata['max_accel_kphps'] == 2.0
+        assert metadata['max_accel_mps2'] == 2.0/3.6
+        assert '속도 명령 가속도 제한: 2 (km/h)/s' in console.output
+        resolved = yaml.safe_load((run / 'config/operation.yaml').read_text())
+        assert resolved['/control/motion_planning']['ros__parameters']['cruise_speed_mps'] == 5/3.6
+        assert (ROOT / 'config/mission.yaml').read_bytes() == original_mission
+        assert 'cruise_speed_kph' not in dry_operation['/**']['ros__parameters']
+        print('PASS: trial speed applied to snapshots and real planner; source YAML preserved', flush=True)
         first_pid = json.loads((run / 'metadata.json').read_text())['launch_pid']
         wait(console, lambda: (run / 'launch.log').read_text().count('[DRY_RUN]') >= 2
              and '[WARN]' in (run / 'launch.log').read_text(), 'periodic logs and warnings preserved in launch.log')
@@ -153,6 +171,47 @@ try:
         metadata = json.loads((run / 'metadata.json').read_text())
         assert metadata['docker_image_id'] and metadata['launch_returncode'] == 0
         assert (run / 'config/source_mode.yaml').exists() and (run / 'config/map.json').exists()
+        clean_graph(console)
+    finally:
+        console.close()
+
+    for option in ('cruise-speed-kph', 'max-accel-kphps', 'max-decel-kphps', 'max-lateral-accel-mps2'):
+        for label, value in [('zero', '0'), ('negative', '-1'), ('nan', 'nan'), ('infinite', 'inf')]:
+            console = Console('invalid_' + option + '_' + label, '--mode', 'test', '--' + option, value)
+            try:
+                wait(console, lambda: console.process.poll() is not None, 'invalid ' + option + ' rejected: ' + label)
+                assert console.process.returncode != 0 and 'finite and positive' in console.output
+                assert console.run_dir() is None
+            finally:
+                console.close()
+
+    console = Console('missing_variable_limits', '--mode', 'test', '--variable-speed')
+    try:
+        wait(console, lambda: console.process.poll() is not None, 'variable speed requires explicit limits')
+        assert console.process.returncode != 0 and 'variable-speed requires' in console.output
+        assert console.run_dir() is None
+    finally:
+        console.close()
+
+    console = Console('variable_speed', '--mode', 'preliminary_lap', '--variable-speed',
+                      '--cruise-speed-kph', '20', '--max-accel-kphps', '5',
+                      '--max-decel-kphps', '5', '--max-lateral-accel-mps2', '1.5')
+    try:
+        wait(console, lambda: '일시정지 상태로 준비됐습니다.' in console.output, 'variable-speed console ready paused')
+        run = console.run_dir()
+        metadata = json.loads((run/'metadata.json').read_text())
+        assert metadata['variable_speed'] and metadata['max_decel_kphps'] == 5.0
+        assert metadata['speed_profile']['speed_profile.max_lateral_accel_mps2'] == 1.5
+        assert metadata['speed_profile']['speed_profile.planned_decel_mps2'] == 5/3.6
+        assert '속도 상한: 20 km/h' in console.output and '계획 목표속도:' in console.output
+        resolved = yaml.safe_load((run/'config/operation.yaml').read_text())
+        planner = resolved['/control/motion_planning']['ros__parameters']
+        lateral = resolved['/control/motion_control']['ros__parameters']
+        assert planner['route_progress_enabled'] and planner['route_progress'] == lateral['route_progress']
+        assert planner['speed_profile']['enabled']
+        console.key('3')
+        wait(console, lambda: console.process.poll() is not None, 'variable-speed dry-run quit completes')
+        assert console.process.returncode == 0
         clean_graph(console)
     finally:
         console.close()

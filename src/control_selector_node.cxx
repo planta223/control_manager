@@ -9,6 +9,8 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   frame_ = param<std::string>("base_frame", "base_link");
   timeout_s_ = positive("command_timeout_s", 0.5);
   paused_ = param<bool>("start_paused", true);
+  acceleration_limiter_ = core::AccelerationLimiter(nonnegative("max_accel_mps2", 0.0),
+                                                   nonnegative("max_decel_mps2", 0.0));
   subscriptions_.push_back(create_subscription<msg::PauseRequest>(topic("pause_request"), 10,
     [this](msg::PauseRequest::ConstSharedPtr request) {
       if (mode_ != core::ControlMode::AUTO || !ingress::validStampFormat(request->header.stamp) ||
@@ -20,15 +22,20 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
         ++resume_sequence_;
         resume_after_ns_ = now().nanoseconds();
       }
+      if (paused_ != request->pause) acceleration_limiter_.reset();
       paused_ = request->pause;
     }));
   manual_ = input<msg::VehicleCommand>("manual_cmd");
   auto_ = input<msg::VehicleCommand>("auto_cmd");
   selected_publisher_ = output<msg::VehicleCommand>("selected_cmd");
   status_publisher_ = output<msg::ControlStatus>("status");
+  previous_tick_ = std::chrono::steady_clock::now();
   tick([this] { update(); });
 }
 void ControlSelectorNode::update() {
+  const auto tick_time = std::chrono::steady_clock::now();
+  const double dt_s = std::chrono::duration<double>(tick_time - previous_tick_).count();
+  previous_tick_ = tick_time;
   auto read = [this](const std::shared_ptr<Input<msg::VehicleCommand>> &in) {
     if (!in || !in->value || !ingress::validStampFormat(in->value->header.stamp) ||
         !current(in, timeout_s_) || in->value->header.frame_id != frame_)
@@ -44,8 +51,11 @@ void ControlSelectorNode::update() {
   // const auto selected = paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
   //   : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds());
   // pause/stale/invalid paths retain the last selected steering command.
-  const auto selected = stop_steering_.apply(paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
-    : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds()));
+  auto selected = paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
+    : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds());
+  if (mode_ == core::ControlMode::AUTO) selected = acceleration_limiter_.apply(selected, dt_s);
+  else acceleration_limiter_.reset();
+  selected = stop_steering_.apply(selected);
   selected_publisher_->publish(toRos(selected, frame_));
   msg::ControlStatus status;
   status.header = header(frame_);

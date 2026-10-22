@@ -1,6 +1,7 @@
 #include "control_manager/core/types.hxx"
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace control_manager::core {
 bool fresh(std::int64_t stamp, std::int64_t now, double timeout_s) {
@@ -28,6 +29,32 @@ Command selectCommand(ControlMode mode, const Command &manual, const Command &au
   if (mode == ControlMode::MANUAL) return manual;
   if (mode == ControlMode::AUTO) return automatic;
   return stop(now, "IDLE", true);
+}
+AccelerationLimiter::AccelerationLimiter(double max_accel_mps2, double max_decel_mps2)
+    : max_accel_mps2_(max_accel_mps2), max_decel_mps2_(max_decel_mps2) {
+  if (!std::isfinite(max_accel_mps2_) || max_accel_mps2_ < 0.0 ||
+      !std::isfinite(max_decel_mps2_) || max_decel_mps2_ < 0.0)
+    throw std::invalid_argument("acceleration/deceleration limits must be finite and nonnegative");
+}
+Command AccelerationLimiter::apply(Command command, double dt_s) {
+  if (max_accel_mps2_ == 0.0 && max_decel_mps2_ == 0.0) { reset(); return command; }
+  if (!command.valid || command.target_brake || command.target_speed_mps == 0.0) {
+    reset(); return command;  // Braking and invalid input must never be ramped.
+  }
+  if (!std::isfinite(command.target_speed_mps) || command.target_speed_mps < 0.0 ||
+      !std::isfinite(dt_s) || dt_s <= 0.0) {
+    reset(); return stop(command.timestamp_ns, "INVALID_ACCELERATION_LIMIT_INPUT");
+  }
+  // Do not catch up a delayed timer with a large speed step (normal tick: 20 ms).
+  double next=command.target_speed_mps;
+  if (max_accel_mps2_>0.0 && next>previous_speed_mps_)
+    next=std::min(next,previous_speed_mps_+max_accel_mps2_*std::min(dt_s,0.1));
+  if (max_decel_mps2_>0.0 && next<previous_speed_mps_)
+    next=std::max(next,previous_speed_mps_-max_decel_mps2_*std::min(dt_s,0.1));
+  if (next < command.target_speed_mps) command.reason += ":ACCELERATION_LIMITED";
+  if (next > command.target_speed_mps) command.reason += ":DECELERATION_LIMITED";
+  command.target_speed_mps = previous_speed_mps_ = next;
+  return command;  // Preserve the source timestamp and steering/brake contract.
 }
 bool validVehicleLimits(const VehicleLimits &l) {
   return std::isfinite(l.min_steer_rad) && std::isfinite(l.max_steer_rad) &&

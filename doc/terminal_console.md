@@ -1,20 +1,27 @@
 # 터미널 운용 메뉴
 
-호스트의 프로젝트 루트에서 기존 main 컨테이너를 사용한다.
+기존 main 컨테이너 안에서 ROS 환경과 빌드 결과를 source한 뒤 실행한다.
 
 ```bash
-bash main/IF_YOU_WANT_TO_RUN/control_console.sh
+ros2 run control_manager control_console
 ```
 
 첫 화면에서 1=test, 2=brake_inspection, 3=preliminary_lap, 4=final_lap을 선택한다.
 Enter 없이 숫자 키로 선택한다. 모드 선택을 생략하려면 다음을 사용한다.
 
 ```bash
-bash main/IF_YOU_WANT_TO_RUN/control_console.sh --mode preliminary_lap
+ros2 run control_manager control_console --mode preliminary_lap
 ```
 
-main 컨테이너 내부에서는 `ros2 run control_manager control_console`로 직접 실행한다.
-호스트 진입 스크립트는 Docker 이미지 ID와 컨테이너 ID도 기록하도록 전달한다.
+호스트에서 접속할 때 이미지 ID와 컨테이너 ID도 함께 전달할 수 있다.
+
+```bash
+docker exec -it \
+  -e CONTROL_IMAGE_ID="$(docker inspect --format '{{.Image}}' main)" \
+  -e CONTROL_CONTAINER_ID="$(docker inspect --format '{{.Id}}' main)" \
+  main bash
+```
+
 이미지 ID를 환경에서 제공하지 않은 직접 실행은 metadata의 docker_image_id가 null이다.
 
 ## 조작
@@ -28,7 +35,70 @@ main 컨테이너 내부에서는 `ros2 run control_manager control_console`로 
 AUTO 운용만 지원하며 외부 센서와 trans 송신기는 자동 실행하지 않는다.
 화면은 ControlStatus 응답을 기준으로 갱신한다. 재개 수락은 실제 출발을 뜻하지 않는다.
 진행 조건이 충족되지 않으면 제어 코드는 정지 명령을 유지한다.
-지도 없는 test/brake_inspection은 기존 GPS 경로 의존성을 그대로 가진다.
+test의 기본 지도는 MAP_test.json이다. 지도 없는 모드는 기존 GPS 경로 의존성을 그대로 가진다.
+
+목표속도를 바꿔 시험하려면 `--cruise-speed-kph`를 지정한다. 원본 mission/mode YAML 대신
+해당 실행의 operation.yaml 사본에 적용하며 실제 Motion Planning 설정값을 화면과 metadata에 남긴다.
+생략하면 기존 YAML의 목표속도를 사용한다. 현재 공통 mission.yaml에는 20km/h가 있으므로,
+속도가 미정인 시험은 이 값을 임의로 채택하지 말고 정한 속도를 명시한다.
+
+```bash
+# TEST_SPEED_KPH는 이번 시험에서 정한 양수 km/h 값. 미지정 시 실행하지 않음.
+: "${TEST_SPEED_KPH:?시험 목표속도를 먼저 지정하세요}"
+ros2 run control_manager control_console --mode test --cruise-speed-kph "$TEST_SPEED_KPH"
+```
+
+변속 옵션을 생략하면 이 값은 고정 목표속도다. `--variable-speed`를 사용하면 속도 상한이다.
+
+`--max-accel-kphps`는 AUTO 속도 명령의 증가율을 (km/h)/s로 제한한다. 출발·재개와
+주행 중 목표속도 증가에 모두 적용한다. 감소는 `--max-decel-kphps`로 제한할 수 있으며,
+생략하면 기존처럼 즉시 감소한다. 정지·제동·무효 입력은 두 제한을 우회해 즉시 적용한다.
+0에서 출발하고 매 제어 주기에 `min(목표속도, 이전 명령 + 상한 × dt)`로 증가한다.
+정지/무효/입력 만료 시 이력을 초기화하며, timer 지연을 한 번에 따라잡지 않도록 dt는 최대 0.1초로 계산한다.
+CLI 값은 내부 ROS 파라미터 max_accel_mps2에 /3.6하여 적용한다. 2.0 (km/h)/s는 약 0.5556m/s²이며,
+2km/h 명령에서 1초 뒤 4km/h 명령이 되는 증가율이다. km/s²와는 다른 단위다.
+이는 명령 제한이며 실제 가속도는 GNSS로 검증해야 한다. 수동 조작에는 적용하지 않는다.
+생략하면 control.yaml 값을 사용하며 현재 기본값 0.0은 미적용이다. CLI에는 양수만 지정한다.
+
+```bash
+# 5km/h·2(km/h)/s는 사용법 예시이며 시험 확정값이 아니다.
+ros2 run control_manager control_console --mode test \
+  --cruise-speed-kph 5.0 --max-accel-kphps 2.0
+```
+
+일시정지로 시작하며 출발 후 지정한 상한으로 속도 명령을 올린다. 초기 heading 확보
+직진 구간에도 같은 제한이 적용된다. 상한과 목표속도는 화면과 metadata에 기록한다.
+
+## 지도 곡률 기반 자동 변속
+
+```bash
+# 아래 숫자는 사용법 예시이며 실측 차량 성능/확정 시험값이 아니다.
+ros2 run control_manager control_console --mode test --variable-speed \
+  --cruise-speed-kph 20 --max-accel-kphps 5 --max-decel-kphps 5 \
+  --max-lateral-accel-mps2 1.5
+```
+
+변속은 최고속도·가속도·감속도·횡가속도 상한을 모두 명시해야 한다.
+종방향 가속/감속 CLI 단위는 (km/h)/s, 횡가속도 CLI 단위는 m/s²다.
+변속 활성 여부와 모든 적용값을 실행별 설정 사본 및 metadata에 남긴다.
+화면에는 속도 상한, 현재 경로의 계획 목표속도, 제한 적용 후 속도 명령, GNSS 실측 속도를 구분한다.
+
+Motion Planning이 후륜축 기준 정적 경로에서 전후 1m 간격의 세 점으로 곡률을 계산하고,
+`v_curve = sqrt(max_lateral_accel / abs(curvature))`를 최고속도 이하로 제한한다.
+미래 곡선과 종점의 낮은 속도를 `v_before² <= v_after² + 2*b*distance`로 앞쪽 경로에 전파한다.
+mission.yaml의 `speed_profile.response_time_s=0.5`는 미측정 지연 가정으로,
+미래의 더 낮은 속도까지 감속하기 전 반응거리를 추가 확보하는 데 사용한다.
+이 속도 계획 거리는 조향 PP의 2~6m lookahead와 독립이다. PP는 계속 GNSS 실측 속도를 사용한다.
+설정된 최대 조향각으로 불가능한 경로 곡률은 저속으로 대체하지 않고 정지 처리한다.
+
+진행 위치는 GlobalPose를 사용하며 예선 모드에서는 Motion Control과 같은
+route_progress 프로필을 실행 사본에 복사해 교차 구간의 다른 가지로 점프하지 않도록 한다.
+경로 내용/점 수를 바꾼 경우 노드를 재시작하고 프로필도 다시 확인한다.
+GNSS 위치/속도 또는 경로가 무효·만료되면 정지하고, 활성화된 상위 미션/장애물 정지도 즉시 우선 적용한다.
+
+감속도와 횡가속도 상한, 지연은 실측 보장값이 아니다. 현재 종방향 출력은 실제 RPM 환산이며
+GNSS 속도오차를 되먹임하는 PI/PID는 포함하지 않는다. 일반 감속은 목표 RPM을 줄이는 방식이다.
+실제 감속과 곡선 속도 준수, 물리 종점 정지 위치는 GNSS 실차 시험으로 확인해야 한다.
 
 ## 종료 확인
 

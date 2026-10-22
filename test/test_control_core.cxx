@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
+#include <stdexcept>
 #include <utility>
 #include "control_manager/core/lateral_controller.hxx"
 namespace cm = control_manager::core;
@@ -25,6 +27,64 @@ TEST(Arbitration, ModeIsolationAndTimestampPreserved) {
   EXPECT_TRUE(cm::selectCommand(cm::ControlMode::IDLE,m,a,now_ns).target_brake);
   a.timestamp_ns -= 100;
   EXPECT_EQ(cm::selectCommand(cm::ControlMode::AUTO,m,a,now_ns).timestamp_ns,a.timestamp_ns);
+}
+TEST(AccelerationLimiter, LimitsStartupAndEveryLaterTargetIncrease) {
+  cm::AccelerationLimiter limiter(0.5);
+  auto c = command(); c.target_speed_mps = 1.0;
+  cm::Command out;
+  for (int i=1;i<=100;++i) {
+    out = limiter.apply(c, 0.02);
+    EXPECT_NEAR(out.target_speed_mps, std::min(1.0,i*0.01), 1e-12);
+    EXPECT_EQ(out.timestamp_ns,c.timestamp_ns);
+    EXPECT_DOUBLE_EQ(out.target_steer_rad,c.target_steer_rad);
+    EXPECT_FALSE(out.target_brake);
+  }
+  c.target_speed_mps = 3.0;  // Acceleration while already driving, not just departure.
+  EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,1.01,1e-12);
+  c.target_speed_mps = 0.4;
+  EXPECT_DOUBLE_EQ(limiter.apply(c,0.02).target_speed_mps,0.4);
+  c.target_speed_mps = 2.0;
+  EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,0.41,1e-12);
+}
+TEST(AccelerationLimiter, StopsInvalidAndZeroResetImmediately) {
+  for (int kind=0;kind<3;++kind) {
+    cm::AccelerationLimiter limiter(1.0);
+    auto c=command();
+    EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,0.02,1e-12);
+    auto stop = kind==0 ? cm::stop(now_ns,"BRAKE",true) : c;
+    if (kind==1) stop.valid=false;
+    if (kind==2) stop.target_speed_mps=0.0;
+    const auto out=limiter.apply(stop,0.02);
+    EXPECT_EQ(out.valid,stop.valid); EXPECT_EQ(out.target_brake,stop.target_brake);
+    EXPECT_DOUBLE_EQ(out.target_speed_mps,stop.target_speed_mps);
+    EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,0.02,1e-12);
+  }
+}
+TEST(AccelerationLimiter, DisabledAndDelayedOrInvalidTicks) {
+  auto c=command();
+  cm::AccelerationLimiter disabled;
+  EXPECT_DOUBLE_EQ(disabled.apply(c,0.02).target_speed_mps,c.target_speed_mps);
+  cm::AccelerationLimiter limiter(0.5);
+  EXPECT_NEAR(limiter.apply(c,5.0).target_speed_mps,0.05,1e-12);
+  for (double bad : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                     std::numeric_limits<double>::infinity()})
+    EXPECT_THROW(cm::AccelerationLimiter{bad},std::invalid_argument);
+  for (double bad : {0.0,-1.0,std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_TRUE(limiter.apply(c,bad).target_brake);
+    EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,0.01,1e-12);
+  }
+}
+TEST(AccelerationLimiter, NormalDecelerationIsLimitedAndBrakingBypassesIt) {
+  cm::AccelerationLimiter limiter(1.0,0.5);
+  auto c=command();
+  for(int i=0;i<100;++i) limiter.apply(c,0.02);
+  c.target_speed_mps=0.2;
+  const auto out=limiter.apply(c,0.02);
+  EXPECT_NEAR(out.target_speed_mps,0.99,1e-12);
+  EXPECT_NE(out.reason.find("DECELERATION_LIMITED"),std::string::npos);
+  EXPECT_TRUE(limiter.apply(cm::stop(now_ns,"PAUSE",true),0.02).target_brake);
+  c.target_speed_mps=1.0;
+  EXPECT_NEAR(limiter.apply(c,0.02).target_speed_mps,0.02,1e-12);
 }
 TEST(ActuatorProtection, ValidSelectedCommandsAcceptedAcrossModes) {
   for (auto mode : {cm::ControlMode::IDLE, cm::ControlMode::AUTO, cm::ControlMode::MANUAL}) {

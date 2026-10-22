@@ -73,6 +73,7 @@
     <param from="$(var vehicle_file)"/>
     <param from="$(var pipeline_file)"/>
     <param from="$(var mission_file)"/>
+    <param from="$(var control_file)"/>
     <param from="$(var operation_file)"/>
   </node>
   <node pkg="control_manager" exec="motion_control_node" name="motion_control" namespace="/control" output="screen">
@@ -86,6 +87,7 @@
     <param from="$(var vehicle_file)"/>
     <param from="$(var pipeline_file)"/>
     <param from="$(var mission_file)"/>
+    <param from="$(var control_file)"/>
     <param from="$(var operation_file)"/>
   </node>
   <node pkg="control_manager" exec="vehicle_interface_node" name="vehicle_interface" namespace="/control" output="screen">

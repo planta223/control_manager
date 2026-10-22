@@ -39,9 +39,9 @@
 
 /control/global_path_provider:
   ros__parameters:
-    # 학교 시험 지도 미정. 준비 후 /workspace/... 경로 지정 또는 launch map_file로 덮어쓰기.
-    # GPS 모드에서 지도/외부 경로가 없으면 주행 경로를 생성하지 않음.
-    map_file: ""
+    # 학교 시험 지도: gps-final-map v1 / rear_axle_center / 1217 points.
+    # 다른 지도 사용 시 launch map_file 또는 control_console --map-file로 덮어쓰기.
+    map_file: /workspace/decision/script/map_generator/test/review/maps/MAP_test.json
 
 /control/sensor_interface:
   ros__parameters:
@@ -96,7 +96,7 @@
     # object_state / mission_limit은 공통 활성화 key가 true일 때만 구독·검증.
     # 비활성 입력은 reason에 명시하며 가짜 valid ObjectState/MissionLimit을 만들지 않음.
     # Motion Planning 발행: motion_plan 항상 발행. Mission 비활성 시 cruise speed 사용.
-    # 등속 목표는 mission.yaml의 공통 cruise_speed_kph 사용.
+    # 등속 목표는 mission.yaml의 cruise_speed_kph; console --cruise-speed-kph로 실행별 지정 가능.
     input_timeout_s: 0.5
 
 /control/motion_control:

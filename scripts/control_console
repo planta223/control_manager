@@ -26,7 +26,7 @@ from rclpy.signals import SignalHandlerOptions
 from rcl_interfaces.srv import GetParameters
 import yaml
 
-from control_manager.msg import ControlStatus, MotionState, PauseRequest, VehicleCommand
+from control_manager.msg import ControlStatus, MotionPlan, MotionState, PauseRequest, VehicleCommand
 from vehicle_recorder.msg import StopStatus  # shared measured-stop observer.
 
 MODES = ('test', 'brake_inspection', 'preliminary_lap', 'final_lap')
@@ -144,6 +144,8 @@ class Operator(Node):
             for key, value in zip(keys, response.values):
                 if value.type == 1:
                     values[key] = value.bool_value
+                elif value.type == 3:
+                    values[key] = value.double_value
                 elif value.type == 4:
                     values[key] = value.string_value
                 else:
@@ -161,19 +163,34 @@ class Operator(Node):
             raise RuntimeError('터미널 운용은 AUTO / start_paused=true 설정이 필요합니다.')
         self.base_frame = settings['base_frame']
         self.dry_run = self.parameters('vehicle_interface', ['dry_run'], process)['dry_run']
+        self.cruise_speed_kph = self.parameters('motion_planning', ['cruise_speed_mps'], process)['cruise_speed_mps'] * 3.6
+        self.max_accel_mps2 = self.parameters('control_selector', ['max_accel_mps2'], process)['max_accel_mps2']
+        self.max_accel_kphps = self.max_accel_mps2 * 3.6
+        self.max_decel_kphps = self.parameters('control_selector', ['max_decel_mps2'], process)['max_decel_mps2'] * 3.6
+        self.variable_speed = self.parameters('motion_planning', ['speed_profile.enabled'], process)['speed_profile.enabled']
+        self.profile_settings = self.parameters('motion_planning',
+            ['speed_profile.max_lateral_accel_mps2', 'speed_profile.planned_decel_mps2',
+             'speed_profile.response_time_s'], process) if self.variable_speed else {}
+        if self.variable_speed and (self.max_accel_kphps <= 0 or self.max_decel_kphps <= 0):
+            raise RuntimeError('변속은 양수 가속·감속 명령 제한이 필요합니다.')
         motion_topic = self.parameters('global_state_estimator', ['topics.motion_state'], process)['topics.motion_state']
         # the observer provides measured state for ordinary control as well as tests.
         self.map_frame = self.parameters('global_state_estimator', ['map_frame'], process)['map_frame']
+        plan_topic = self.parameters('motion_planning', ['topics.motion_plan'], process)['topics.motion_plan']
         # stop_topic = '/control/stop_status'
         stop_topic = self.parameters('vehicle_interface', ['topics.stop_status'], process)['topics.stop_status']
         self.publisher = self.create_publisher(PauseRequest, settings['topics.pause_request'], 10)
         for key, topic, message_type in [('status', settings['topics.status'], ControlStatus),
                                           ('selected', settings['topics.selected_cmd'], VehicleCommand),
                                           ('motion', motion_topic, MotionState),
+                                          ('plan', plan_topic, MotionPlan),
                                           ('stop', stop_topic, StopStatus)]:  # shared stop status subscription.
             self.create_subscription(message_type, topic,
                                      lambda msg, name=key: self.receive(name, msg), 10)
-        self.journal.metadata.update(selector=settings, dry_run=self.dry_run, motion_topic=motion_topic)
+        self.journal.metadata.update(selector=settings, dry_run=self.dry_run, motion_topic=motion_topic,
+                                     cruise_speed_kph=self.cruise_speed_kph, max_accel_mps2=self.max_accel_mps2,
+                                     max_accel_kphps=self.max_accel_kphps, max_decel_kphps=self.max_decel_kphps,
+                                     variable_speed=self.variable_speed, speed_profile=self.profile_settings)
         self.journal.save_metadata()
         self.wait(lambda: self.fresh('status') and self.fresh('selected'), self.args.startup_timeout, process)
         self.message = '일시정지 상태로 준비됐습니다.'
@@ -196,7 +213,7 @@ class Operator(Node):
         # previous frame check always required base_frame.
         # if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != self.base_frame
         # stop positions and stamps use the GNSS map frame.
-        expected_frame = self.map_frame if name == 'stop' else self.base_frame
+        expected_frame = self.map_frame if name in ('stop', 'plan') else self.base_frame
         if (stamp <= 0 or stamp < after_ns or msg.header.frame_id != expected_frame
                 or not 0 <= age <= self.args.status_timeout
                 or time.monotonic() - received > self.args.status_timeout):
@@ -293,8 +310,17 @@ class Operator(Node):
             state = '재개 상태 / 정지 명령'
         speed = (f'{motion.speed_mps * 3.6:.1f} km/h' if motion is not None and motion.speed_valid
                  and math.isfinite(motion.speed_mps) else '관측 없음')
+        target_line = f'목표속도: {self.cruise_speed_kph:g} km/h\n'
+        if self.variable_speed:
+            plan = self.fresh('plan')
+            planned = f'{plan.target_speed_mps * 3.6:.1f} km/h' if plan and plan.valid else '계획 없음'
+            selected = self.fresh('selected')
+            commanded = f'{selected.target_speed_mps * 3.6:.1f} km/h' if selected and selected.valid else '명령 없음'
+            target_line = f'속도 상한: {self.cruise_speed_kph:g} km/h\n계획 목표속도: {planned}\n속도 명령: {commanded}\n'
         return (f'control_manager | 모드: {mode}\n'
-                f'제어 상태: {state}\n실측 속도: {speed}\n'
+                f'제어 상태: {state}\n{target_line}실측 속도: {speed}\n'
+                f'속도 명령 가속도 제한: {format(self.max_accel_kphps, "g") + " (km/h)/s" if self.max_accel_mps2 > 0 else "미적용"}\n'
+                f'속도 명령 감속도 제한: {format(self.max_decel_kphps, "g") + " (km/h)/s" if self.max_decel_kphps > 0 else "미적용"}\n'
                 f'출력: {"DRY RUN" if self.dry_run else "실제 출력"}\n'
                 f'지도: {Path(map_file).name if map_file else "미지정 (외부 경로 입력 가능)"}\n\n'
                 '[1] 출발/재개  [2] 일시정지  [3] 종료\n'
@@ -307,6 +333,26 @@ def prepare(args, journal):
     files = {name: Path(getattr(args, name + '_file') or share / 'config' / (name + '.yaml')) for name in names}
     operation = Path(args.operation_file or share / 'config/modes' / (args.mode + '.yaml'))
     data = yaml.safe_load(operation.read_text())
+    # Apply an explicit trial speed to this run's snapshot; leave source YAML untouched.
+    if args.cruise_speed_kph is not None:
+        data.setdefault('/**', {}).setdefault('ros__parameters', {})['cruise_speed_kph'] = args.cruise_speed_kph
+        for node in ('/control/motion_planning', '/control/mission_based_limit'):
+            data.setdefault(node, {}).setdefault('ros__parameters', {})['cruise_speed_mps'] = args.cruise_speed_kph / 3.6
+    if args.max_accel_kphps is not None:
+        data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_accel_mps2'] = args.max_accel_kphps / 3.6
+    if args.max_decel_kphps is not None:
+        data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_decel_mps2'] = args.max_decel_kphps / 3.6
+    if args.variable_speed:
+        planner = data.setdefault('/control/motion_planning', {}).setdefault('ros__parameters', {})
+        planner.setdefault('speed_profile', {}).update(enabled=True,
+                        max_lateral_accel_mps2=args.max_lateral_accel_mps2,
+                        planned_decel_mps2=args.max_decel_kphps / 3.6)
+        lateral = data.get('/control/motion_control', {}).get('ros__parameters', {})
+        planner['route_progress_enabled'] = lateral.get('route_progress_enabled', False)
+        if planner['route_progress_enabled']:
+            planner['route_progress'] = dict(lateral.get('route_progress', {}))
+        control = yaml.safe_load(files['control'].read_text()).get('/control/motion_control', {}).get('ros__parameters', {})
+        planner['goal_tolerance_m'] = lateral.get('goal_tolerance_m', control.get('goal_tolerance_m', 0.3))
     # Always begin paused without editing the user's mode YAML.
     data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['start_paused'] = True
     resolved = journal.path / 'config' / 'operation.yaml'
@@ -327,6 +373,11 @@ def prepare(args, journal):
     if args.map_file:
         command.append('map_file:=' + args.map_file)
     journal.metadata.update(command=command, map_file=map_file,
+                            requested_cruise_speed_kph=args.cruise_speed_kph,
+                            requested_max_accel_kphps=args.max_accel_kphps,
+                            requested_max_decel_kphps=args.max_decel_kphps,
+                            requested_variable_speed=args.variable_speed,
+                            requested_max_lateral_accel_mps2=args.max_lateral_accel_mps2,
                             console_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     journal.save_metadata()
     if map_file:
@@ -349,6 +400,15 @@ def prepare(args, journal):
 def main():
     parser = argparse.ArgumentParser(description='모드 선택 및 출발·일시정지·종료 터미널 메뉴')
     parser.add_argument('--mode', choices=MODES)
+    parser.add_argument('--cruise-speed-kph', type=float,
+                        help='Target speed or variable-speed ceiling in km/h; source YAML is preserved')
+    parser.add_argument('--max-accel-kphps', type=float,
+                        help='This run only: positive AUTO speed command rise limit in (km/h)/s')
+    parser.add_argument('--max-decel-kphps', type=float,
+                        help='Positive normal speed command decrease limit and assumed planning deceleration in (km/h)/s')
+    parser.add_argument('--variable-speed', action='store_true', help='Plan speed from route curvature and end distance')
+    parser.add_argument('--max-lateral-accel-mps2', type=float,
+                        help='Assumed curve lateral acceleration limit in m/s^2; required with --variable-speed')
     for name in ('map', 'operation', 'pipeline', 'mission', 'control', 'vehicle'):
         parser.add_argument('--' + name + '-file')
     parser.add_argument('--log-root', type=Path, default=Path(os.environ.get('CONTROL_LOG_ROOT',
@@ -359,6 +419,15 @@ def main():
     parser.add_argument('--stop-speed-mps', type=float, default=0.1)
     parser.add_argument('--stop-hold-s', type=float, default=0.5)
     args = parser.parse_args()
+    for key in ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps', 'max_lateral_accel_mps2'):
+        value = getattr(args, key)
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            parser.error(key.replace('_', '-') + ' must be finite and positive')
+    if args.variable_speed and any(getattr(args, key) is None for key in
+            ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps', 'max_lateral_accel_mps2')):
+        parser.error('variable-speed requires --cruise-speed-kph, --max-accel-kphps, --max-decel-kphps and --max-lateral-accel-mps2')
+    if args.max_lateral_accel_mps2 is not None and not args.variable_speed:
+        parser.error('max-lateral-accel-mps2 requires --variable-speed')
     for name in ('startup_timeout', 'request_timeout', 'status_timeout', 'stop_speed_mps', 'stop_hold_s'):
         if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
             parser.error(name + ' must be finite and positive')

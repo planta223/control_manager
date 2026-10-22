@@ -6,6 +6,8 @@ class ControlSelectorNode : public NodeBase {
  private:
   void update();
   core::StopSteeringHold stop_steering_;  // selected output hold.
+  core::AccelerationLimiter acceleration_limiter_;
+  std::chrono::steady_clock::time_point previous_tick_;
   core::ControlMode mode_{core::ControlMode::IDLE};
   bool paused_;
   std::int64_t last_pause_request_ns_{0};

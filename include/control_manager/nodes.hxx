@@ -9,6 +9,7 @@
 #include "control_manager/core/guidance.hxx"
 #include "control_manager/core/mission.hxx"
 #include "control_manager/core/stopped_heading.hxx"
+#include "control_manager/core/speed_profile.hxx"
 
 namespace control_manager {
 class SensorInterfaceNode : public NodeBase {
@@ -95,6 +96,10 @@ class MotionPlanningNode : public NodeBase {
  public: MotionPlanningNode();
  private:
   void update();
+  std::unique_ptr<core::PathSpeedProfile> speed_profile_;
+  std::unique_ptr<core::RouteProgressTracker> speed_progress_;
+  std::shared_ptr<Input<msg::GlobalPose>> pose_;
+  double max_path_distance_m_{3.0};
   std::shared_ptr<Input<msg::MotionState>> motion_;
   std::shared_ptr<Input<nav_msgs::msg::Path>> path_;
   std::shared_ptr<Input<msg::ObjectState>> objects_;

@@ -26,7 +26,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 add_library(control_core src/core.cxx src/pure_pursuit.cxx src/guidance.cxx src/mission.cxx
-  src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx src/route_progress.cxx)
+  src/path_geometry.cxx src/pid_lateral_controller.cxx src/tracking.cxx src/route_progress.cxx src/speed_profile.cxx)
 target_include_directories(control_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
@@ -60,6 +60,8 @@ if(BUILD_TESTING)
     COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test/test_global_path_map.py)
   ament_add_gtest(test_control_core test/test_control_core.cxx)
   target_link_libraries(test_control_core control_core)
+  ament_add_gtest(test_speed_profile test/test_speed_profile.cxx)
+  target_link_libraries(test_speed_profile control_core)
   ament_add_gtest(test_guidance test/test_guidance.cxx)
   target_link_libraries(test_guidance control_core)
   ament_add_gtest(test_mission test/test_mission.cxx)

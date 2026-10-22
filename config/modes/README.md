@@ -1,4 +1,4 @@
-Last Updated : 2026.10.21. 02:10
+Last Updated : 2026.10.23
 
 ===========================================
 control_manager의 mode를 관리하는 yaml 4개
@@ -6,7 +6,9 @@ control_manager의 mode를 관리하는 yaml 4개
 
 test.yaml
 - 학교용. 10.22 혹은 10.23
-- map : 아직 준비 안됨 (타 팀원 추가 구현 예정)
+- map : /workspace/decision/script/map_generator/test/review/maps/MAP_test.json
+- 지도는 후륜축 기준 1,217점 / 약 121.6 m. 실제 GNSS datum으로 재투영한다.
+- 목표속도는 시험 시 정한다. control_console --cruise-speed-kph로 해당 실행에만 적용 가능.
 - 차량상태 : gps odom topic 사용
 
 
