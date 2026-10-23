@@ -5,10 +5,19 @@ VehicleInterfaceNode::VehicleInterfaceNode() : NodeBase("vehicle_interface") {
   conversion_.wheel_diameter_m = positive("vehicle.wheel_diameter_m", 0.0);
   conversion_.steering_full_scale_deg = positive("trans.steering_full_scale_deg", 30.0);
   conversion_.motor_full_scale_rpm = positive("trans.motor_full_scale_rpm", 891.387);
+  conversion_.steering_zero_deg = param<double>("trans.steering_zero_deg", 0.0);
+  if (!core::validActuatorConversion(conversion_))
+    throw std::invalid_argument("trans.steering_zero_deg must be finite and inside the steering full scale");
   frame_ = param<std::string>("base_frame", "base_link");
   config_.command_timeout_s = positive("command_timeout_s", 0.5);
   config_.operating_limits_verified = param<bool>("operating_limits_verified", false);
   config_.limits = vehicleLimits();
+  const double degrees = 180.0 / std::acos(-1.0);
+  if (config_.limits.min_steer_rad * degrees + conversion_.steering_zero_deg <
+        -conversion_.steering_full_scale_deg - 1e-9 ||
+      config_.limits.max_steer_rad * degrees + conversion_.steering_zero_deg >
+        conversion_.steering_full_scale_deg + 1e-9)
+    throw std::invalid_argument("offset steering limits exceed trans full scale; use control_console --steering-zero-deg");
   selected_ = input<msg::VehicleCommand>("selected_cmd");
   (void)topic("stop_status");  // expose common observer wiring to console discovery.
   if (!dry_run) actuator_publisher_ = output<std_msgs::msg::Float32MultiArray>("actuator_raw", rclcpp::QoS(1));

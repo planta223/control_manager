@@ -90,6 +90,7 @@
     trans:
       steering_full_scale_deg: 17.01
       motor_full_scale_rpm: 891.387
+      steering_zero_deg: 0.0  # 정렬 시험에서 직진한 보드 조향각; control_console 옵션으로 지정.
 
 /control/global_path_provider:
   ros__parameters:

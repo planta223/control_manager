@@ -210,6 +210,38 @@ TEST(ActuatorRaw, CalibratedWheelSpeedReachesActualRpmFullScale) {
   c.target_speed_mps=-c.target_speed_mps;
   EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],-1.0F);
 }
+TEST(ActuatorRaw, SteeringZeroUsesAlignmentSignAndAppliesOnceToWireAngle) {
+  for (double zero : {-1.2, 0.0, 1.2}) {
+    const cm::ActuatorConversionConfig cfg{0.47, 17.01, 891.387, zero};
+    for (double logical : {-3.0, 0.0, 3.0}) {
+      auto c=command(); c.target_steer_rad=logical*std::acos(-1.0)/180.0;
+      const auto raw=cm::actuatorRaw(c,cfg);
+      EXPECT_NEAR(-raw[0]*17.01, logical+zero, 1e-6);
+    }
+  }
+}
+TEST(ActuatorRaw, SteeringZeroPreservesHeldBrakeAngleAndCalibratesStartupNeutral) {
+  const cm::ActuatorConversionConfig cfg{0.47, 17.01, 891.387, 1.2};
+  cm::StopSteeringHold hold;
+  auto raw=cm::actuatorRaw(hold.apply(cm::stop(1,"STARTUP")),cfg);
+  EXPECT_NEAR(-raw[0]*17.01,1.2,1e-6);
+  auto moving=command(); moving.target_steer_rad=-3.0*std::acos(-1.0)/180.0;
+  hold.apply(moving);
+  raw=cm::actuatorRaw(hold.apply(cm::stop(2,"STALE")),cfg);
+  EXPECT_NEAR(-raw[0]*17.01,-1.8,1e-6);
+  EXPECT_FLOAT_EQ(raw[1],0.0F); EXPECT_FLOAT_EQ(raw[2],1.0F);
+}
+TEST(ActuatorRaw, SteeringZeroRejectsInvalidCalibrationAndClampsWireRange) {
+  for (double zero : {std::numeric_limits<double>::quiet_NaN(),
+                      std::numeric_limits<double>::infinity(), -17.01, 17.01}) {
+    const cm::ActuatorConversionConfig cfg{0.47, 17.01, 891.387, zero};
+    EXPECT_FALSE(cm::validActuatorConversion(cfg));
+    EXPECT_EQ(cm::actuatorRaw(command(),cfg),(std::array<float,3>{0,0,1}));
+  }
+  const cm::ActuatorConversionConfig cfg{0.47, 17.01, 891.387, 1.2};
+  auto c=command(); c.target_steer_rad=17.01*std::acos(-1.0)/180.0;
+  EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[0],-1.0F);
+}
 // safety stops must retain actual last protected steering.
 TEST(StopSteering, HoldsBrakeStaleInvalidAndOutOfRangeWithoutLearningRejectedValues) {
   cm::StopSteeringHold memory;

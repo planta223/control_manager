@@ -93,7 +93,8 @@ bool validActuatorConversion(const ActuatorConversionConfig &cfg) {
   for (const double value : {cfg.wheel_diameter_m,
                              cfg.steering_full_scale_deg, cfg.motor_full_scale_rpm})
     if (!std::isfinite(value) || value <= 0.0) return false;
-  return true;
+  return std::isfinite(cfg.steering_zero_deg) &&
+    std::abs(cfg.steering_zero_deg) < cfg.steering_full_scale_deg;
 }
 std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfig &cfg) {
   // previous brake conversion forced steering to zero.
@@ -104,7 +105,8 @@ std::array<float, 3> actuatorRaw(const Command &c, const ActuatorConversionConfi
   if (!validActuatorConversion(cfg) || !std::isfinite(c.target_steer_rad))
     return {0.0F, 0.0F, 1.0F};
   const double pi = std::acos(-1.0);
-  const double steering = -c.target_steer_rad * 180.0 / pi / cfg.steering_full_scale_deg;
+  const double steering = -(c.target_steer_rad * 180.0 / pi + cfg.steering_zero_deg) /
+    cfg.steering_full_scale_deg;
   const auto steering_raw = static_cast<float>(std::clamp(steering, -1.0, 1.0));
   if (!c.valid || c.target_brake || !std::isfinite(c.target_speed_mps))
     return {steering_raw, 0.0F, 1.0F};

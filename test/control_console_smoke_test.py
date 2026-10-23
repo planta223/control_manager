@@ -122,8 +122,9 @@ try:
     dry_file = OUT / 'dry_operation.yaml'
     dry_file.write_text(yaml.safe_dump(dry_operation))
     original_mission = (ROOT / 'config/mission.yaml').read_bytes()
+    vehicle_limits = yaml.safe_load((ROOT / 'config/vehicle.yaml').read_text())['/**']['ros__parameters']['vehicle']['limits']
     console = Console('menu_and_logging', '--map-file', MAP, '--operation-file', str(dry_file),
-                      '--cruise-speed-kph', '5.0', '--max-accel-kphps', '2.0')
+                      '--cruise-speed-kph', '5.0', '--max-accel-kphps', '2.0', '--steering-zero-deg', '1.2')
     try:
         wait(console, lambda: '주행 모드 선택' in console.output, 'mode selection menu')
         console.key('1')
@@ -134,6 +135,8 @@ try:
         assert metadata['requested_cruise_speed_kph'] == metadata['cruise_speed_kph'] == 5.0
         assert metadata['requested_max_accel_kphps'] == metadata['max_accel_kphps'] == 2.0
         assert metadata['max_accel_mps2'] == 2.0/3.6
+        assert metadata['steering_zero_deg'] == metadata['requested_steering_zero_deg'] == 1.2
+        assert metadata['calibrated_steering_limits_deg']['max'] == 17.01-1.2
         assert '속도 명령 가속도 제한: 2 (km/h)/s' in console.output
         resolved = yaml.safe_load((run / 'config/operation.yaml').read_text())
         assert resolved['/control/motion_planning']['ros__parameters']['cruise_speed_mps'] == 5/3.6
@@ -194,7 +197,8 @@ try:
     finally:
         console.close()
 
-    for option, value in [('max-accel-kphps', '6'), ('max-lateral-accel-mps2', '2.0')]:
+    for option, value in [('max-accel-kphps', str(vehicle_limits['max_accel_kphps']+1.)),
+                          ('max-lateral-accel-mps2', str(vehicle_limits['max_lateral_accel_g']*9.80665+.1))]:
         console = Console('exceeds_' + option, '--mode', 'test', '--variable-speed',
                           '--max-decel-kphps', '5', '--' + option, value)
         try:
@@ -212,7 +216,7 @@ try:
         metadata = json.loads((run/'metadata.json').read_text())
         assert metadata['variable_speed'] and metadata['max_decel_kphps'] == 5.0
         assert metadata['requested_max_accel_kphps'] is None
-        assert abs(metadata['max_accel_kphps'] - 5.0) < 1e-12
+        assert abs(metadata['max_accel_kphps'] - vehicle_limits['max_accel_kphps']) < 1e-12
         assert metadata['requested_max_lateral_accel_mps2'] is None
         assert metadata['speed_profile']['speed_profile.max_lateral_accel_mps2'] == 0.20 * 9.80665
         assert metadata['speed_profile']['speed_profile.planned_decel_mps2'] == 5/3.6

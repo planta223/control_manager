@@ -60,3 +60,77 @@ TEST(SpeedProfile, InvalidGeometryStateAndChangedRouteFailClosed) {
   c.max_lateral_accel_mps2=0;
   EXPECT_THROW(cm::PathSpeedProfile{c},std::invalid_argument);
 }
+
+TEST(SpeedProfile, CurveExitAccelerationAndBrakingRespectSpatialLimits) {
+  std::vector<cm::Point> path;
+  for(int i=0;i<=300;++i) {
+    const double a=i*std::acos(-1.0)/600;
+    path.push_back({10*std::sin(a),10*(1-std::cos(a))});
+  }
+  for(int i=1;i<=700;++i) path.push_back({10,10+i*.1});
+  auto c=config(); c.max_accel_mps2=.25; c.response_time_s=.5;
+  cm::PathSpeedProfile p(c);
+  ASSERT_EQ(p.setPath(path),"");
+  double previous=p.sample(at(0),0).target_speed_mps;
+  for(std::size_t i=1;i<path.size();++i) {
+    const auto sample=i+1==path.size() ? p.sample(at(i-1,1.),0) : p.sample(at(i),0);
+    const double speed=sample.target_speed_mps;
+    const double distance=std::hypot(path[i].x_m-path[i-1].x_m,path[i].y_m-path[i-1].y_m);
+    EXPECT_LE(speed*speed-previous*previous,2*c.max_accel_mps2*distance+1e-9);
+    EXPECT_LE(previous*previous-speed*speed,2*c.planned_decel_mps2*distance+1e-9);
+    previous=speed;
+  }
+  const auto bend=p.sample(at(290),0), exit=p.sample(at(310),0);
+  EXPECT_LT(exit.target_speed_mps,c.max_speed_mps);
+  EXPECT_GT(exit.target_speed_mps,bend.target_speed_mps);
+  EXPECT_TRUE(p.sample(at(310),10).measured_overspeed);
+}
+
+namespace {
+cm::SpeedProfileSample cap(double speed) {
+  cm::SpeedProfileSample sample;
+  sample.valid=true; sample.target_speed_mps=sample.speed_limit_mps=speed;
+  sample.reason="CURVATURE_SPEED_PROFILE";
+  return sample;
+}
+}
+TEST(SpeedReferencePlanner, StartsFromMeasuredSpeedAndContinuesWithSensorLag) {
+  cm::SpeedReferencePlanner planner(1.,2.,10.);
+  for(int i=1;i<=40;++i) {
+    const auto sample=planner.update(cap(10.),0.,.05);
+    ASSERT_TRUE(sample.valid);
+    EXPECT_NEAR(sample.target_speed_mps,i*.05,1e-9);
+  }
+  planner.reset();
+  EXPECT_NEAR(planner.update(cap(10.),3.,.05).target_speed_mps,3.05,1e-9);
+}
+TEST(SpeedReferencePlanner, DeceleratesAtConfiguredRateAndReportsUnreachableLimit) {
+  cm::SpeedReferencePlanner planner(1.,2.,10.);
+  const auto first=planner.update(cap(2.),5.,.05);
+  EXPECT_TRUE(first.measured_overspeed);
+  EXPECT_NEAR(first.target_speed_mps,4.9,1e-9);
+  EXPECT_NE(first.reason.find("MEASURED_OVERSPEED"),std::string::npos);
+  EXPECT_NE(first.reason.find("PLANNED_DECELERATION_LIMIT"),std::string::npos);
+  for(int i=0;i<40;++i) planner.update(cap(2.),2.,.05);
+  EXPECT_DOUBLE_EQ(planner.update(cap(2.),2.,.05).target_speed_mps,2.);
+  // A measured overspeed must not increase an already lower RPM reference.
+  EXPECT_DOUBLE_EQ(planner.update(cap(3.),4.,.05).target_speed_mps,2.);
+  EXPECT_NEAR(planner.update(cap(3.),2.,.05).target_speed_mps,2.05,1e-9);
+}
+TEST(SpeedReferencePlanner, StopsInvalidInputsAndResetsWithoutDelayedTimerCatchup) {
+  cm::SpeedReferencePlanner planner(1.,2.,10.);
+  EXPECT_DOUBLE_EQ(planner.update(cap(10.),0.,5.).target_speed_mps,.1);
+  EXPECT_DOUBLE_EQ(planner.update(cap(0.),5.,.05).target_speed_mps,0.);
+  EXPECT_NEAR(planner.update(cap(10.),0.,.05).target_speed_mps,.05,1e-9);
+  for(double bad : {-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_FALSE(planner.update(cap(10.),bad,.05).valid);
+    EXPECT_FALSE(planner.update(cap(10.),0.,bad).valid);
+  }
+  EXPECT_FALSE(planner.update(cap(10.),0.,0.).valid);
+  EXPECT_FALSE(planner.update(cm::SpeedProfileSample{},0.,.05).valid);
+  EXPECT_THROW(cm::SpeedReferencePlanner(0.,1.,10.),std::invalid_argument);
+  planner.reset();
+  EXPECT_LE(planner.update(cap(100.),100.,.05).target_speed_mps,10.);
+  auto c=config(); c.max_accel_mps2=0.;
+  EXPECT_THROW(cm::PathSpeedProfile{c},std::invalid_argument);
+}

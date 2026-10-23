@@ -97,7 +97,11 @@ class MotionPlanningNode : public NodeBase {
  private:
   void update();
   std::unique_ptr<core::PathSpeedProfile> speed_profile_;
+  std::unique_ptr<core::SpeedReferencePlanner> speed_reference_;
   std::unique_ptr<core::RouteProgressTracker> speed_progress_;
+  std::shared_ptr<Input<msg::ControlStatus>> planning_status_;
+  std::chrono::steady_clock::time_point planning_tick_;
+  std::optional<std::uint64_t> planning_resume_sequence_;
   std::shared_ptr<Input<msg::GlobalPose>> pose_;
   double max_path_distance_m_{3.0};
   std::shared_ptr<Input<msg::MotionState>> motion_;

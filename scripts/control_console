@@ -163,6 +163,14 @@ class Operator(Node):
             raise RuntimeError('터미널 운용은 AUTO / start_paused=true 설정이 필요합니다.')
         self.base_frame = settings['base_frame']
         self.dry_run = self.parameters('vehicle_interface', ['dry_run'], process)['dry_run']
+        self.steering_zero_deg = getattr(self.args, 'steering_zero_deg', 0.0)
+        if self.steering_zero_deg != 0.0:
+            try:
+                applied = self.parameters('vehicle_interface', ['trans.steering_zero_deg'], process)
+            except RuntimeError as error:
+                raise RuntimeError('조향 영점 보정 지원을 확인하지 못했습니다. control_manager 재빌드가 필요합니다.') from error
+            if not math.isclose(applied['trans.steering_zero_deg'], self.steering_zero_deg, abs_tol=1e-9):
+                raise RuntimeError('요청한 조향 영점 보정이 적용되지 않았습니다.')
         self.cruise_speed_kph = self.parameters('motion_planning', ['cruise_speed_mps'], process)['cruise_speed_mps'] * 3.6
         self.max_accel_mps2 = self.parameters('control_selector', ['max_accel_mps2'], process)['max_accel_mps2']
         self.max_accel_kphps = self.max_accel_mps2 * 3.6
@@ -171,8 +179,13 @@ class Operator(Node):
         self.profile_settings = self.parameters('motion_planning',
             ['speed_profile.max_lateral_accel_mps2', 'speed_profile.planned_decel_mps2',
              'speed_profile.response_time_s'], process) if self.variable_speed else {}
+        self.planned_decel_kphps = (self.profile_settings['speed_profile.planned_decel_mps2'] * 3.6
+                                    if self.variable_speed else None)
         if self.variable_speed and (self.max_accel_kphps <= 0 or self.max_decel_kphps <= 0):
             raise RuntimeError('변속은 양수 가속·감속 명령 제한이 필요합니다.')
+        if self.variable_speed and (not math.isfinite(self.planned_decel_kphps) or
+                self.planned_decel_kphps <= 0 or self.planned_decel_kphps > self.max_decel_kphps + 1e-12):
+            raise RuntimeError('계획 감속도는 양수이며 속도 명령 감속도 제한 이하여야 합니다.')
         motion_topic = self.parameters('global_state_estimator', ['topics.motion_state'], process)['topics.motion_state']
         # the observer provides measured state for ordinary control as well as tests.
         self.map_frame = self.parameters('global_state_estimator', ['map_frame'], process)['map_frame']
@@ -190,6 +203,8 @@ class Operator(Node):
         self.journal.metadata.update(selector=settings, dry_run=self.dry_run, motion_topic=motion_topic,
                                      cruise_speed_kph=self.cruise_speed_kph, max_accel_mps2=self.max_accel_mps2,
                                      max_accel_kphps=self.max_accel_kphps, max_decel_kphps=self.max_decel_kphps,
+                                     planned_decel_kphps=self.planned_decel_kphps,
+                                     steering_zero_deg=self.steering_zero_deg,
                                      variable_speed=self.variable_speed, speed_profile=self.profile_settings)
         self.journal.save_metadata()
         self.wait(lambda: self.fresh('status') and self.fresh('selected'), self.args.startup_timeout, process)
@@ -317,11 +332,14 @@ class Operator(Node):
             selected = self.fresh('selected')
             commanded = f'{selected.target_speed_mps * 3.6:.1f} km/h' if selected and selected.valid else '명령 없음'
             target_line = f'속도 상한: {self.cruise_speed_kph:g} km/h\n계획 목표속도: {planned}\n속도 명령: {commanded}\n'
+            target_line += (f'계획 감속도 가정: {self.planned_decel_kphps:g} (km/h)/s\n'
+                            f'계획 응답 지연 가정: {self.profile_settings["speed_profile.response_time_s"]:g} s\n')
         return (f'control_manager | 모드: {mode}\n'
                 f'제어 상태: {state}\n{target_line}실측 속도: {speed}\n'
                 f'속도 명령 가속도 제한: {format(self.max_accel_kphps, "g") + " (km/h)/s" if self.max_accel_mps2 > 0 else "미적용"}\n'
                 f'속도 명령 감속도 제한: {format(self.max_decel_kphps, "g") + " (km/h)/s" if self.max_decel_kphps > 0 else "미적용"}\n'
                 f'출력: {"DRY RUN" if self.dry_run else "실제 출력"}\n'
+                f'직진 조향 영점: {self.steering_zero_deg:+g}°\n'
                 f'지도: {Path(map_file).name if map_file else "미지정 (외부 경로 입력 가능)"}\n\n'
                 '[1] 출발/재개  [2] 일시정지  [3] 종료\n'
                 f'{self.message}\n\n로그: {self.journal.path / "launch.log"}')
@@ -334,6 +352,29 @@ def prepare(args, journal):
     operation = Path(args.operation_file or share / 'config/modes' / (args.mode + '.yaml'))
     data = yaml.safe_load(operation.read_text())
     limits = yaml.safe_load(files['vehicle'].read_text())['/**']['ros__parameters']['vehicle']['limits']
+    steering_zero = getattr(args, 'steering_zero_deg', 0.0)
+    interface = data.setdefault('/control/vehicle_interface', {}).setdefault('ros__parameters', {})
+    conversion = interface.setdefault('trans', {})
+    pipeline_conversion = yaml.safe_load(files['pipeline'].read_text()).get(
+        '/control/vehicle_interface', {}).get('ros__parameters', {}).get('trans', {})
+    full_scale = float(conversion.get('steering_full_scale_deg',
+                                     pipeline_conversion.get('steering_full_scale_deg', 30.0)))
+    minimum, maximum = float(limits['min_steering_deg']), float(limits['max_steering_deg'])
+    if (not all(math.isfinite(v) for v in (steering_zero, full_scale, minimum, maximum)) or
+            full_scale <= 0 or not minimum < steering_zero < maximum or abs(steering_zero) >= full_scale):
+        raise RuntimeError('--steering-zero-deg must be finite and strictly inside vehicle steering limits and trans full scale')
+    conversion['steering_zero_deg'] = steering_zero
+    # Keep steering geometry relative to the calibrated straight direction. Tighten
+    # the per-run model limits so the shifted command fits the unchanged wire limits.
+    if steering_zero != 0.0:
+        model_limits = data.setdefault('/**', {}).setdefault('ros__parameters', {}).setdefault(
+            'vehicle', {}).setdefault('limits', {})
+        minimum = max(minimum, -full_scale-steering_zero)
+        maximum = min(maximum, full_scale-steering_zero)
+        model_limits['min_steering_deg'] = max(float(model_limits.get('min_steering_deg', minimum)), minimum)
+        model_limits['max_steering_deg'] = min(float(model_limits.get('max_steering_deg', maximum)), maximum)
+        journal.metadata['calibrated_steering_limits_deg'] = {
+            'min': model_limits['min_steering_deg'], 'max': model_limits['max_steering_deg']}
     # CLI overrides can tighten a configured vehicle ceiling. Zero denotes an undecided ceiling.
     for option, key, factor in [('max_accel_kphps', 'max_accel_kphps', 1.0),
                                 ('max_decel_kphps', 'max_decel_kphps', 1.0),
@@ -360,10 +401,27 @@ def prepare(args, journal):
         planner = data.setdefault('/control/motion_planning', {}).setdefault('ros__parameters', {})
         profile = planner.setdefault('speed_profile', {})
         profile['enabled'] = True
+        selector = data.get('/control/control_selector', {}).get('ros__parameters', {})
+        profile['max_accel_mps2'] = selector.get('max_accel_mps2', float(limits['max_accel_kphps']) / 3.6)
+        profile['max_decel_mps2'] = selector.get('max_decel_mps2', float(limits['max_decel_kphps']) / 3.6)
         if args.max_lateral_accel_mps2 is not None:
             profile['max_lateral_accel_mps2'] = args.max_lateral_accel_mps2
         if args.max_decel_kphps is not None:
             profile['planned_decel_mps2'] = args.max_decel_kphps / 3.6
+        if args.planned_decel_kphps is not None:
+            profile['planned_decel_mps2'] = args.planned_decel_kphps / 3.6
+        # Retain the previous fallback when the new option is omitted. A planning
+        # assumption must not request faster braking than the command slew permits.
+        mission_profile = yaml.safe_load(files['mission'].read_text()).get(
+            '/control/motion_planning', {}).get('ros__parameters', {}).get('speed_profile', {})
+        command_decel = data.get('/control/control_selector', {}).get('ros__parameters', {}).get(
+            'max_decel_mps2', float(limits['max_decel_kphps']) / 3.6)
+        planned_decel = profile.get('planned_decel_mps2', mission_profile.get(
+            'planned_decel_mps2', float(limits['max_decel_kphps']) / 3.6))
+        if not math.isfinite(planned_decel) or planned_decel <= 0:
+            raise RuntimeError('variable-speed requires positive planned deceleration')
+        if planned_decel > command_decel + 1e-12:
+            raise RuntimeError('--planned-decel-kphps must not exceed the effective --max-decel-kphps')
         lateral = data.get('/control/motion_control', {}).get('ros__parameters', {})
         planner['route_progress_enabled'] = lateral.get('route_progress_enabled', False)
         if planner['route_progress_enabled']:
@@ -393,8 +451,10 @@ def prepare(args, journal):
                             requested_cruise_speed_kph=args.cruise_speed_kph,
                             requested_max_accel_kphps=args.max_accel_kphps,
                             requested_max_decel_kphps=args.max_decel_kphps,
+                            requested_planned_decel_kphps=args.planned_decel_kphps,
                             requested_variable_speed=args.variable_speed,
                             requested_max_lateral_accel_mps2=args.max_lateral_accel_mps2,
+                            requested_steering_zero_deg=steering_zero,
                             console_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     journal.save_metadata()
     if map_file:
@@ -422,10 +482,14 @@ def main():
     parser.add_argument('--max-accel-kphps', type=float,
                         help='AUTO speed command rise limit in (km/h)/s; defaults to vehicle.yaml ceiling')
     parser.add_argument('--max-decel-kphps', type=float,
-                        help='Normal speed command decrease limit and planning deceleration in (km/h)/s; defaults to vehicle.yaml')
+                        help='Normal speed command decrease limit in (km/h)/s; defaults to vehicle.yaml')
+    parser.add_argument('--planned-decel-kphps', type=float,
+                        help='Assumed deceleration for curve/end distance planning in (km/h)/s; requires variable-speed, defaults to existing planning setting or max-decel-kphps')
     parser.add_argument('--variable-speed', action='store_true', help='Plan speed from route curvature and end distance')
     parser.add_argument('--max-lateral-accel-mps2', type=float,
                         help='Curve lateral acceleration limit in m/s^2; defaults to vehicle.yaml g value times 9.80665')
+    parser.add_argument('--steering-zero-deg', type=float, default=0.0,
+                        help='Board steering angle that produced straight driving in the alignment test; left-positive, default 0')
     for name in ('map', 'operation', 'pipeline', 'mission', 'control', 'vehicle'):
         parser.add_argument('--' + name + '-file')
     parser.add_argument('--log-root', type=Path, default=Path(os.environ.get('CONTROL_LOG_ROOT',
@@ -436,12 +500,17 @@ def main():
     parser.add_argument('--stop-speed-mps', type=float, default=0.1)
     parser.add_argument('--stop-hold-s', type=float, default=0.5)
     args = parser.parse_args()
-    for key in ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps', 'max_lateral_accel_mps2'):
+    if not math.isfinite(args.steering_zero_deg):
+        parser.error('steering-zero-deg must be finite')
+    for key in ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps',
+                'planned_decel_kphps', 'max_lateral_accel_mps2'):
         value = getattr(args, key)
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(key.replace('_', '-') + ' must be finite and positive')
     if args.max_lateral_accel_mps2 is not None and not args.variable_speed:
         parser.error('max-lateral-accel-mps2 requires --variable-speed')
+    if args.planned_decel_kphps is not None and not args.variable_speed:
+        parser.error('planned-decel-kphps requires --variable-speed')
     for name in ('startup_timeout', 'request_timeout', 'status_timeout', 'stop_speed_mps', 'stop_hold_s'):
         if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
             parser.error(name + ' must be finite and positive')

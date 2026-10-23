@@ -7,7 +7,7 @@ namespace control_manager::core {
 PathSpeedProfile::PathSpeedProfile(SpeedProfileConfig config) : config_(config) {
   for (double v : {config.max_speed_mps, config.max_lateral_accel_mps2,
       config.planned_decel_mps2, config.wheelbase_m, config.max_steering_rad,
-      config.curvature_sample_m})
+      config.curvature_sample_m, config.max_accel_mps2})
     if (!std::isfinite(v) || v <= 0.0) throw std::invalid_argument("speed profile limits must be finite and positive");
   if (config.max_steering_rad >= std::acos(-1.0)/2 ||
       !std::isfinite(config.response_time_s) || config.response_time_s < 0.0 ||
@@ -73,6 +73,14 @@ std::string PathSpeedProfile::setPath(const std::vector<Point> &path) {
         // Already travelling at w needs no deceleration or response-distance reserve.
         speeds_[i]=std::min(speeds_[i],std::max(local_caps[j],std::sqrt(bt*bt+local_caps[j]*local_caps[j]+
             2*b*(stations_[j]-stations_[i]))-bt));
+  // Re-enforce pairwise braking after response-distance reservations, then bound
+  // acceleration out of every low-speed curve by the available path distance.
+  for (std::size_t i=path.size()-1;i>0;--i)
+    speeds_[i-1]=std::min(speeds_[i-1],std::sqrt(speeds_[i]*speeds_[i]+
+        2*config_.planned_decel_mps2*(stations_[i]-stations_[i-1])));
+  for (std::size_t i=1;i<path.size();++i)
+    speeds_[i]=std::min(speeds_[i],std::sqrt(speeds_[i-1]*speeds_[i-1]+
+        2*config_.max_accel_mps2*(stations_[i]-stations_[i-1])));
   return "";
 }
 double PathSpeedProfile::speedAt(double station) const {
@@ -91,8 +99,48 @@ SpeedProfileSample PathSpeedProfile::sample(const PathMatch &match,double measur
   }
   out.station_m=stations_[match.segment]+match.fraction*(stations_[match.segment+1]-stations_[match.segment]);
   out.target_speed_mps=speedAt(out.station_m);
+  out.speed_limit_mps=out.target_speed_mps;
+  out.measured_overspeed=measured_speed_mps>out.speed_limit_mps+1e-6;
   out.valid=true;
   out.reason=out.target_speed_mps==0.0 ? "SPEED_PROFILE_END_STOP" : "CURVATURE_SPEED_PROFILE";
   return out;
+}
+
+SpeedReferencePlanner::SpeedReferencePlanner(double max_accel_mps2, double max_decel_mps2, double max_speed_mps)
+    : max_accel_mps2_(max_accel_mps2), max_decel_mps2_(max_decel_mps2), max_speed_mps_(max_speed_mps) {
+  if (!std::isfinite(max_accel_mps2) || max_accel_mps2<=0.0 ||
+      !std::isfinite(max_decel_mps2) || max_decel_mps2<=0.0 ||
+      !std::isfinite(max_speed_mps) || max_speed_mps<=0.0)
+    throw std::invalid_argument("speed reference acceleration/deceleration must be finite and positive");
+}
+SpeedProfileSample SpeedReferencePlanner::update(SpeedProfileSample sample,
+                                                 double measured_speed_mps, double dt_s) {
+  if (!sample.valid || !std::isfinite(sample.target_speed_mps) || sample.target_speed_mps<0.0 ||
+      !std::isfinite(measured_speed_mps) || measured_speed_mps<0.0 ||
+      !std::isfinite(dt_s) || dt_s<=0.0) {
+    reset(); sample.valid=false; sample.target_speed_mps=0.0;
+    sample.reason="SPEED_PLAN_INVALID_STATE"; return sample;
+  }
+  // Endpoint/mission/protection stops remain immediate, independent of rate limits.
+  if (sample.target_speed_mps==0.0) { reset(); return sample; }
+  if (!previous_speed_) previous_speed_=std::min(measured_speed_mps,max_speed_mps_);
+  const double dt=std::min(dt_s,0.1), requested=std::min(sample.target_speed_mps,max_speed_mps_);
+  sample.speed_limit_mps=requested;
+  sample.measured_overspeed=measured_speed_mps>requested+1e-6;
+  double desired=requested;
+  // Do not increase a low RPM reference while measured speed already exceeds
+  // the route limit. A persistent bias still requires vehicle calibration/control.
+  if (sample.measured_overspeed) {
+    desired=std::min(desired,*previous_speed_);
+    sample.reason+=":MEASURED_OVERSPEED";
+  }
+  const double next=std::clamp(desired,
+      std::max(0.0,*previous_speed_-max_decel_mps2_*dt),
+      *previous_speed_+max_accel_mps2_*dt);
+  if (next<requested-1e-9) sample.reason+=":PLANNED_ACCELERATION_LIMIT";
+  if (next>requested+1e-9) sample.reason+=":PLANNED_DECELERATION_LIMIT";
+  sample.target_speed_mps=next;
+  previous_speed_=next;
+  return sample;
 }
 }  // namespace control_manager::core

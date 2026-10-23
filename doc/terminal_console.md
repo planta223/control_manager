@@ -33,6 +33,15 @@ docker exec -it \
 
 시작 시 사용한 모드 설정의 사본에 start_paused=true를 적용한다. 원본 YAML은 수정하지 않는다.
 AUTO 운용만 지원하며 외부 센서와 trans 송신기는 자동 실행하지 않는다.
+`--steering-zero-deg`에는 조향 정렬 시험에서 직진한 `--steering-deg` 값을 같은 부호로 지정한다.
+기본값은 0°이며 양수는 좌회전이다. +1.2°에서 직진했다면 `--steering-zero-deg 1.2`로 실행한다.
+Vehicle Interface가 자율주행의 논리 조향각에 이 값을 더한 뒤 raw 명령으로 변환한다.
+논리 0°는 보드 +1.2°, 논리 +3°는 보드 +4.2°가 된다. 별도 trans 보정은 적용하지 않는다.
+출발 전 정지·초기 직진·제동 중 유지 각도에도 같은 변환을 적용하며, 수동 정렬/제동시험에는 적용하지 않는다.
+차량 조향 한계와 trans full scale 안쪽의 유한값만 허용한다. 보정 후 송신 범위를 넘지 않도록
+실행 사본의 차량 조향 한계를 줄여 제어·변속 곡률 검증에 함께 반영한다. 원본 vehicle.yaml은 유지한다.
+보정값과 적용 조향 한계는 실행별 operation.yaml/metadata.json에 남고, actuator_raw는 보정된 값이다.
+보정 지원이 없는 이전 Vehicle Interface에서 0이 아닌 값을 사용하면 출발 전에 오류로 종료한다.
 화면은 ControlStatus 응답을 기준으로 갱신한다. 재개 수락은 실제 출발을 뜻하지 않는다.
 진행 조건이 충족되지 않으면 제어 코드는 정지 명령을 유지한다.
 test의 기본 지도는 MAP_test.json이다. 지도 없는 모드는 기존 GPS 경로 의존성을 그대로 가진다.
@@ -58,7 +67,7 @@ ros2 run control_manager control_console --mode test --cruise-speed-kph "$TEST_S
 CLI 값은 내부 ROS 파라미터 max_accel_mps2에 /3.6하여 적용한다. 2.0 (km/h)/s는 약 0.5556m/s²이며,
 2km/h 명령에서 1초 뒤 4km/h 명령이 되는 증가율이다. km/s²와는 다른 단위다.
 이는 명령 제한이며 실제 가속도는 GNSS로 검증해야 한다. 수동 조작에는 적용하지 않는다.
-생략하면 vehicle.yaml의 vehicle.limits 값을 사용한다. 현재 가속도 기본값은 5.0(km/h)/s,
+생략하면 vehicle.yaml의 vehicle.limits 값을 사용한다. 현재 가속도 기본값은 10.0(km/h)/s,
 감속도는 0.0(미정)이다. 양수로 설정한 차량 공통 상한보다 큰 실행 옵션은 거부한다. CLI에는 양수만 지정한다.
 
 ```bash
@@ -76,6 +85,7 @@ ros2 run control_manager control_console --mode test \
 # 아래 숫자는 사용법 예시이며 실측 차량 성능/확정 시험값이 아니다.
 ros2 run control_manager control_console --mode test --variable-speed \
   --cruise-speed-kph 20 --max-accel-kphps 5 --max-decel-kphps 5 \
+  --planned-decel-kphps 3 \
   --max-lateral-accel-mps2 1.5
 ```
 
@@ -85,6 +95,12 @@ ros2 run control_manager control_console --mode test --variable-speed \
 변속은 적용할 세 가속도 값이 모두 양수여야 한다. 현재 감속도가 미정(0)이므로
 --max-decel-kphps를 지정하거나 vehicle.yaml에 양수 감속도를 설정해야 한다.
 종방향 가속/감속 CLI 단위는 (km/h)/s, 횡가속도 CLI 단위는 m/s²다.
+`--planned-decel-kphps`는 곡선·종점 감속거리 계산에 사용할 감속도 가정값이며,
+`--max-decel-kphps`의 명령 감소율과 별도로 지정할 수 있다. 양수이며 적용 명령 감소율 이하여야 한다.
+작을수록 낮은 미래 속도를 더 먼 앞쪽 경로에 전파해 일찍 감속하도록 계획한다.
+생략하면 기존 동작을 유지한다. `--max-decel-kphps`가 지정됐으면 그 값을 계획에도 사용하고,
+그마저 생략하면 기존 YAML 계획 설정 또는 차량 감속도를 사용한다. `--variable-speed`와 함께 사용한다.
+설정 예시의 3(km/h)/s는 실측 성능이 아니며, 실제 일반 감속 성능보다 과대하게 가정하지 않는다.
 변속 활성 여부와 모든 적용값을 실행별 설정 사본 및 metadata에 남긴다.
 화면에는 속도 상한, 현재 경로의 계획 목표속도, 제한 적용 후 속도 명령, GNSS 실측 속도를 구분한다.
 
@@ -94,6 +110,16 @@ Motion Planning이 후륜축 기준 정적 경로에서 전후 1m 간격의 세 
 mission.yaml의 `speed_profile.response_time_s=0.5`는 미측정 지연 가정으로,
 미래의 더 낮은 속도까지 감속하기 전 반응거리를 추가 확보하는 데 사용한다.
 이 속도 계획 거리는 조향 PP의 2~6m lookahead와 독립이다. PP는 계속 GNSS 실측 속도를 사용한다.
+`--max-accel-kphps`는 Motion Planning의 거리 기반 전방 가속 제약과 시간별 목표속도 증가율에도 적용한다.
+`--max-decel-kphps`는 계획 목표속도 감소율과 최종 명령 감소율에 함께 적용하며,
+`--planned-decel-kphps`는 기존처럼 곡선·종점 전 감속거리 가정값이다.
+출발/재개 및 입력 오류 복구 때 GNSS 실측 속도로 계획 기준을 초기화하고, 이후에는 이전 계획에서
+가감속 제한을 지키며 진행한다. 센서 응답이 늦다고 매번 상승을 처음부터 시작하지 않는다.
+일시정지/비활성 상태에서는 목표속도 0으로 유지하고 계획 기준을 초기화한다.
+GNSS 속도가 경로의 속도 상한을 넘으면 `MEASURED_OVERSPEED`를 표시하고 추가 가속을 억제한다.
+현재 속도에서 즉시 낮은 상한에 도달할 수 없는 경우 `PLANNED_DECELERATION_LIMIT`를 표시하며
+일반 감속 제한으로 낮춘다. 이미 발생한 과속의 해소나 물리 제한 준수는 보장하지 않는다.
+정지·입력 오류는 즉시 우선하며, GNSS 속도 PID와 저크 제한은 포함하지 않는다.
 설정된 최대 조향각으로 불가능한 경로 곡률은 저속으로 대체하지 않고 정지 처리한다.
 
 진행 위치는 GlobalPose를 사용하며 예선 모드에서는 Motion Control과 같은

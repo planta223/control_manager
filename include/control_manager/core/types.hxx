@@ -58,6 +58,7 @@ struct ActuatorProtectionConfig {
 struct ActuatorConversionConfig {
   double wheel_diameter_m{0.0};
   double steering_full_scale_deg{30.0}, motor_full_scale_rpm{891.387};
+  double steering_zero_deg{0.0};  // Board command measured to produce straight wheels; left-positive.
 };
 bool validActuatorConversion(const ActuatorConversionConfig &config);
 // stop/invalid commands retain the last valid moving command.

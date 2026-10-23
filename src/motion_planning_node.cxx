@@ -16,7 +16,17 @@ MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
     config.curvature_sample_m=positive("speed_profile.curvature_sample_m",1.0);
     config.response_time_s=nonnegative("speed_profile.response_time_s",0.5);
     config.stop_before_end_m=nonnegative("goal_tolerance_m",0.3);
+    config.max_accel_mps2=vehicleAccelerationLimit("max_accel_kphps", "speed_profile.max_accel_mps2", 1.0/3.6, true);
+    // The planned-deceleration lookup above already declared the shared ceiling.
+    const double decel_ceiling=get_parameter("vehicle.limits.max_decel_kphps").as_double()/3.6;
+    const double command_decel=positive("speed_profile.max_decel_mps2",decel_ceiling);
+    if (decel_ceiling>0.0 && command_decel>decel_ceiling+1e-12)
+      throw std::invalid_argument("speed_profile.max_decel_mps2 exceeds vehicle.limits.max_decel_kphps");
+    if (config.planned_decel_mps2>command_decel+1e-12)
+      throw std::invalid_argument("planned deceleration must not exceed speed profile command deceleration");
     speed_profile_=std::make_unique<core::PathSpeedProfile>(config);
+    speed_reference_=std::make_unique<core::SpeedReferencePlanner>(config.max_accel_mps2, command_decel, config.max_speed_mps);
+    planning_status_=input<msg::ControlStatus>("status");
     max_path_distance_m_=positive("speed_profile.max_path_distance_m",3.0);
     pose_=input<msg::GlobalPose>("global_pose");
     if (param<bool>("route_progress_enabled",false)) {
@@ -41,9 +51,13 @@ MotionPlanningNode::MotionPlanningNode() : NodeBase("motion_planning") {
   if (objects_enabled_) objects_ = input<msg::ObjectState>("object_state");
   if (mission_enabled_) limit_ = input<msg::MissionLimit>("mission_limit");
   publisher_ = output<msg::MotionPlan>("motion_plan");
+  planning_tick_=std::chrono::steady_clock::now();
   tick([this] { update(); });
 }
 void MotionPlanningNode::update() {
+  const auto tick_time=std::chrono::steady_clock::now();
+  const double dt_s=std::chrono::duration<double>(tick_time-planning_tick_).count();
+  planning_tick_=tick_time;
   msg::MotionPlan plan;
   plan.header = header(frame_);
   plan.stop_request = true;
@@ -98,10 +112,24 @@ void MotionPlanningNode::update() {
         if (!match.valid || match.distance_m>max_path_distance_m_) error="SPEED_PROFILE_PATH_DEVIATION";
       }
       if (error.empty()) {
-        const auto sample=speed_profile_->sample(match,motion_->value->speed_mps);
+        auto sample=speed_profile_->sample(match,motion_->value->speed_mps);
+        if (!current_input(planning_status_) || planning_status_->value->header.frame_id!=base_frame_)
+          error="SPEED_PLAN_STATUS_UNAVAILABLE";
+        else if (planning_status_->value->mode!=msg::ControlStatus::AUTO || planning_status_->value->paused) {
+          speed_reference_->reset();
+          planning_resume_sequence_=planning_status_->value->resume_sequence;
+          sample.target_speed_mps=0.0; sample.reason="SPEED_PLAN_PAUSED";
+        } else {
+          if (!planning_resume_sequence_ || *planning_resume_sequence_!=planning_status_->value->resume_sequence)
+            speed_reference_->reset();
+          planning_resume_sequence_=planning_status_->value->resume_sequence;
+          // Mission caps participate in the same reference planning as map caps.
+          sample.target_speed_mps=std::min(speed,sample.target_speed_mps);
+          sample=speed_reference_->update(sample,motion_->value->speed_mps,dt_s);
+        }
         if (!sample.valid) error=sample.reason;
-        else {
-          plan.target_speed_mps=std::min(speed,sample.target_speed_mps);
+        else if (error.empty()) {
+          plan.target_speed_mps=sample.target_speed_mps;
           plan.stop_request=plan.target_speed_mps==0.0;
           plan.reason=sample.reason;
         }
@@ -113,6 +141,7 @@ void MotionPlanningNode::update() {
     if (!objects_enabled_) plan.reason += ":OBJECT_DISABLED";
     if (!mission_enabled_) plan.reason += ":MISSION_DISABLED";
   }
+  if (speed_reference_ && (!plan.valid || plan.stop_request)) speed_reference_->reset();
   publisher_->publish(plan);
 }
 }  // namespace control_manager
