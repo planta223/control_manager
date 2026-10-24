@@ -8,7 +8,7 @@ namespace control_manager::core {
 struct StoppedHeadingConfig {
   bool enabled{true};
   double stop_speed_mps{0.1}, reacquire_speed_mps{0.7};
-  double max_distance_m{1.0}, max_reacquire_time_s{3.0};
+  double max_distance_m{1.0}, max_reacquire_time_s{3.0};  // max_distance_m=0 disables only the distance bound.
 };
 struct StoppedHeadingResult {
   std::optional<double> yaw_rad;
@@ -20,7 +20,7 @@ class StoppedHeadingMemory {
   explicit StoppedHeadingMemory(StoppedHeadingConfig config) : config_(config) {
     if (!std::isfinite(config.stop_speed_mps) || config.stop_speed_mps < 0.0 ||
         !std::isfinite(config.reacquire_speed_mps) || config.reacquire_speed_mps <= config.stop_speed_mps ||
-        !std::isfinite(config.max_distance_m) || config.max_distance_m <= 0.0 ||
+        !std::isfinite(config.max_distance_m) || config.max_distance_m < 0.0 ||
         !std::isfinite(config.max_reacquire_time_s) || config.max_reacquire_time_s <= 0.0)
       throw std::invalid_argument("invalid stopped_heading configuration");
   }
@@ -49,7 +49,8 @@ class StoppedHeadingMemory {
       moving_since_.reset();
     }
     if (held_yaw_) {
-      if (std::hypot(x - anchor_x_, y - anchor_y_) > config_.max_distance_m) {
+      if (config_.max_distance_m > 0.0 &&
+          std::hypot(x - anchor_x_, y - anchor_y_) > config_.max_distance_m) {
         expire("HEADING_HOLD_DISTANCE_EXCEEDED");
       } else {
         if (speed > config_.stop_speed_mps && !moving_since_) moving_since_ = now_s;

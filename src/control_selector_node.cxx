@@ -15,16 +15,19 @@ ControlSelectorNode::ControlSelectorNode() : NodeBase("control_selector") {
   subscriptions_.push_back(create_subscription<msg::PauseRequest>(topic("pause_request"), 10,
     [this](msg::PauseRequest::ConstSharedPtr request) {
       if (mode_ != core::ControlMode::AUTO || !ingress::validStampFormat(request->header.stamp) ||
-          (!request->header.frame_id.empty() && request->header.frame_id != frame_)) return;
+          (!request->header.frame_id.empty() && request->header.frame_id != frame_) ||
+          (request->pause && request->motor_zero)) return;
       const auto stamp = rclcpp::Time(request->header.stamp).nanoseconds();
       if (!core::fresh(stamp, now().nanoseconds(), timeout_s_) || stamp <= last_pause_request_ns_) return;
       last_pause_request_ns_ = stamp;
-      if (paused_ && !request->pause) {
+      if ((paused_ && !request->pause) ||
+          (motor_zero_ && !request->pause && !request->motor_zero)) {
         ++resume_sequence_;
         resume_after_ns_ = now().nanoseconds();
       }
-      if (paused_ != request->pause) acceleration_limiter_.reset();
+      if (paused_ != request->pause || motor_zero_ != request->motor_zero) acceleration_limiter_.reset();
       paused_ = request->pause;
+      motor_zero_ = request->motor_zero;
     }));
   manual_ = input<msg::VehicleCommand>("manual_cmd");
   auto_ = input<msg::VehicleCommand>("auto_cmd");
@@ -54,6 +57,10 @@ void ControlSelectorNode::update() {
   // pause/stale/invalid paths retain the last selected steering command.
   auto selected = paused ? core::stop(now().nanoseconds(), "AUTO_PAUSED", true)
     : core::selectCommand(mode_, read(manual_), read(auto_), now().nanoseconds());
+  // Remove motor drive only from a healthy non-braking AUTO command. Preserve
+  // live steering, source time, and every upstream fault/goal brake command.
+  if (mode_ == core::ControlMode::AUTO && motor_zero_ && !paused)
+    selected = core::motorZeroCommand(selected);
   if (mode_ == core::ControlMode::AUTO) selected = acceleration_limiter_.apply(selected, dt_s);
   else acceleration_limiter_.reset();
   selected = stop_steering_.apply(selected);
@@ -62,6 +69,7 @@ void ControlSelectorNode::update() {
   status.header = header(frame_);
   status.mode = static_cast<std::uint8_t>(mode_);
   status.paused = paused;
+  status.motor_zero = mode_ == core::ControlMode::AUTO && motor_zero_;
   status.resume_sequence = resume_sequence_;
   // This FSM describes selection only; final actuator protection belongs to Vehicle Interface.
   status.fsm_state = static_cast<std::uint8_t>(core::fsmState(

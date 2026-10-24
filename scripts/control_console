@@ -213,11 +213,12 @@ class Operator(Node):
     def receive(self, name, msg):
         self.samples[name] = (msg, time.monotonic())
         if name == 'status':
-            key = (msg.mode, msg.paused, msg.fsm_state, msg.reason, msg.resume_sequence)
+            key = (msg.mode, msg.paused, msg.motor_zero, msg.fsm_state, msg.reason, msg.resume_sequence)
             if key != self.last_status_key:
                 self.last_status_key = key
                 self.journal.event('control_status', mode=msg.mode, paused=msg.paused,
-                                   fsm_state=msg.fsm_state, reason=msg.reason, resume_sequence=msg.resume_sequence)
+                                   motor_zero=msg.motor_zero, fsm_state=msg.fsm_state,
+                                   reason=msg.reason, resume_sequence=msg.resume_sequence)
 
     def fresh(self, name, after_ns=0):
         if name not in self.samples:
@@ -235,20 +236,25 @@ class Operator(Node):
             return None
         return msg
 
-    def request(self, pause, exiting=False):
+    def request(self, pause, exiting=False, motor_zero=False):
         if self.pending and self.pending['exit']:
             return
         status = self.fresh('status')
         if not exiting and (status is None or status.mode != ControlStatus.AUTO):
             self.message = '제어 상태 응답을 확인한 뒤 다시 조작하세요.'
             return
-        self.pending = {'pause': pause, 'exit': exiting, 'first_ns': self.get_clock().now().nanoseconds,
+        self.pending = {'pause': pause, 'motor_zero': motor_zero, 'exit': exiting,
+                        'first_ns': self.get_clock().now().nanoseconds,
                         'started': time.monotonic(), 'last_sent': 0.0, 'ack': False,
                         'sequence': status.resume_sequence if status else None,
-                        'was_paused': status.paused if status else None}
+                        'was_paused': status.paused if status else None,
+                        'was_motor_zero': status.motor_zero if status else None}
         self.stop_since = None
-        self.message = '종료를 위한 정지 요청 중' if exiting else ('일시정지 요청 중' if pause else '출발·재개 요청 중')
-        self.journal.event('request', pause=pause, exiting=exiting, stamp_ns=self.pending['first_ns'])
+        self.message = ('종료를 위한 정지 요청 중' if exiting else
+                        '모터 0·브레이크 OFF 요청 중' if motor_zero else
+                        '일시정지 요청 중' if pause else '출발·재개 요청 중')
+        self.journal.event('request', pause=pause, motor_zero=motor_zero,
+                           exiting=exiting, stamp_ns=self.pending['first_ns'])
 
     def update_request(self):
         action = self.pending
@@ -260,22 +266,29 @@ class Operator(Node):
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = self.base_frame
             msg.pause = action['pause']
+            msg.motor_zero = action['motor_zero']
             self.publisher.publish(msg)
             action['last_sent'] = now
         status = self.fresh('status', action['first_ns'])
         selected = self.fresh('selected', action['first_ns'])
-        ack = status is not None and status.mode == ControlStatus.AUTO and status.paused == action['pause']
-        if ack and not action['pause'] and action['was_paused']:
+        ack = (status is not None and status.mode == ControlStatus.AUTO and
+               status.paused == action['pause'] and status.motor_zero == action['motor_zero'])
+        if ack and not action['pause'] and not action['motor_zero'] and (action['was_paused'] or action['was_motor_zero']):
             ack = status.resume_sequence > action['sequence']
+        if ack and action['motor_zero']:
+            ack = (selected is not None and selected.valid and not selected.target_brake
+                   and math.isfinite(selected.target_speed_mps) and selected.target_speed_mps == 0.0)
         if ack and action['pause']:
             ack = (selected is not None and selected.valid and selected.target_brake
                    and math.isfinite(selected.target_speed_mps) and selected.target_speed_mps == 0.0)
         if ack and not action['ack']:
             action['ack'] = True
-            self.journal.event('acknowledged', pause=action['pause'], exiting=action['exit'])
+            self.journal.event('acknowledged', pause=action['pause'], motor_zero=action['motor_zero'], exiting=action['exit'])
         if action['ack']:
             if not action['exit']:
-                self.message = '일시정지가 수락됐습니다.' if action['pause'] else '출발·재개가 수락됐습니다. 진행 조건을 확인합니다.'
+                self.message = ('모터 0·브레이크 OFF가 수락됐습니다.' if action['motor_zero'] else
+                                '일시정지가 수락됐습니다.' if action['pause'] else
+                                '출발·재개가 수락됐습니다. 진행 조건을 확인합니다.')
                 self.pending = None
             elif self.dry_run and ack:
                 self.journal.event('exit_ready', verification='dry_run_stop_command')
@@ -306,7 +319,7 @@ class Operator(Node):
             if action['exit']:
                 self.message = '종료 대기: 정지 응답 없음. 제어 노드와 로그를 확인하세요.'
             else:
-                self.journal.event('request_timeout', pause=action['pause'])
+                self.journal.event('request_timeout', pause=action['pause'], motor_zero=action['motor_zero'])
                 self.message = '요청 응답 시간이 초과됐습니다. 현재 상태를 확인하세요.'
                 self.pending = None
 
@@ -317,10 +330,15 @@ class Operator(Node):
             state = '상태 응답 대기 / 끊김'
         elif status.paused:
             state = '일시정지'
-        elif status.fsm_state == ControlStatus.DRIVING:
-            state = '진행 명령 출력 중'
         elif status.fsm_state == ControlStatus.FAULT:
             state = '진행 조건 미충족'
+        elif status.motor_zero:
+            selected = self.fresh('selected')
+            state = ('모터 0·브레이크 OFF / 조향 추종 중'
+                     if selected and selected.valid and not selected.target_brake and selected.target_speed_mps == 0.0
+                     else '모터 0 요청 상태 / 보호 정지')
+        elif status.fsm_state == ControlStatus.DRIVING:
+            state = '진행 명령 출력 중'
         else:
             state = '재개 상태 / 정지 명령'
         speed = (f'{motion.speed_mps * 3.6:.1f} km/h' if motion is not None and motion.speed_valid
@@ -341,7 +359,7 @@ class Operator(Node):
                 f'출력: {"DRY RUN" if self.dry_run else "실제 출력"}\n'
                 f'직진 조향 영점: {self.steering_zero_deg:+g}°\n'
                 f'지도: {Path(map_file).name if map_file else "미지정 (외부 경로 입력 가능)"}\n\n'
-                '[1] 출발/재개  [2] 일시정지  [3] 종료\n'
+                '[0/C] 모터 0·브레이크 OFF  [1/R] 출발/재개  [2/P] 모터 0·브레이크 ON  [3/Q] 종료\n'
                 f'{self.message}\n\n로그: {self.journal.path / "launch.log"}')
 
 
@@ -397,6 +415,17 @@ def prepare(args, journal):
         data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_accel_mps2'] = args.max_accel_kphps / 3.6
     if args.max_decel_kphps is not None:
         data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_decel_mps2'] = args.max_decel_kphps / 3.6
+    for option, key in (('stopped_heading_max_distance_m', 'max_distance_m'),
+                        ('stopped_heading_max_reacquire_time_s', 'max_reacquire_time_s')):
+        value = getattr(args, option, None)
+        if value is not None:
+            allow_zero = key == 'max_distance_m'
+            if not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
+                requirement = 'nonnegative' if allow_zero else 'positive'
+                raise RuntimeError('--' + option.replace('_', '-') + ' must be finite and ' + requirement)
+            heading = data.setdefault('/control/motion_control', {}).setdefault('ros__parameters', {}).setdefault(
+                'stopped_heading', {})
+            heading[key] = value
     if args.variable_speed:
         planner = data.setdefault('/control/motion_planning', {}).setdefault('ros__parameters', {})
         profile = planner.setdefault('speed_profile', {})
@@ -455,6 +484,8 @@ def prepare(args, journal):
                             requested_variable_speed=args.variable_speed,
                             requested_max_lateral_accel_mps2=args.max_lateral_accel_mps2,
                             requested_steering_zero_deg=steering_zero,
+                            requested_stopped_heading_max_distance_m=getattr(args, 'stopped_heading_max_distance_m', None),
+                            requested_stopped_heading_max_reacquire_time_s=getattr(args, 'stopped_heading_max_reacquire_time_s', None),
                             console_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     journal.save_metadata()
     if map_file:
@@ -490,6 +521,10 @@ def main():
                         help='Curve lateral acceleration limit in m/s^2; defaults to vehicle.yaml g value times 9.80665')
     parser.add_argument('--steering-zero-deg', type=float, default=0.0,
                         help='Board steering angle that produced straight driving in the alignment test; left-positive, default 0')
+    parser.add_argument('--stopped-heading-max-distance-m', type=float,
+                        help='Maximum displacement while using saved heading; 0 disables the distance bound; defaults to YAML (currently 1m)')
+    parser.add_argument('--stopped-heading-max-reacquire-time-s', type=float,
+                        help='Maximum heading reacquisition time after measured movement starts; defaults to YAML (currently 3s); stationary wait is excluded')
     for name in ('map', 'operation', 'pipeline', 'mission', 'control', 'vehicle'):
         parser.add_argument('--' + name + '-file')
     parser.add_argument('--log-root', type=Path, default=Path(os.environ.get('CONTROL_LOG_ROOT',
@@ -503,10 +538,14 @@ def main():
     if not math.isfinite(args.steering_zero_deg):
         parser.error('steering-zero-deg must be finite')
     for key in ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps',
-                'planned_decel_kphps', 'max_lateral_accel_mps2'):
+                'planned_decel_kphps', 'max_lateral_accel_mps2',
+                'stopped_heading_max_reacquire_time_s'):
         value = getattr(args, key)
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(key.replace('_', '-') + ' must be finite and positive')
+    value = args.stopped_heading_max_distance_m
+    if value is not None and (not math.isfinite(value) or value < 0):
+        parser.error('stopped-heading-max-distance-m must be finite and nonnegative')
     if args.max_lateral_accel_mps2 is not None and not args.variable_speed:
         parser.error('max-lateral-accel-mps2 requires --variable-speed')
     if args.planned_decel_kphps is not None and not args.variable_speed:
@@ -569,6 +608,8 @@ def main():
                     operator.request(False)
                 elif key in ('2', 'p', 'P'):
                     operator.request(True)
+                elif key in ('0', 'c', 'C'):
+                    operator.request(False, motor_zero=True)
                 operator.update_request()
                 if time.monotonic() >= next_draw:
                     terminal.show(operator.screen(args.mode, map_file))

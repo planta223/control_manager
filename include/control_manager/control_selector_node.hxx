@@ -10,6 +10,7 @@ class ControlSelectorNode : public NodeBase {
   std::chrono::steady_clock::time_point previous_tick_;
   core::ControlMode mode_{core::ControlMode::IDLE};
   bool paused_;
+  bool motor_zero_{false};
   std::int64_t last_pause_request_ns_{0};
   std::int64_t resume_after_ns_{0};
   std::uint64_t resume_sequence_{0};

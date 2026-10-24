@@ -145,6 +145,66 @@ class PlannedDecelerationOptions(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('planned-decel-kphps requires --variable-speed', result.stderr)
 
+    def test_heading_options_reach_run_configuration_and_metadata(self):
+        self.args.stopped_heading_max_distance_m = 2.5
+        self.args.stopped_heading_max_reacquire_time_s = 6.5
+        data, metadata = self.prepare()
+        heading = data['/control/motion_control']['ros__parameters']['stopped_heading']
+        self.assertEqual(heading, dict(max_distance_m=2.5, max_reacquire_time_s=6.5))
+        self.assertEqual(metadata['requested_stopped_heading_max_distance_m'], 2.5)
+        self.assertEqual(metadata['requested_stopped_heading_max_reacquire_time_s'], 6.5)
+
+    def test_heading_options_are_independent_and_work_without_variable_speed(self):
+        self.args.variable_speed = False
+        for option, key in (('stopped_heading_max_distance_m', 'max_distance_m'),
+                            ('stopped_heading_max_reacquire_time_s', 'max_reacquire_time_s')):
+            with self.subTest(option=option):
+                self.args.stopped_heading_max_distance_m = None
+                self.args.stopped_heading_max_reacquire_time_s = None
+                setattr(self.args, option, 4.)
+                data, _ = self.prepare()
+                self.assertEqual(data['/control/motion_control']['ros__parameters']['stopped_heading'], {key: 4.})
+
+    def test_omitting_heading_options_preserves_custom_control_yaml(self):
+        path = self.share / 'config/control.yaml'
+        data = yaml.safe_load(path.read_text())
+        heading = data['/control/motion_control']['ros__parameters']['stopped_heading']
+        heading.update(max_distance_m=4., max_reacquire_time_s=7.)
+        path.write_text(yaml.safe_dump(data))
+        resolved, metadata = self.prepare()
+        self.assertNotIn('stopped_heading', resolved.get('/control/motion_control', {}).get('ros__parameters', {}))
+        control_arg = next(arg for arg in metadata['command'] if arg.startswith('control_file:='))
+        actual = yaml.safe_load(Path(control_arg.split(':=', 1)[1]).read_text())
+        self.assertEqual(actual['/control/motion_control']['ros__parameters']['stopped_heading'], heading)
+
+    def test_explicit_heading_options_override_mode_specific_values(self):
+        path = self.share / 'config/modes/test.yaml'
+        data = yaml.safe_load(path.read_text())
+        data['/control/motion_control']['ros__parameters']['stopped_heading'] = dict(
+            max_distance_m=4., max_reacquire_time_s=7., enabled=True)
+        path.write_text(yaml.safe_dump(data))
+        self.args.stopped_heading_max_distance_m = 2.5
+        resolved, _ = self.prepare()
+        self.assertEqual(resolved['/control/motion_control']['ros__parameters']['stopped_heading'],
+                         dict(max_distance_m=2.5, max_reacquire_time_s=7., enabled=True))
+
+    def test_invalid_heading_limits_fail_before_launch(self):
+        for flag in ('stopped-heading-max-distance-m', 'stopped-heading-max-reacquire-time-s'):
+            values = ('-1', 'nan', 'inf') if flag.endswith('distance-m') else ('0', '-1', 'nan', 'inf')
+            requirement = 'nonnegative' if flag.endswith('distance-m') else 'positive'
+            for value in values:
+                with self.subTest(flag=flag, value=value):
+                    result = subprocess.run([sys.executable, str(CONSOLE), '--mode', 'test',
+                        '--'+flag, value], text=True, capture_output=True, timeout=10)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(flag+' must be finite and '+requirement, result.stderr)
+
+    def test_zero_heading_distance_is_preserved_in_run_configuration(self):
+        self.args.stopped_heading_max_distance_m = 0.
+        data, metadata = self.prepare()
+        self.assertEqual(data['/control/motion_control']['ros__parameters']['stopped_heading']['max_distance_m'], 0.)
+        self.assertEqual(metadata['requested_stopped_heading_max_distance_m'], 0.)
+
 
 if __name__ == '__main__':
     unittest.main()

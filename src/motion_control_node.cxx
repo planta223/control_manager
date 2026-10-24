@@ -39,7 +39,7 @@ MotionControlNode::MotionControlNode() : NodeBase("motion_control") {
   heading_memory.enabled = param<bool>("stopped_heading.enabled", true);
   heading_memory.stop_speed_mps = nonnegative("stopped_heading.stop_speed_mps", 0.1);
   heading_memory.reacquire_speed_mps = positive("stopped_heading.reacquire_speed_mps", 0.7);
-  heading_memory.max_distance_m = positive("stopped_heading.max_distance_m", 1.0);
+  heading_memory.max_distance_m = nonnegative("stopped_heading.max_distance_m", 1.0);
   heading_memory.max_reacquire_time_s = positive("stopped_heading.max_reacquire_time_s", 3.0);
   stopped_heading_ = std::make_unique<core::StoppedHeadingMemory>(heading_memory);
   heading_bootstrap_enabled_ = param<bool>("heading_bootstrap_enabled", false) &&
@@ -121,7 +121,7 @@ void MotionControlNode::update() {
     std::isfinite(pose_->value->yaw_rad) &&
     (pose_->value->valid || pose_->value->initial_heading_unavailable || pose_->value->heading_unavailable) &&
     motion_->value->header.frame_id == base_frame_ && motion_->value->speed_valid;
-  const bool intentional_stop = auto_status && (paused_ ||
+  const bool intentional_stop = auto_status && (paused_ || control_status_->value->motor_zero ||
     (current_input(plan_) && plan_->value->valid && plan_->value->header.frame_id == frame_ &&
      (plan_->value->stop_request || plan_->value->target_speed_mps == 0.0)));
   const auto memory = stopped_heading_->update(

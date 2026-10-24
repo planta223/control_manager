@@ -13,5 +13,7 @@ uint8 fsm_state
 string reason
 # AUTO pause state, independent of source-command validity and FSM.
 bool paused
-# Increments only on an accepted paused -> resumed transition, not repeated resume requests.
+# Requested AUTO motor-zero mode. Actual faults/goal stops may still apply brakes.
+bool motor_zero
+# Increments on release of a pause or motor-zero -> powered driving, not repeated requests.
 uint64 resume_sequence

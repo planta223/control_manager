@@ -41,7 +41,8 @@
   ros__parameters:
     # 제동검사 지도 사용 여부 미정. 임의의 시험 지도에 연결하지 않음.
     # 현재 GPS 제어는 경로가 필요하며, 지도 없는 제동 주행은 별도 구현 사항.
-    map_file: ""
+    # 10월 24일 기준 일단 구현은 해 놨음.
+    map_file: /workspace/decision/script/map_generator/test/review/maps/MAP_brake.json
 
 /control/sensor_interface:
   ros__parameters:

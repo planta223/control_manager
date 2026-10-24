@@ -25,9 +25,16 @@ __pycache__/
 .DS_Store
 
 # Recorded runtime data; keep source/config fixtures trackable
+# Ignore rules do not untrack files already present in Git history.
 /log_significant/
+*.log
+*.log.[0-9]*
+*.bag
+*.bag.active
 rosbag2_*/
 *.db3
+*.db3-shm
+*.db3-wal
 *.db3.zstd
 *.mcap
 *.mcap.zstd

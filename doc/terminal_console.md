@@ -26,10 +26,18 @@ docker exec -it \
 
 ## 조작
 
+- 0 또는 c: 모터 명령 0·브레이크 OFF를 유지한다. 경로 추종 조향과 진행 위치 갱신은 계속한다.
 - 1 또는 r: 출발/재개. 현재 시각을 포함한 PauseRequest(pause=false)를 발행한다.
 - 2 또는 p: 일시정지. PauseRequest(pause=true)를 발행한다.
 - 3 또는 q, Ctrl+C, 입력 EOF: 일시정지 후 종료 절차를 시작한다.
 - 모드 변경은 현재 운용을 종료한 후 다른 모드로 다시 실행한다.
+
+모터 0에서 1/R을 누르면 구동을 재개하고, 2/P를 누르면 기존 모터 0·브레이크 ON으로 전환한다.
+3/Q·Ctrl+C·EOF 종료도 기존 제동 및 정지 확인 절차를 사용한다. 센서 무효·명령 만료·경로 이탈·종점
+보호는 모터 0 요청보다 우선한다. 모터 0은 PC의 RPM 명령이 0이라는 뜻이며 모터 보드의 enable을
+끄는 명령은 아니다. 실제 감속이나 회생제동 동작은 모터 제어기에서 확인해야 한다.
+PauseRequest.motor_zero와 ControlStatus.motor_zero 필드를 추가했으므로 control_manager를 재빌드하고
+관련 제어 노드를 새로 실행한다. 기존 PauseRequest(pause=true/false)는 motor_zero=false가 기본값이다.
 
 시작 시 사용한 모드 설정의 사본에 start_paused=true를 적용한다. 원본 YAML은 수정하지 않는다.
 AUTO 운용만 지원하며 외부 센서와 trans 송신기는 자동 실행하지 않는다.
@@ -42,6 +50,12 @@ Vehicle Interface가 자율주행의 논리 조향각에 이 값을 더한 뒤 r
 실행 사본의 차량 조향 한계를 줄여 제어·변속 곡률 검증에 함께 반영한다. 원본 vehicle.yaml은 유지한다.
 보정값과 적용 조향 한계는 실행별 operation.yaml/metadata.json에 남고, actuator_raw는 보정된 값이다.
 보정 지원이 없는 이전 Vehicle Interface에서 0이 아닌 값을 사용하면 출발 전에 오류로 종료한다.
+정지 후 저장 heading으로 재개할 때의 한계는 `--stopped-heading-max-distance-m`과
+`--stopped-heading-max-reacquire-time-s`로 실행별 지정할 수 있다. 첫 값은 정지 위치에서의 변위(m),
+두 번째 값은 실측 이동이 시작된 후의 대기시간(s)이며 정지 대기시간은 포함하지 않는다.
+거리는 유한한 0 이상의 값이며 0이면 거리 제한만 해제한다. 시간은 유한한 양수만 허용하며,
+거리 제한을 해제해도 계속 적용된다. 생략하면 YAML의 기존 값을 유지하며 현재 control.yaml은 1m·3초다.
+값은 실행별 설정 사본과 metadata에 남고 원본 YAML은 바꾸지 않는다. 적용에는 콘솔을 새로 실행해야 한다.
 화면은 ControlStatus 응답을 기준으로 갱신한다. 재개 수락은 실제 출발을 뜻하지 않는다.
 진행 조건이 충족되지 않으면 제어 코드는 정지 명령을 유지한다.
 test의 기본 지도는 MAP_test.json이다. 지도 없는 모드는 기존 GPS 경로 의존성을 그대로 가진다.

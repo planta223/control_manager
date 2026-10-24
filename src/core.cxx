@@ -30,6 +30,18 @@ Command selectCommand(ControlMode mode, const Command &manual, const Command &au
   if (mode == ControlMode::AUTO) return automatic;
   return stop(now, "IDLE", true);
 }
+Command motorZeroCommand(const Command &command) {
+  if (!command.valid || command.target_brake) return command;
+  // Zeroing the motor must not sanitize a malformed upstream command or renew
+  // its timestamp. Existing invalid/stale protection must still apply.
+  if (!std::isfinite(command.target_speed_mps) || command.target_speed_mps < 0.0 ||
+      !std::isfinite(command.target_steer_rad))
+    return stop(command.timestamp_ns, "INVALID_MOTOR_ZERO_SOURCE_COMMAND");
+  auto result = command;
+  result.target_speed_mps = 0.0;
+  result.reason = "AUTO_MOTOR_ZERO:" + command.reason;
+  return result;
+}
 AccelerationLimiter::AccelerationLimiter(double max_accel_mps2, double max_decel_mps2)
     : max_accel_mps2_(max_accel_mps2), max_decel_mps2_(max_decel_mps2) {
   if (!std::isfinite(max_accel_mps2_) || max_accel_mps2_ < 0.0 ||

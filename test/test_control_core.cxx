@@ -28,6 +28,32 @@ TEST(Arbitration, ModeIsolationAndTimestampPreserved) {
   a.timestamp_ns -= 100;
   EXPECT_EQ(cm::selectCommand(cm::ControlMode::AUTO,m,a,now_ns).timestamp_ns,a.timestamp_ns);
 }
+TEST(Arbitration, MotorZeroPreservesSteeringSourceTimeAndBrakingPriority) {
+  auto c=command(); c.timestamp_ns-=10;
+  const auto zero=cm::motorZeroCommand(c);
+  EXPECT_DOUBLE_EQ(zero.target_speed_mps,0.0);
+  EXPECT_FALSE(zero.target_brake); EXPECT_TRUE(zero.valid);
+  EXPECT_DOUBLE_EQ(zero.target_steer_rad,c.target_steer_rad);
+  EXPECT_EQ(zero.timestamp_ns,c.timestamp_ns);
+  const auto brake=cm::stop(now_ns,"GOAL_REACHED",true);
+  EXPECT_TRUE(cm::motorZeroCommand(brake).target_brake);
+  EXPECT_EQ(cm::motorZeroCommand(brake).reason,"GOAL_REACHED");
+  c.valid=false;
+  EXPECT_FALSE(cm::motorZeroCommand(c).valid);
+  c=command(); c.timestamp_ns-=600000000;
+  EXPECT_TRUE(cm::protectActuatorCommand(cm::motorZeroCommand(c),now_ns,config()).target_brake);
+}
+TEST(Arbitration, MotorZeroDoesNotHideInvalidAutoValues) {
+  for (const double bad : {-1.0,std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+    auto c=command(); c.target_speed_mps=bad;
+    EXPECT_FALSE(cm::motorZeroCommand(c).valid);
+    EXPECT_TRUE(cm::motorZeroCommand(c).target_brake);
+  }
+  auto c=command(); c.target_steer_rad=std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(cm::motorZeroCommand(c).valid);
+  EXPECT_TRUE(cm::motorZeroCommand(c).target_brake);
+}
 TEST(AccelerationLimiter, LimitsStartupAndEveryLaterTargetIncrease) {
   cm::AccelerationLimiter limiter(0.5);
   auto c = command(); c.target_speed_mps = 1.0;
@@ -209,6 +235,22 @@ TEST(ActuatorRaw, CalibratedWheelSpeedReachesActualRpmFullScale) {
   EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],1.0F);
   c.target_speed_mps=-c.target_speed_mps;
   EXPECT_FLOAT_EQ(cm::actuatorRaw(c,cfg)[1],-1.0F);
+}
+TEST(ActuatorRaw, ZeroMotorDoesNotApplyBrakeOrFreezeLiveSteering) {
+  const cm::ActuatorConversionConfig cfg{0.47, 17.01, 891.387};
+  cm::StopSteeringHold hold;
+  auto c=command(); c.target_speed_mps=0.0; c.target_brake=false;
+  c.target_steer_rad=.1;
+  auto raw=cm::actuatorRaw(hold.apply(cm::protectActuatorCommand(c,now_ns,config())),cfg);
+  EXPECT_FLOAT_EQ(raw[1],0.0F); EXPECT_FLOAT_EQ(raw[2],0.0F);
+  EXPECT_LT(raw[0],0.0F);
+  c.target_steer_rad=-.1;
+  raw=cm::actuatorRaw(hold.apply(cm::protectActuatorCommand(c,now_ns,config())),cfg);
+  EXPECT_GT(raw[0],0.0F);
+  c.target_brake=true;
+  raw=cm::actuatorRaw(hold.apply(cm::protectActuatorCommand(c,now_ns,config())),cfg);
+  EXPECT_FLOAT_EQ(raw[1],0.0F); EXPECT_FLOAT_EQ(raw[2],1.0F);
+  EXPECT_GT(raw[0],0.0F);
 }
 TEST(ActuatorRaw, SteeringZeroUsesAlignmentSignAndAppliesOnceToWireAngle) {
   for (double zero : {-1.2, 0.0, 1.2}) {

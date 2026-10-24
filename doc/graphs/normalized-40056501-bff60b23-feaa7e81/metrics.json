@@ -1,0 +1,253 @@
+{
+  "trials": [
+    {
+      "label": "A",
+      "trial": "20261024T143456-40056501-15초10키로-trial1",
+      "configured_target_kph": 10.0,
+      "target_rpm": 112.87584616446479,
+      "max_transmitted_ref_rpm": 112.6498863620907,
+      "ramp_rmse_pct": 29.98920922168516,
+      "ramp_mae_pct": 23.769838483405834,
+      "ramp_bias_pct": -8.53057446082252,
+      "actual_at_zero_rpm": 112.0,
+      "reached_target_pct": 99.22406237098002,
+      "ramp_peak_pct": 103.65370801254163,
+      "zero_command_s": 5.000075364,
+      "below_10pct_of_pre_zero_rpm_s": 5.669155626999999,
+      "measured_stop_confirmation_s": 6.579514458,
+      "zero_before_stop_s": 6.069315857,
+      "zero_values_during_ramp_after_half_second": [
+        [
+          0.579490532,
+          0.619531198
+        ],
+        [
+          0.679362089,
+          0.979333769
+        ],
+        [
+          1.019298063,
+          1.079448906
+        ],
+        [
+          1.279517646,
+          1.379414081
+        ],
+        [
+          1.4195519,
+          1.479441053
+        ],
+        [
+          1.519484609,
+          1.619380415
+        ],
+        [
+          1.679312635,
+          1.71948207
+        ],
+        [
+          1.779272883,
+          1.819397801
+        ],
+        [
+          1.879195937,
+          1.919267605
+        ],
+        [
+          1.979172867,
+          2.07946465
+        ],
+        [
+          2.379304104,
+          2.419304928
+        ],
+        [
+          2.519301071,
+          2.619257023
+        ],
+        [
+          2.71932792,
+          2.779358871
+        ],
+        [
+          2.819289168,
+          2.879252873
+        ],
+        [
+          3.119178342,
+          3.179119
+        ],
+        [
+          3.219311334,
+          3.279326823
+        ],
+        [
+          3.319551774,
+          3.379168625
+        ],
+        [
+          4.789186268,
+          4.829388672
+        ]
+      ],
+      "reference_source": "PC TRANSMITTED",
+      "stop_action": "motor_zero"
+    },
+    {
+      "label": "B",
+      "trial": "20261024T143612-bff60b23-20키로5초-trial1",
+      "configured_target_kph": 20.0,
+      "target_rpm": 225.75169232892958,
+      "max_transmitted_ref_rpm": 225.75045478177069,
+      "ramp_rmse_pct": 19.004818544049233,
+      "ramp_mae_pct": 14.99937145910376,
+      "ramp_bias_pct": -9.604560495979973,
+      "actual_at_zero_rpm": 213.0,
+      "reached_target_pct": 94.35145216526224,
+      "ramp_peak_pct": 160.3531722245302,
+      "zero_command_s": 5.009954267,
+      "below_10pct_of_pre_zero_rpm_s": 9.534277901,
+      "measured_stop_confirmation_s": 11.214220058,
+      "zero_before_stop_s": 10.674246923,
+      "zero_values_during_ramp_after_half_second": [
+        [
+          0.584009048,
+          0.684084399
+        ],
+        [
+          0.7441207,
+          0.784065005
+        ],
+        [
+          0.944003097,
+          0.9840871
+        ],
+        [
+          1.083892395,
+          1.143981772
+        ],
+        [
+          1.183936611,
+          1.244112736
+        ],
+        [
+          1.344245802,
+          1.443817555
+        ],
+        [
+          1.544209981,
+          1.584284325
+        ],
+        [
+          1.644060917,
+          1.683987308
+        ],
+        [
+          1.884117314,
+          1.944184532
+        ],
+        [
+          1.983873602,
+          2.044011031
+        ],
+        [
+          2.384205156,
+          2.444228608
+        ]
+      ],
+      "reference_source": "PC TRANSMITTED",
+      "stop_action": "motor_zero"
+    },
+    {
+      "label": "C",
+      "trial": "20261024T144141-feaa7e81-30키로5초-trial1",
+      "configured_target_kph": 20.0,
+      "target_rpm": 225.75169232892958,
+      "max_transmitted_ref_rpm": 225.30532489335536,
+      "ramp_rmse_pct": 18.253540882672468,
+      "ramp_mae_pct": 14.663877941918912,
+      "ramp_bias_pct": -11.123418618410048,
+      "actual_at_zero_rpm": 191.0,
+      "reached_target_pct": 84.60623175382672,
+      "ramp_peak_pct": 91.69366478032528,
+      "zero_command_s": 5.000205966,
+      "below_10pct_of_pre_zero_rpm_s": 10.146551846000001,
+      "measured_stop_confirmation_s": 11.706724334,
+      "zero_before_stop_s": 11.206623514,
+      "zero_values_during_ramp_after_half_second": [
+        [
+          0.606641914,
+          0.806629892
+        ],
+        [
+          1.006522447,
+          1.066515979
+        ],
+        [
+          1.106593404,
+          1.206620879
+        ],
+        [
+          1.266450899,
+          1.306643215
+        ],
+        [
+          1.406822574,
+          1.466514631
+        ],
+        [
+          1.506548949,
+          1.566659734
+        ],
+        [
+          1.606558387,
+          1.666723048
+        ],
+        [
+          1.966541323,
+          2.00661123
+        ],
+        [
+          2.266583079,
+          2.306497266
+        ],
+        [
+          2.406618555,
+          2.506578179
+        ]
+      ],
+      "reference_source": "PC TRANSMITTED",
+      "stop_action": "motor_zero"
+    }
+  ],
+  "target_normalization": "100 * recorded RPM / configured first target RPM",
+  "error_normalization": "100 * (actual RPM - recorded transmitted reference RPM) / configured first target RPM",
+  "coast_normalization": "100 * actual RPM / measured feedback RPM just before motor-zero command",
+  "ramp_metrics_window_s": [
+    0.0,
+    5.0
+  ],
+  "weighting": "exact time-weighted zero-order holds; not an unweighted mean of repeated telemetry",
+  "coast_10pct_hold_s": 0.2,
+  "selected_records": "Three latest named accepted extracted RPM recordings; rejected 143807 recording excluded",
+  "warnings": [
+    "C is named 30키로5초 but its configured and transmitted target is 20 km/h equivalent",
+    "Zero-valued and abrupt telemetry samples are preserved; physical oscillation and telemetry errors are not distinguished",
+    "One trial each. Gain, load, road and battery conditions are not verified. No GNSS ground speed.",
+    "There is no constant-speed hold; the endpoint value is not a steady-state measurement"
+  ],
+  "inputs_sha256": {
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143456-40056501-15초10키로-trial1/summary.json": "71dd30a58473e2277de17e34d5b98e513362624798c74cb6cd307425e1235ddc",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143456-40056501-15초10키로-trial1/actual.csv": "2cc116faa2ea6c5e5407e4b04300c2492e444a5da67700e60f08a9ee8c15a16d",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143456-40056501-15초10키로-trial1/ref.csv": "b11f73e06ae89a337d541d6bc4b24433cab2389d3d52150cfc1241ad5dab04ec",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143456-40056501-15초10키로-trial1/events.json": "80ed6d199da2c6ba45cddd9cf49402eb36426ce5cdf75143cec59490906ffa65",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143612-bff60b23-20키로5초-trial1/summary.json": "68abe8bac3debf276abb52778079fd26fe8b1832190c03cd719bfe25cc6fff81",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143612-bff60b23-20키로5초-trial1/actual.csv": "1790a7530cdd2e477095c2b871d7677065e70a3be9e273b845354d26b7065785",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143612-bff60b23-20키로5초-trial1/ref.csv": "8bf7266fb12ee4c61c8d47594499e1eae00eabca74d0e8aee4ff1f7118060bf9",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T143612-bff60b23-20키로5초-trial1/events.json": "36884856df783ee3fe0e5c6e35364b83c01d696f02cde20c559f90446d4e8c81",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T144141-feaa7e81-30키로5초-trial1/summary.json": "9fc34c96cc4d87b0d67e697499f6c764018660133bffe29000eab3fb0dc237d3",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T144141-feaa7e81-30키로5초-trial1/actual.csv": "4fd71bbb0d9199fb015743ec5b455882adc1ee812ecd1ef23412280813f7f06f",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T144141-feaa7e81-30키로5초-trial1/ref.csv": "2cb2732f75deb65a33ae81317f311f4efa474461f388145e588a31190ba6d4f6",
+    "/home/baqu4/Workspaces/2026WS/main/src/control_manager/doc/graphs/20261024T144141-feaa7e81-30키로5초-trial1/events.json": "d4ba9307e302437318247ed7b64a4f079cf8b21c689d59a0d1964472ca7b31f8"
+  }
+}

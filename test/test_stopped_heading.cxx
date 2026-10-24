@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <limits>
 #include "control_manager/core/stopped_heading.hxx"
 using control_manager::core::StoppedHeadingMemory;
 using control_manager::core::StoppedHeadingConfig;
@@ -58,5 +59,35 @@ TEST(StoppedHeading, DisabledAndInvalidConfiguration) {
   h.update(0,true,true,0,0,0,1.0);
   EXPECT_FALSE(h.update(1,true,false,0,0,0,std::nullopt).yaw_rad);
   c.reacquire_speed_mps=c.stop_speed_mps;
+  EXPECT_THROW(StoppedHeadingMemory{c},std::invalid_argument);
+}
+TEST(StoppedHeading, ZeroDistanceDisablesDistanceButPreservesMovementTimeout) {
+  StoppedHeadingConfig c; c.max_distance_m=0.0;
+  StoppedHeadingMemory h(c);
+  h.update(0,true,true,0,0,0,1.2);
+  // A long stationary wait is excluded; displacement no longer expires memory.
+  EXPECT_DOUBLE_EQ(*h.update(100,true,false,20,0,.5,std::nullopt).yaw_rad,1.2);
+  EXPECT_DOUBLE_EQ(*h.update(102.9,true,false,80,0,.5,std::nullopt).yaw_rad,1.2);
+  const auto result=h.update(103,true,false,100,0,.5,std::nullopt);
+  EXPECT_FALSE(result.yaw_rad);
+  EXPECT_EQ(result.reason,"HEADING_HOLD_REACQUIRE_TIMEOUT");
+}
+TEST(StoppedHeading, ZeroDistanceStillUsesFreshYawAndRejectsInvalidObservations) {
+  StoppedHeadingConfig c; c.max_distance_m=0.0;
+  StoppedHeadingMemory h(c);
+  h.update(0,true,true,0,0,0,1.2);
+  EXPECT_TRUE(h.update(1,true,false,20,0,.5,std::nullopt).yaw_rad);
+  EXPECT_FALSE(h.update(1.1,true,false,21,0,.8,1.3).yaw_rad);
+  EXPECT_FALSE(h.update(1.2,true,false,22,0,.8,std::nullopt).yaw_rad);
+  h.update(2,true,true,22,0,0,1.3);
+  EXPECT_FALSE(h.update(3,false,false,23,0,.2,std::nullopt).yaw_rad);
+}
+TEST(StoppedHeading, DistanceMustBeFiniteNonnegativeAndTimeRemainsPositive) {
+  for (const double distance : {-1.0, std::numeric_limits<double>::infinity(),
+                                std::numeric_limits<double>::quiet_NaN()}) {
+    StoppedHeadingConfig c; c.max_distance_m=distance;
+    EXPECT_THROW(StoppedHeadingMemory{c},std::invalid_argument);
+  }
+  StoppedHeadingConfig c; c.max_distance_m=0.0; c.max_reacquire_time_s=0.0;
   EXPECT_THROW(StoppedHeadingMemory{c},std::invalid_argument);
 }
