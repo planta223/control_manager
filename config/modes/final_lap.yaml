@@ -39,7 +39,7 @@
 
 /control/global_path_provider:
   ros__parameters:
-    # 본선 파일 준비 필요. 파일이 없을 때 다른 지도로 대체하지 않음.
+    # 6787-point ordered rear-axle route. Keep the start-first profile below in sync.
     map_file: /workspace/decision/script/map_generator/test/review/maps/MAP_final.json
 
 /control/sensor_interface:
@@ -97,6 +97,15 @@
     # Motion Planning 발행: motion_plan 항상 발행. Mission 비활성 시 cruise speed 사용.
     # 등속 목표는 mission.yaml의 공통 cruise_speed_kph 사용.
     input_timeout_s: 0.5
+    # Use the same ordered association for variable-speed / endpoint planning.
+    route_progress_enabled: true
+    route_progress:
+      expected_points: 6787
+      front_end_index: 2262
+      rear_start_index: 4524
+      initial_search_m: 10.0
+      search_back_m: 3.0
+      search_forward_m: 10.0
 
 /control/motion_control:
   ros__parameters:
@@ -105,7 +114,17 @@
     rate_hz: 50.0                  # 제어 계산·명령 발행 주기; 센서 입력 주기와 독립.
     # Tracking Mode 설정 (시작 시 고정, 변경 후 재시작; 별도 요청 토픽 없음)
     tracking_mode: PURE_PURSUIT     # PID / PURE_PURSUIT
-    route_progress_enabled: false # 본선 지도용 점 개수·구간 경계 확정 후 활성화.
+    # Start association is restricted to the first 10 m, even when the return
+    # branch/end is closer. Retain progress across pauses and invalid inputs.
+    # Distance-third gates are association phases, NOT competition missions.
+    route_progress_enabled: true
+    route_progress:
+      expected_points: 6787
+      front_end_index: 2262
+      rear_start_index: 4524
+      initial_search_m: 10.0
+      search_back_m: 3.0
+      search_forward_m: 10.0
     heading_bootstrap_enabled: true # 최초 GNSS heading 미확보 시 제한 시간 동안 직진 허용.
     # 정지 후 재개는 control.yaml의 stopped_heading 정책 사용. 직진 bootstrap은 최초 확보 전만 허용.
     pid:

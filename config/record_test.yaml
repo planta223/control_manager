@@ -12,10 +12,15 @@
       - /workspace/src/control_manager/config/record_test.yaml
       - /workspace/src/trans/trans/config.py
       - /workspace/src/trans/trans/motor.py
+      - /workspace/traffic_sign/CONTROL_TEAM_HANDOFF_20261025/CONTROL_TEAM_HANDOFF_20261025/RELEASE.json
+      - /workspace/traffic_sign/CONTROL_TEAM_HANDOFF_20261025/CONTROL_TEAM_HANDOFF_20261025/baqu_traffic_light/config/traffic_light.yaml
     topics:
       - /gnss/odom
       - /gnss/fix
       - /gnss/status
+      # traffic_sign observations only: preserve external result and ingress relay.
+      - /sensors/detectTraffic
+      - /control/sensors/traffic
       - /motor_feedback
       - /steering_feedback
       - /control/global_path

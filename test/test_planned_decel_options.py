@@ -49,6 +49,17 @@ class PlannedDecelerationOptions(unittest.TestCase):
         self.assertTrue(all(p.read_bytes() == contents for p, contents in before.items()))
         return yaml.safe_load((journal.path / 'config/operation.yaml').read_text()), journal.metadata
 
+    def test_final_lap_console_keeps_start_first_association_in_both_nodes(self):
+        self.args.mode = 'final_lap'
+        data, _ = self.prepare()
+        control = data['/control/motion_control']['ros__parameters']
+        planner = data['/control/motion_planning']['ros__parameters']
+        self.assertTrue(control['route_progress_enabled'])
+        self.assertTrue(planner['route_progress_enabled'])
+        self.assertEqual(planner['route_progress'], control['route_progress'])
+        self.assertEqual(control['route_progress']['expected_points'], 6787)
+        self.assertEqual(control['route_progress']['initial_search_m'], 10.)
+
     def test_independent_plan_and_command_values_reach_separate_nodes(self):
         data, metadata = self.prepare()
         self.assertEqual(data['/control/control_selector']['ros__parameters']['max_decel_mps2'], 5 / 3.6)
@@ -56,6 +67,51 @@ class PlannedDecelerationOptions(unittest.TestCase):
         self.assertEqual(data['/control/motion_planning']['ros__parameters']['speed_profile']['max_accel_mps2'], 5 / 3.6)
         self.assertEqual(data['/control/motion_planning']['ros__parameters']['speed_profile']['max_decel_mps2'], 5 / 3.6)
         self.assertEqual(metadata['requested_planned_decel_kphps'], 3.)
+
+    def test_heading_bootstrap_timeout_reaches_control_and_metadata(self):
+        for timeout in (0.5, 5., 20.):
+            with self.subTest(timeout=timeout):
+                self.args.heading_bootstrap_timeout_s = timeout
+                data, metadata = self.prepare()
+                self.assertEqual(data['/control/motion_control']['ros__parameters']['heading_bootstrap_timeout_s'], timeout)
+                self.assertEqual(metadata['requested_heading_bootstrap_timeout_s'], timeout)
+
+    def test_omitting_bootstrap_timeout_keeps_yaml(self):
+        data, metadata = self.prepare()
+        self.assertNotIn('heading_bootstrap_timeout_s', data['/control/motion_control']['ros__parameters'])
+        self.assertIsNone(metadata['requested_heading_bootstrap_timeout_s'])
+
+    def test_invalid_bootstrap_timeout_cli_fails_before_launch(self):
+        for value in ('0', '-1', 'nan', 'inf'):
+            with self.subTest(value=value):
+                result = subprocess.run([sys.executable, str(CONSOLE), '--mode', 'test',
+                    '--heading-bootstrap-timeout-s', value], text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('heading-bootstrap-timeout-s must be finite and positive', result.stderr)
+
+    def test_path_distance_option_reaches_both_distance_gates(self):
+        for distance in (0., 3., 100.):
+            with self.subTest(distance=distance):
+                self.args.max_path_distance_m = distance
+                data, metadata = self.prepare()
+                expected = sys.float_info.max if distance == 0 else distance
+                self.assertEqual(data['/control/motion_control']['ros__parameters']['max_cross_track_m'], expected)
+                self.assertEqual(data['/control/motion_planning']['ros__parameters']['speed_profile']['max_path_distance_m'], expected)
+                self.assertEqual(metadata['requested_max_path_distance_m'], distance)
+
+    def test_omitting_path_distance_option_keeps_yaml(self):
+        data, metadata = self.prepare()
+        self.assertNotIn('max_cross_track_m', data['/control/motion_control']['ros__parameters'])
+        self.assertNotIn('max_path_distance_m', data['/control/motion_planning']['ros__parameters']['speed_profile'])
+        self.assertIsNone(metadata['requested_max_path_distance_m'])
+
+    def test_invalid_path_distance_cli_fails_before_launch(self):
+        for value in ('-1', 'nan', 'inf'):
+            with self.subTest(value=value):
+                result = subprocess.run([sys.executable, str(CONSOLE), '--mode', 'test',
+                    '--max-path-distance-m', value], text=True, capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('max-path-distance-m must be finite and nonnegative', result.stderr)
 
     def test_steering_zero_is_recorded_with_shifted_model_limits(self):
         for zero in (-1.2, 1.2):

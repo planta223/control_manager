@@ -35,6 +35,15 @@ TrafficLight.msg는 modes/README.md의 traffic_id/status/timestamp/valid/color_c
 같은 필드여도 다른 패키지 이름의 메시지는 별개 타입이므로, 팀원이 외부 패키지를 사용하면
 perception_types.traffic도 그 타입으로 변경해야 한다.
 
+2026-10-25 `main/traffic_sign/CONTROL_TEAM_HANDOFF_20261025/CONTROL_TEAM_HANDOFF_20261025/`
+인계본의 실행 패키지는 `baqu_traffic_light`다. 출력 토픽·타입은 위 기존 traffic 입력과 동일하다.
+예선·본선은 이미 `traffic_enabled: true`이므로 원본 직렬화 메시지를 그대로 구독·relay한다.
+`config/record_test.yaml`, vehicle_recorder 기본 설정·기본 토픽 목록에 원본과 relay를 모두 추가했다.
+인계본의 `publish_cached()`는 현재 설치된 `control_manager.msg.TrafficLight`를 사용한다.
+인계본이 채우지 않는 `traffic_id`는 기본 0(미지정)이며 제어 측에서 임의 ID를 부여하지 않는다.
+참조용 `.msg`를 현재 메시지 대신 덮어쓰지 않는다. 반복되는 영상 timestamp와
+`Unknown`, `valid=false`도 그대로 보존하며 색에 따른 구동·제동·미션 판단을 추가하지 않았다.
+
 이번 변경은 결과 수신 경로까지다. 결과를 ObjectState로 검증·변환하고 목표 신호 선택,
 현시 계산, 콘 제동 지점 판단을 수행하는 adapter/mission은 미구현이다.
 따라서 4개 모드의 object_state_enabled는 false로 유지한다. 원시 RGB/depth는 Object Manager가

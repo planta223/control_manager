@@ -38,7 +38,7 @@
       lane_observation: /control/lane_observation # 미구현: Lane 경로 생성 미구현.
       sensor_cone: /control/sensors/cone #구현 예정
       sensor_obstacle: /control/sensors/obstacle # 구현 미정
-      sensor_traffic: /control/sensors/traffic # 구현 예정
+      sensor_traffic: /control/sensors/traffic # traffic_sign 결과 그대로 relay; 제어 판단 미연결.
       sensor_gnss: /control/sensors/gnss_odom
       sensor_motor_feedback: /control/sensors/motor_feedback
       sensor_steering_feedback: /control/sensors/steering_feedback
@@ -81,7 +81,7 @@
     perception_types:
       cone: ""
       obstacle: ""
-      traffic: control_manager/msg/TrafficLight
+      traffic: control_manager/msg/TrafficLight # baqu_traffic_light 출력과 같은 설치 메시지 사용.
 
 /control/vehicle_interface:
   ros__parameters:

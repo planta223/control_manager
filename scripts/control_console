@@ -415,6 +415,19 @@ def prepare(args, journal):
         data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_accel_mps2'] = args.max_accel_kphps / 3.6
     if args.max_decel_kphps is not None:
         data.setdefault('/control/control_selector', {}).setdefault('ros__parameters', {})['max_decel_mps2'] = args.max_decel_kphps / 3.6
+    bootstrap_timeout = getattr(args, 'heading_bootstrap_timeout_s', None)
+    if bootstrap_timeout is not None:
+        if not math.isfinite(bootstrap_timeout) or bootstrap_timeout <= 0:
+            raise RuntimeError('--heading-bootstrap-timeout-s must be finite and positive')
+        data.setdefault('/control/motion_control', {}).setdefault('ros__parameters', {})['heading_bootstrap_timeout_s'] = bootstrap_timeout
+    path_distance = getattr(args, 'max_path_distance_m', None)
+    if path_distance is not None:
+        if not math.isfinite(path_distance) or path_distance < 0:
+            raise RuntimeError('--max-path-distance-m must be finite and nonnegative')
+        distance_limit = sys.float_info.max if path_distance == 0 else path_distance
+        data.setdefault('/control/motion_control', {}).setdefault('ros__parameters', {})['max_cross_track_m'] = distance_limit
+        data.setdefault('/control/motion_planning', {}).setdefault('ros__parameters', {}).setdefault(
+            'speed_profile', {})['max_path_distance_m'] = distance_limit
     for option, key in (('stopped_heading_max_distance_m', 'max_distance_m'),
                         ('stopped_heading_max_reacquire_time_s', 'max_reacquire_time_s')):
         value = getattr(args, option, None)
@@ -484,6 +497,8 @@ def prepare(args, journal):
                             requested_variable_speed=args.variable_speed,
                             requested_max_lateral_accel_mps2=args.max_lateral_accel_mps2,
                             requested_steering_zero_deg=steering_zero,
+                            requested_max_path_distance_m=getattr(args, 'max_path_distance_m', None),
+                            requested_heading_bootstrap_timeout_s=getattr(args, 'heading_bootstrap_timeout_s', None),
                             requested_stopped_heading_max_distance_m=getattr(args, 'stopped_heading_max_distance_m', None),
                             requested_stopped_heading_max_reacquire_time_s=getattr(args, 'stopped_heading_max_reacquire_time_s', None),
                             console_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
@@ -521,6 +536,10 @@ def main():
                         help='Curve lateral acceleration limit in m/s^2; defaults to vehicle.yaml g value times 9.80665')
     parser.add_argument('--steering-zero-deg', type=float, default=0.0,
                         help='Board steering angle that produced straight driving in the alignment test; left-positive, default 0')
+    parser.add_argument('--max-path-distance-m', type=float,
+                        help='Path distance limit for planning and tracking in metres; 0 disables the distance limit; omitted keeps YAML')
+    parser.add_argument('--heading-bootstrap-timeout-s', type=float,
+                        help='Maximum initial straight-driving time before first valid GNSS heading in seconds; positive; defaults to YAML (currently 10s)')
     parser.add_argument('--stopped-heading-max-distance-m', type=float,
                         help='Maximum displacement while using saved heading; 0 disables the distance bound; defaults to YAML (currently 1m)')
     parser.add_argument('--stopped-heading-max-reacquire-time-s', type=float,
@@ -539,13 +558,16 @@ def main():
         parser.error('steering-zero-deg must be finite')
     for key in ('cruise_speed_kph', 'max_accel_kphps', 'max_decel_kphps',
                 'planned_decel_kphps', 'max_lateral_accel_mps2',
-                'stopped_heading_max_reacquire_time_s'):
+                'stopped_heading_max_reacquire_time_s', 'heading_bootstrap_timeout_s'):
         value = getattr(args, key)
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(key.replace('_', '-') + ' must be finite and positive')
     value = args.stopped_heading_max_distance_m
     if value is not None and (not math.isfinite(value) or value < 0):
         parser.error('stopped-heading-max-distance-m must be finite and nonnegative')
+    value = args.max_path_distance_m
+    if value is not None and (not math.isfinite(value) or value < 0):
+        parser.error('max-path-distance-m must be finite and nonnegative')
     if args.max_lateral_accel_mps2 is not None and not args.variable_speed:
         parser.error('max-lateral-accel-mps2 requires --variable-speed')
     if args.planned_decel_kphps is not None and not args.variable_speed:
